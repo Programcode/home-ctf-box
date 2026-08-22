@@ -1,0 +1,64 @@
+[*] registering ctfbot-27214 at http://127.0.0.1:8874
+[*] room 1 busted-login: SQL injection
+[+] busted-login:      FLAG{sql_bypass_4e91}
+[*] room 2 nosy-files: path traversal
+[+] nosy-files:        FLAG{path_traverse_9c02}
+[*] room 3 ping-of-doom: command injection
+[+] ping-of-doom:      FLAG{cmd_inject_77b3}
+[*] room 4 ssti-greeting: server-side template injection
+[+] ssti-greeting:     FLAG{ssti_render_11aa}
+[*] room 5 token-forger: alg:none JWT forgery
+[+] token-forger:      FLAG{alg_none_forged_22bb}
+[*] room 6 idor-invoices: insecure direct object reference
+[+] idor-invoices:     FLAG{idor_invoice_33cc}
+[*] room 7 open-panels: exposed debug panel
+[+] open-panels:       FLAG{debug_panel_44dd}
+[*] room 8 cookie-shapeshifter: base64 cookie forgery
+[+] cookie-shapeshifter: FLAG{b64_admin_55ee}
+[*] room 9 regex-doom: regex injection
+[+] regex-doom:        FLAG{regex_fullmatch_66ff}
+[*] room 10 mass-assign: blind mass assignment
+[+] mass-assign:       FLAG{mass_assign_77aa}
+[*] room 11 xxe-importer: external entity injection
+[+] xxe-importer:      FLAG{xxe_entity_88bb}
+[*] room 12 pickle-jar: insecure deserialization RCE
+[+] pickle-jar:        FLAG{pickle_rce_99cc}
+[*] room 13 trusted-proxy: X-Forwarded-For spoofing
+[+] trusted-proxy:     FLAG{xff_trust_a0dd}
+[*] room 14 wrong-method: HTTP verb tampering
+[+] wrong-method:      FLAG{verb_put_e1ee}
+[*] room 15 open-closet: directory listing
+[+] open-closet:       FLAG{backup_listing_f2ff}
+[*] room 16 predictable-reset: weak reset tokens
+[+] predictable-reset: FLAG{md5_time_a3aa}
+[*] room 17 double-trouble: HTTP parameter pollution
+[+] double-trouble:    FLAG{hpp_lastwins_b4bb}
+[*] room 18 fetch-boy: SSRF
+[+] fetch-boy:         FLAG{ssrf_local_c5cc}
+[*] room 19 union-vault: UNION-based SQL injection
+[+] union-vault:       FLAG{union_select_d6dd}
+[*] room 20 brace-yourself: format string injection
+[+] brace-yourself:    FLAG{fmt_inject_e7ee}
+[*] submitting 20 flags
+    FLAG{sql_bypass_4e91} -> {"challenge":"Busted Login","ok":true,"points":100}
+    FLAG{path_traverse_9c02} -> {"challenge":"Nosy Files","ok":true,"points":150}
+    FLAG{cmd_inject_77b3} -> {"challenge":"Ping of Doom","ok":true,"points":200}
+    FLAG{ssti_render_11aa} -> {"challenge":"SSTI Greeting","ok":true,"points":150}
+    FLAG{alg_none_forged_22bb} -> {"challenge":"Token Forger","ok":true,"points":250}
+    FLAG{idor_invoice_33cc} -> {"challenge":"IDOR Invoices","ok":true,"points":125}
+    FLAG{debug_panel_44dd} -> {"challenge":"Open Panels","ok":true,"points":50}
+    FLAG{b64_admin_55ee} -> {"challenge":"Cookie Shapeshifter","ok":true,"points":100}
+    FLAG{regex_fullmatch_66ff} -> {"challenge":"Regex Doom","ok":true,"points":125}
+    FLAG{mass_assign_77aa} -> {"challenge":"Mass Assign","ok":true,"points":150}
+    FLAG{xxe_entity_88bb} -> {"challenge":"XXE Importer","ok":true,"points":225}
+    FLAG{pickle_rce_99cc} -> {"challenge":"Pickle Jar","ok":true,"points":275}
+    FLAG{xff_trust_a0dd} -> {"challenge":"Trusted Proxy","ok":true,"points":75}
+    FLAG{verb_put_e1ee} -> {"challenge":"Wrong Method","ok":true,"points":75}
+    FLAG{backup_listing_f2ff} -> {"challenge":"Open Closet","ok":true,"points":50}
+    FLAG{md5_time_a3aa} -> {"challenge":"Predictable Reset","ok":true,"points":175}
+    FLAG{hpp_lastwins_b4bb} -> {"challenge":"Double Trouble","ok":true,"points":150}
+    FLAG{ssrf_local_c5cc} -> {"challenge":"Fetch Boy","ok":true,"points":200}
+    FLAG{union_select_d6dd} -> {"challenge":"Union Vault","ok":true,"points":225}
+    FLAG{fmt_inject_e7ee} -> {"challenge":"Brace Yourself","ok":true,"points":125}
+[*] scoreboard: [{"score":2975,"solved":20,"username":"ctfbot-1178"},{"score":2975,"solved":20,"username":"ctfbot-27214"},{"score":2975,"solved":20,"username":"ctfbot-8253"},{"score":450,"solved":3,"username":"ctfbot-11204"},{"score":450,"solved":3,"username":"ctfbot-23060"},{"score":0,"solved":0,"username":"ctfbot-23555"}]
+[PASS] 20/20 rooms exploited and scored (2975 pts).
