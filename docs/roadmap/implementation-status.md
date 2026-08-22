@@ -7,16 +7,16 @@ and "mostly done" are not statuses here. Plan of record:
 
 ## Phase 0 — Product contract, licensing, baseline preservation
 
-| Item | Status | Evidence |
-|------|--------|----------|
-| LICENSE AGPL-3.0-or-later | verified | `LICENSE` |
-| Content licensing policy (CC BY-SA 4.0) | verified | `docs/content-licensing.md`, `licenses/CC-BY-SA-4.0.txt` |
-| NOTICE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY | verified | repo root |
-| ADRs for stack, parity, isolation, packaging, flags, workstation, deployment, licensing, naming | verified | `docs/decisions/0001`–`0009` |
-| Legacy 20-room demo captured as legacy-v0 profile with solver proof | verified | `docker-compose.yml` profiles, `docs/evidence/2026-08-22-legacy-solve.txt` (20/20, 2975 pts, exit 0) |
-| Migration inventory for all 20 rooms | verified | `docs/legacy/migration-inventory.md` |
-| Semver + conventional commits + changelog automation config | verified | `CONTRIBUTING.md`, `cliff.toml` |
-| CODEOWNERS / protected main expectations | in-progress | `CODEOWNERS`; branch protection needs repo admin action after CI exists |
+| Item                                                                                            | Status      | Evidence                                                                                             |
+| ----------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
+| LICENSE AGPL-3.0-or-later                                                                       | verified    | `LICENSE`                                                                                            |
+| Content licensing policy (CC BY-SA 4.0)                                                         | verified    | `docs/content-licensing.md`, `licenses/CC-BY-SA-4.0.txt`                                             |
+| NOTICE, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY                                                 | verified    | repo root                                                                                            |
+| ADRs for stack, parity, isolation, packaging, flags, workstation, deployment, licensing, naming | verified    | `docs/decisions/0001`–`0009`                                                                         |
+| Legacy 20-room demo captured as legacy-v0 profile with solver proof                             | verified    | `docker-compose.yml` profiles, `docs/evidence/2026-08-22-legacy-solve.txt` (20/20, 2975 pts, exit 0) |
+| Migration inventory for all 20 rooms                                                            | verified    | `docs/legacy/migration-inventory.md`                                                                 |
+| Semver + conventional commits + changelog automation config                                     | verified    | `CONTRIBUTING.md`, `cliff.toml`                                                                      |
+| CODEOWNERS / protected main expectations                                                        | in-progress | `CODEOWNERS`; branch protection needs repo admin action after CI exists                              |
 
 ## Phases 1–15
 

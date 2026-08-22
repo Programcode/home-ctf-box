@@ -1,237 +1,241 @@
+include:
+  - path: infra/compose/core.yml
+  - path: infra/compose/dev.yml
+
 services:
   ctf-platform:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./platform
     container_name: ctf-platform
     environment:
-      FLAG_1: "FLAG{sql_bypass_4e91}"
-      FLAG_2: "FLAG{path_traverse_9c02}"
-      FLAG_3: "FLAG{cmd_inject_77b3}"
-      FLAG_4: "FLAG{ssti_render_11aa}"
-      FLAG_5: "FLAG{alg_none_forged_22bb}"
-      FLAG_6: "FLAG{idor_invoice_33cc}"
-      FLAG_7: "FLAG{debug_panel_44dd}"
-      FLAG_8: "FLAG{b64_admin_55ee}"
-      FLAG_9: "FLAG{regex_fullmatch_66ff}"
-      FLAG_10: "FLAG{mass_assign_77aa}"
-      FLAG_11: "FLAG{xxe_entity_88bb}"
-      FLAG_12: "FLAG{pickle_rce_99cc}"
-      FLAG_13: "FLAG{xff_trust_a0dd}"
-      FLAG_14: "FLAG{verb_put_e1ee}"
-      FLAG_15: "FLAG{backup_listing_f2ff}"
-      FLAG_16: "FLAG{md5_time_a3aa}"
-      FLAG_17: "FLAG{hpp_lastwins_b4bb}"
-      FLAG_18: "FLAG{ssrf_local_c5cc}"
-      FLAG_19: "FLAG{union_select_d6dd}"
-      FLAG_20: "FLAG{fmt_inject_e7ee}"
+      FLAG_1: 'FLAG{sql_bypass_4e91}'
+      FLAG_2: 'FLAG{path_traverse_9c02}'
+      FLAG_3: 'FLAG{cmd_inject_77b3}'
+      FLAG_4: 'FLAG{ssti_render_11aa}'
+      FLAG_5: 'FLAG{alg_none_forged_22bb}'
+      FLAG_6: 'FLAG{idor_invoice_33cc}'
+      FLAG_7: 'FLAG{debug_panel_44dd}'
+      FLAG_8: 'FLAG{b64_admin_55ee}'
+      FLAG_9: 'FLAG{regex_fullmatch_66ff}'
+      FLAG_10: 'FLAG{mass_assign_77aa}'
+      FLAG_11: 'FLAG{xxe_entity_88bb}'
+      FLAG_12: 'FLAG{pickle_rce_99cc}'
+      FLAG_13: 'FLAG{xff_trust_a0dd}'
+      FLAG_14: 'FLAG{verb_put_e1ee}'
+      FLAG_15: 'FLAG{backup_listing_f2ff}'
+      FLAG_16: 'FLAG{md5_time_a3aa}'
+      FLAG_17: 'FLAG{hpp_lastwins_b4bb}'
+      FLAG_18: 'FLAG{ssrf_local_c5cc}'
+      FLAG_19: 'FLAG{union_select_d6dd}'
+      FLAG_20: 'FLAG{fmt_inject_e7ee}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:${PLATFORM_PORT:-8000}:8000"
+      - '${CTF_BIND:-127.0.0.1}:${PLATFORM_PORT:-8000}:8000'
     volumes:
       - ctf-db:/data
     restart: unless-stopped
 
   busted-login:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/busted-login
     container_name: room-busted-login
     environment:
-      FLAG_1: "FLAG{sql_bypass_4e91}"
+      FLAG_1: 'FLAG{sql_bypass_4e91}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8081:5000"
+      - '${CTF_BIND:-127.0.0.1}:8081:5000'
     restart: unless-stopped
 
   nosy-files:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build:
       context: ./rooms/nosy-files
       args:
-        FLAG_2: "FLAG{path_traverse_9c02}"
+        FLAG_2: 'FLAG{path_traverse_9c02}'
     container_name: room-nosy-files
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8082:5000"
+      - '${CTF_BIND:-127.0.0.1}:8082:5000'
     restart: unless-stopped
 
   ping-of-doom:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build:
       context: ./rooms/ping-of-doom
       args:
-        FLAG_3: "FLAG{cmd_inject_77b3}"
+        FLAG_3: 'FLAG{cmd_inject_77b3}'
     container_name: room-ping-of-doom
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8083:5000"
+      - '${CTF_BIND:-127.0.0.1}:8083:5000'
     restart: unless-stopped
 
   ssti-greeting:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/ssti-greeting
     container_name: room-ssti-greeting
     environment:
-      FLAG_4: "FLAG{ssti_render_11aa}"
+      FLAG_4: 'FLAG{ssti_render_11aa}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8084:5000"
+      - '${CTF_BIND:-127.0.0.1}:8084:5000'
     restart: unless-stopped
 
   token-forger:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/token-forger
     container_name: room-token-forger
     environment:
-      FLAG_5: "FLAG{alg_none_forged_22bb}"
+      FLAG_5: 'FLAG{alg_none_forged_22bb}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8085:5000"
+      - '${CTF_BIND:-127.0.0.1}:8085:5000'
     restart: unless-stopped
 
   idor-invoices:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/idor-invoices
     container_name: room-idor-invoices
     environment:
-      FLAG_6: "FLAG{idor_invoice_33cc}"
+      FLAG_6: 'FLAG{idor_invoice_33cc}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8086:5000"
+      - '${CTF_BIND:-127.0.0.1}:8086:5000'
     restart: unless-stopped
 
   open-panels:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/open-panels
     container_name: room-open-panels
     environment:
-      FLAG_7: "FLAG{debug_panel_44dd}"
+      FLAG_7: 'FLAG{debug_panel_44dd}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8087:5000"
+      - '${CTF_BIND:-127.0.0.1}:8087:5000'
     restart: unless-stopped
 
   cookie-shapeshifter:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/cookie-shapeshifter
     container_name: room-cookie-shapeshifter
     environment:
-      FLAG_8: "FLAG{b64_admin_55ee}"
+      FLAG_8: 'FLAG{b64_admin_55ee}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8088:5000"
+      - '${CTF_BIND:-127.0.0.1}:8088:5000'
     restart: unless-stopped
 
   regex-doom:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/regex-doom
     container_name: room-regex-doom
     environment:
-      FLAG_9: "FLAG{regex_fullmatch_66ff}"
+      FLAG_9: 'FLAG{regex_fullmatch_66ff}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8089:5000"
+      - '${CTF_BIND:-127.0.0.1}:8089:5000'
     restart: unless-stopped
 
   mass-assign:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/mass-assign
     container_name: room-mass-assign
     environment:
-      FLAG_10: "FLAG{mass_assign_77aa}"
+      FLAG_10: 'FLAG{mass_assign_77aa}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8090:5000"
+      - '${CTF_BIND:-127.0.0.1}:8090:5000'
     restart: unless-stopped
 
   xxe-importer:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build:
       context: ./rooms/xxe-importer
       args:
-        FLAG_11: "FLAG{xxe_entity_88bb}"
+        FLAG_11: 'FLAG{xxe_entity_88bb}'
     container_name: room-xxe-importer
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8091:5000"
+      - '${CTF_BIND:-127.0.0.1}:8091:5000'
     restart: unless-stopped
 
   pickle-jar:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build:
       context: ./rooms/pickle-jar
       args:
-        FLAG_12: "FLAG{pickle_rce_99cc}"
+        FLAG_12: 'FLAG{pickle_rce_99cc}'
     container_name: room-pickle-jar
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8092:5000"
+      - '${CTF_BIND:-127.0.0.1}:8092:5000'
     restart: unless-stopped
 
   trusted-proxy:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/trusted-proxy
     container_name: room-trusted-proxy
     environment:
-      FLAG_13: "FLAG{xff_trust_a0dd}"
+      FLAG_13: 'FLAG{xff_trust_a0dd}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8093:5000"
+      - '${CTF_BIND:-127.0.0.1}:8093:5000'
     restart: unless-stopped
 
   wrong-method:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/wrong-method
     container_name: room-wrong-method
     environment:
-      FLAG_14: "FLAG{verb_put_e1ee}"
+      FLAG_14: 'FLAG{verb_put_e1ee}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8094:5000"
+      - '${CTF_BIND:-127.0.0.1}:8094:5000'
     restart: unless-stopped
 
   open-closet:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/open-closet
     container_name: room-open-closet
     environment:
-      FLAG_15: "FLAG{backup_listing_f2ff}"
+      FLAG_15: 'FLAG{backup_listing_f2ff}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8095:5000"
+      - '${CTF_BIND:-127.0.0.1}:8095:5000'
     restart: unless-stopped
 
   predictable-reset:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/predictable-reset
     container_name: room-predictable-reset
     environment:
-      FLAG_16: "FLAG{md5_time_a3aa}"
+      FLAG_16: 'FLAG{md5_time_a3aa}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8096:5000"
+      - '${CTF_BIND:-127.0.0.1}:8096:5000'
     restart: unless-stopped
 
   double-trouble:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/double-trouble
     container_name: room-double-trouble
     environment:
-      FLAG_17: "FLAG{hpp_lastwins_b4bb}"
+      FLAG_17: 'FLAG{hpp_lastwins_b4bb}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8097:5000"
+      - '${CTF_BIND:-127.0.0.1}:8097:5000'
     restart: unless-stopped
 
   fetch-boy:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/fetch-boy
     container_name: room-fetch-boy
     environment:
-      FLAG_18: "FLAG{ssrf_local_c5cc}"
+      FLAG_18: 'FLAG{ssrf_local_c5cc}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8098:5000"
+      - '${CTF_BIND:-127.0.0.1}:8098:5000'
     restart: unless-stopped
 
   union-vault:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/union-vault
     container_name: room-union-vault
     environment:
-      FLAG_19: "FLAG{union_select_d6dd}"
+      FLAG_19: 'FLAG{union_select_d6dd}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8099:5000"
+      - '${CTF_BIND:-127.0.0.1}:8099:5000'
     restart: unless-stopped
 
   brace-yourself:
-    profiles: ["legacy-v0"]
+    profiles: ['legacy-v0']
     build: ./rooms/brace-yourself
     container_name: room-brace-yourself
     environment:
-      FLAG_20: "FLAG{fmt_inject_e7ee}"
+      FLAG_20: 'FLAG{fmt_inject_e7ee}'
     ports:
-      - "${CTF_BIND:-127.0.0.1}:8100:5000"
+      - '${CTF_BIND:-127.0.0.1}:8100:5000'
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,75 @@
+# Core backing services shared by every edition.
+# Start with: docker compose --profile core up -d
+name: openrange
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    profiles: ['core']
+    environment:
+      POSTGRES_USER: openrange
+      POSTGRES_PASSWORD: openrange
+      POSTGRES_DB: openrange
+    ports:
+      - '127.0.0.1:15432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U openrange']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine
+    profiles: ['core', 'dev']
+    command: ['redis-server', '--save', '60', '1', '--loglevel', 'warning']
+    ports:
+      - '127.0.0.1:16379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-11Z
+    profiles: ['core']
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: openrange-dev
+      MINIO_ROOT_PASSWORD: openrange-dev-secret
+    ports:
+      - '127.0.0.1:19000:9000'
+      - '127.0.0.1:19001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    profiles: ['core']
+    environment:
+      MEILI_MASTER_KEY: dev-only-meili-master-key
+      MEILI_NO_ANALYTICS: 'true'
+    ports:
+      - '127.0.0.1:17700:7700'
+    volumes:
+      - meili-data:/meili_data
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:7700/health | grep -q available']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  meili-data:

@@ -14,28 +14,28 @@ actually passed; `in-review` items are listed but not counted.
 
 Migrated from legacy (bundle format pending Phase 5): 0 of 20 counted.
 
-| Slug | Track | Difficulty | Type | Status |
-|------|-------|------------|------|--------|
-| busted-login | A | beginner | guided web | not-started |
-| nosy-files | A | beginner | guided web | not-started |
-| ping-of-doom | A | easy | challenge web | not-started |
-| ssti-greeting | A | easy | challenge web | not-started |
-| token-forger | A | medium | challenge web | not-started |
-| idor-invoices | A | beginner | guided web | not-started |
-| open-panels | A | beginner | guided web | not-started |
-| cookie-shapeshifter | A | beginner | guided web | not-started |
-| regex-doom | A | easy | challenge web | not-started |
-| mass-assign | A | easy | challenge web | not-started |
-| xxe-importer | A | medium | challenge web | not-started |
-| pickle-jar | A | medium | challenge web | not-started |
-| trusted-proxy | A | beginner | guided web | not-started |
-| wrong-method | A | beginner | guided web | not-started |
-| open-closet | A | beginner | guided web | not-started |
-| predictable-reset | A | easy | challenge web | not-started |
-| double-trouble | A | easy | challenge web | not-started |
-| fetch-boy | A | easy | challenge web | not-started |
-| union-vault | A | easy | challenge web | not-started |
-| brace-yourself | A | easy | challenge web | not-started |
+| Slug                | Track | Difficulty | Type          | Status      |
+| ------------------- | ----- | ---------- | ------------- | ----------- |
+| busted-login        | A     | beginner   | guided web    | not-started |
+| nosy-files          | A     | beginner   | guided web    | not-started |
+| ping-of-doom        | A     | easy       | challenge web | not-started |
+| ssti-greeting       | A     | easy       | challenge web | not-started |
+| token-forger        | A     | medium     | challenge web | not-started |
+| idor-invoices       | A     | beginner   | guided web    | not-started |
+| open-panels         | A     | beginner   | guided web    | not-started |
+| cookie-shapeshifter | A     | beginner   | guided web    | not-started |
+| regex-doom          | A     | easy       | challenge web | not-started |
+| mass-assign         | A     | easy       | challenge web | not-started |
+| xxe-importer        | A     | medium     | challenge web | not-started |
+| pickle-jar          | A     | medium     | challenge web | not-started |
+| trusted-proxy       | A     | beginner   | guided web    | not-started |
+| wrong-method        | A     | beginner   | guided web    | not-started |
+| open-closet         | A     | beginner   | guided web    | not-started |
+| predictable-reset   | A     | easy       | challenge web | not-started |
+| double-trouble      | A     | easy       | challenge web | not-started |
+| fetch-boy           | A     | easy       | challenge web | not-started |
+| union-vault         | A     | easy       | challenge web | not-started |
+| brace-yourself      | A     | easy       | challenge web | not-started |
 
 New rooms 021–100: `not-started` (authored in batches per track B–E).
 
