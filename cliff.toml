@@ -22,14 +22,14 @@ tag_pattern = "v[0-9].*"
 
 [git.commit_parsers]
 message = [
-  { message = "^feat", group = "Added" },
-  { message = "^fix", group = "Fixed" },
-  { message = "^perf", group = "Performance" },
-  { message = "^doc", group = "Documentation" },
-  { message = "^refactor", group = "Changed" },
-  { message = "^content", group = "Content" },
-  { message = "^test", group = "Testing" },
-  { message = "^chore|ci|build", group = "Maintenance" },
+  { message = "^feat(\\([^)]*\\))?!?:", group = "Added" },
+  { message = "^fix(\\([^)]*\\))?!?:", group = "Fixed" },
+  { message = "^perf(\\([^)]*\\))?!?:", group = "Performance" },
+  { message = "^docs(\\([^)]*\\))?!?:", group = "Documentation" },
+  { message = "^refactor(\\([^)]*\\))?!?:", group = "Changed" },
+  { message = "^content(\\([^)]*\\))?!?:", group = "Content" },
+  { message = "^test(\\([^)]*\\))?!?:", group = "Testing" },
+  { message = "^(chore|ci|build)(\\([^)]*\\))?!?:", group = "Maintenance" },
 ]
 
 [git.filter]
