@@ -1,0 +1,67 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: cartographer
+  title: 'Cartographer'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 25
+  tags: [recon, api-discovery, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Waypoint Maps ships a polished public site and keeps its operations
+    tooling quiet. Somewhere past robots.txt sits machine-readable
+    documentation for routes the marketing pages never mention, and one
+    of those routes answers with more than backups. Map the hidden
+    surface and walk out with the deployment provisioning token.
+  objectives:
+    - 'Enumerate unlinked routes from robots.txt directives.'
+    - 'Read an OpenAPI document to learn what an undocumented admin route returns.'
+    - 'Retrieve the provisioning token from the exposed backup manifest.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Static Flask site; the flag is a fake provisioning token served over the room network only.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: find-backup-manifest
+      title: 'Recover the provisioning token'
+      prompt: >-
+        Find the admin backup route that no public page links to, using
+        robots.txt and the OpenAPI document as your map. Fetch that
+        route directly and submit the provisioning_token value as the
+        FLAG.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Fetch /robots.txt first. Anything listed under Disallow is usually worth a visit.'
+        - cost: 10
+          text: 'The OpenAPI document lives at /api/openapi.json. Read its paths section; one entry is marked internal use only.'
+        - cost: 25
+          text: 'GET /admin/backups/latest. The JSON response carries a provisioning_token field, which is the FLAG value.'
+      solution: |
+        1. GET /robots.txt. Two Disallow lines point at /api/openapi.json
+           and /admin/.
+        2. GET /api/openapi.json. The paths section documents
+           GET /admin/backups/latest as the nightly backup manifest and
+           states the response includes the provisioning token used by
+           deploy agents.
+        3. GET /admin/backups/latest. The JSON body contains
+           provisioning_token set to the room flag. Submit it.
+      validator:
+        type: per_session_flag
