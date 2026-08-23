@@ -35,9 +35,9 @@ spec:
       root for privilege separation; capabilities are not bounded to any
       sshd profile. The intended escalation grants cap_setuid=ep to
       /usr/bin/python3.11; learner sessions run as the unprivileged learner
-      account (uid 1000) until that capability is abused. The image ships a
-      minimal python3 solely because the harness TCP healthcheck execs
-      python3 inside targets. The escalation surface is one capability bit
+      account (uid 1000) until that capability is abused. Python 3.11 is
+      intentionally present as the capability-bearing interpreter used by
+      the challenge; the healthcheck only verifies TCP port 22. The escalation surface is one capability bit
       on one binary inside this container only; the intended abuse is
       reading a single flag file.
   target:
