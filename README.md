@@ -7,28 +7,28 @@ stack also builds on any x86 box (it was developed and tested on a VPS).
 
 ## Rooms
 
-| # | Room | Port | Points | Technique |
-|---|------|------|--------|-----------|
-| 1 | Busted Login | 8081 | 100 | SQL injection login bypass |
-| 2 | Nosy Files | 8082 | 150 | Path traversal |
-| 3 | Ping of Doom | 8083 | 200 | Shell command injection |
-| 4 | SSTI Greeting | 8084 | 150 | Jinja server-side template injection |
-| 5 | Token Forger | 8085 | 250 | JWT alg:none forgery |
-| 6 | IDOR Invoices | 8086 | 125 | Missing ownership check |
-| 7 | Open Panels | 8087 | 50 | Exposed debug panel |
-| 8 | Cookie Shapeshifter | 8088 | 100 | Unsigned base64 cookie forgery |
-| 9 | Regex Doom | 8089 | 125 | Regex injection |
-| 10 | Mass Assign | 8090 | 150 | Blind mass assignment |
-| 11 | XXE Importer | 8091 | 225 | External entity injection |
-| 12 | Pickle Jar | 8092 | 275 | Unsafe deserialization RCE |
-| 13 | Trusted Proxy | 8093 | 75 | X-Forwarded-For spoofing |
-| 14 | Wrong Method | 8094 | 75 | HTTP verb tampering |
-| 15 | Open Closet | 8095 | 50 | Directory listing exposure |
-| 16 | Predictable Reset | 8096 | 175 | Time-derived reset tokens |
-| 17 | Double Trouble | 8097 | 150 | HTTP parameter pollution |
-| 18 | Fetch Boy | 8098 | 200 | SSRF |
-| 19 | Union Vault | 8099 | 225 | UNION-based SQL injection |
-| 20 | Brace Yourself | 8100 | 125 | Python format string injection |
+| #   | Room                | Port | Points | Technique                            |
+| --- | ------------------- | ---- | ------ | ------------------------------------ |
+| 1   | Busted Login        | 8081 | 100    | SQL injection login bypass           |
+| 2   | Nosy Files          | 8082 | 150    | Path traversal                       |
+| 3   | Ping of Doom        | 8083 | 200    | Shell command injection              |
+| 4   | SSTI Greeting       | 8084 | 150    | Jinja server-side template injection |
+| 5   | Token Forger        | 8085 | 250    | JWT alg:none forgery                 |
+| 6   | IDOR Invoices       | 8086 | 125    | Missing ownership check              |
+| 7   | Open Panels         | 8087 | 50     | Exposed debug panel                  |
+| 8   | Cookie Shapeshifter | 8088 | 100    | Unsigned base64 cookie forgery       |
+| 9   | Regex Doom          | 8089 | 125    | Regex injection                      |
+| 10  | Mass Assign         | 8090 | 150    | Blind mass assignment                |
+| 11  | XXE Importer        | 8091 | 225    | External entity injection            |
+| 12  | Pickle Jar          | 8092 | 275    | Unsafe deserialization RCE           |
+| 13  | Trusted Proxy       | 8093 | 75     | X-Forwarded-For spoofing             |
+| 14  | Wrong Method        | 8094 | 75     | HTTP verb tampering                  |
+| 15  | Open Closet         | 8095 | 50     | Directory listing exposure           |
+| 16  | Predictable Reset   | 8096 | 175    | Time-derived reset tokens            |
+| 17  | Double Trouble      | 8097 | 150    | HTTP parameter pollution             |
+| 18  | Fetch Boy           | 8098 | 200    | SSRF                                 |
+| 19  | Union Vault         | 8099 | 225    | UNION-based SQL injection            |
+| 20  | Brace Yourself      | 8100 | 125    | Python format string injection       |
 
 Total: 2975 points. Exploit each service, grab its `FLAG{...}` token, submit it on the platform scoreboard.
 

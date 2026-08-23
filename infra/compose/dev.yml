@@ -1,0 +1,18 @@
+# Developer conveniences: fake email and DB inspection.
+# Start with: docker compose --profile dev up -d
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.22
+    profiles: ['dev']
+    ports:
+      - '127.0.0.1:11025:1025'
+      - '127.0.0.1:18025:8025'
+
+  db-admin:
+    image: adminer:5
+    profiles: ['dev']
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - '127.0.0.1:18080:8080'

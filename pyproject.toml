@@ -1,0 +1,70 @@
+[project]
+name = "openrange"
+version = "0.1.0"
+description = "Open-source cyber range platform (workspace root)"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.8.4",
+  "mypy>=1.14",
+  "pre-commit>=4.0",
+]
+
+[tool.uv.workspace]
+members = ["apps/*", "packages/*"]
+
+[tool.uv.sources]
+openrange-config = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["apps", "packages", "tests"]
+extend-exclude = ["rooms", "platform"]  # frozen legacy baseline; see docs/legacy/migration-inventory.md
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import order
+  "B",        # bugbear
+  "UP",       # pyupgrade
+  "S",        # bandit
+  "ASYNC",    # async hygiene
+  "RUF",
+]
+ignore = [
+  "S101",  # assert is how tests work; bandit rule stays for non-test code via per-file-ignores
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106"]
+"**/solver/**" = ["S101"]
+"content/rooms/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = []
+files = ["packages"]
+mypy_path = "packages/config/src:packages/content-sdk/src:packages/scoring/src"
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["celery.*", "meilisearch.*", "boto3.*", "botocore.*", "docker.*", "pyotp.*", "webauthn.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "apps/*/tests", "packages/*/tests"]
+addopts = "-q --strict-markers"
+markers = [
+  "integration: requires backing services (postgres/redis/minio/meilisearch)",
+  "content: content bundle validation and solvers",
+  "e2e: browser end-to-end journeys",
+  "slow: long-running verification",
+]

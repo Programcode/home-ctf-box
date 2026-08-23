@@ -1,0 +1,11 @@
+node_modules
+.next
+.turbo
+coverage
+dist
+pnpm-lock.yaml
+uv.lock
+LICENSE
+licenses
+docs/evidence
+.hermes
