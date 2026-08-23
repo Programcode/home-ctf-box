@@ -1,0 +1,96 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: quiet-persistence
+  title: 'Quiet Persistence'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 45
+  tags: [blue-team, persistence, forensics, linux]
+spec:
+  track: linux-networking
+  type: investigation
+  summary: >-
+    A lab box shows signs someone settled in: an odd cron drop-in, a
+    shell init file that phones home to a local log, a self-styled
+    monitoring helper living where admins rarely look, and a systemd
+    unit nobody wrote. Nothing hostile actually executes here; every
+    mechanism only prints timestamped lines to a local file. You will
+    hunt all four persistence artifacts methodically, then file your
+    findings to the box's own report endpoint, which verifies your
+    list and pays out the flag when it is complete.
+  objectives:
+    - 'Sweep the standard persistence locations: cron drop-ins, shell init files, /usr/local/sbin, and custom systemd units.'
+    - 'Correlate artifacts by shared indicators instead of treating each find as an isolated curiosity.'
+    - 'Report findings precisely, by path, the way an incident ticket needs them.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation,
+      matching the other SSH rooms; sessions run as unprivileged
+      analyst (uid 1000). Nothing malicious executes anywhere in this
+      image: the cron entry never runs (no cron daemon), the systemd
+      unit never starts (no init), the bashrc line waits on a login
+      that never happens, and the loop helper only appends timestamped
+      strings to a local log file. Disposable Debian container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: report-artifacts
+      title: 'Find all four artifacts and file the report'
+      prompt: >-
+        SSH in as analyst and sweep the box for persistence mechanisms.
+        There are exactly four artifacts: one cron drop-in, one shell
+        init file with a beacon line, one rogue loop script under
+        /usr/local/sbin, and one custom systemd unit. Submit their
+        full paths to the local reporting endpoint at
+        http://127.0.0.1:8000/api/report as JSON {"findings": [...]}.
+        When your list matches all four, the endpoint returns the FLAG
+        value alongside its verdict.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'Start wide: list /etc/cron.d, /usr/local/sbin, and /etc/systemd/system, then grep the home directories for anything writing to hidden log files.'
+        - cost: 10
+          text: 'The artifacts share a family resemblance: system-sync, sysmon-helper, and sysmon.service reference each other, and the deploy account .bashrc appends to /tmp/.beacon.log like the helper does.'
+        - cost: 25
+          text: 'File the report from the box itself: curl-style POST via python3 to http://127.0.0.1:8000/api/report with body {"findings": ["/etc/cron.d/system-sync", "/home/deploy/.bashrc", "/usr/local/sbin/sysmon-helper", "/etc/systemd/system/sysmon.service"]}. The verified reply carries FLAG{...}.'
+      solution: |
+        1. SSH in as analyst (password analyst).
+        2. Sweep cron: `ls -la /etc/cron.d` reveals system-sync, a
+           drop-in scheduling /usr/local/sbin/sysmon-helper every five
+           minutes as root. Note no crond is even installed here; the
+           entry is evidence, not a live mechanism.
+        3. Sweep shell init files:
+           `grep -l beacon.log /home/*/.bashrc` flags
+           /home/deploy/.bashrc, whose last line backgrounds an append
+           to /tmp/.beacon.log whenever deploy logs in.
+        4. Sweep admin directories: `ls -la /usr/local/sbin` exposes
+           sysmon-helper, a while-loop script appending heartbeats to
+           /tmp/.beacon.log, the same indicator as step 3.
+        5. Sweep units: `ls /etc/systemd/system` lists
+           sysmon.service, a custom unit restarting sysmon-helper
+           always and wanted by multi-user.target.
+        6. File the report over the loopback API:
+           python3 -c "import json,urllib.request; ..." posting
+           {"findings": ["/etc/cron.d/system-sync",
+           "/home/deploy/.bashrc", "/usr/local/sbin/sysmon-helper",
+           "/etc/systemd/system/sysmon.service"]} to
+           http://127.0.0.1:8000/api/report. The verified response
+           includes the room flag. Submit it.
+      validator:
+        type: per_session_flag

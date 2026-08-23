@@ -1,0 +1,88 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: kernel-of-truth
+  title: 'Kernel of Truth'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 45
+  tags: [kernel, cve-analysis, linux, investigation]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    A legacy appliance slice reports its kernel through a small HTTP
+    endpoint, and someone left research notes next to a precompiled
+    exploit simulator on disk. No exploit code runs here; your job is
+    the part every real engagement demands first. Read the version
+    data, weigh three candidate CVEs against the notes' failure
+    analysis, pick the one that actually applies, and drive the
+    simulator with the right identifier.
+  objectives:
+    - 'Pull authoritative version data from a sysinfo endpoint instead of trusting container uname output.'
+    - 'Evaluate candidate CVEs against stated preconditions and eliminate the ones whose requirements the box cannot meet.'
+    - 'Invoke the exploit simulator with the correct CVE identifier and capture the flag it verifies.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and
+      the simulator is a small SUID-root binary so it alone can read
+      the root-only flag file after validating its argument; sessions
+      run as unprivileged learner (uid 1000). No kernel exploit code,
+      network payloads, or privilege escalation beyond the simulator's
+      own read exists in this image. Disposable Debian container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22, 8000]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: pick-the-cve
+      title: 'Deduce the applicable CVE, then prove it'
+      prompt: >-
+        Fetch /api/sysinfo from the appliance slice and note exactly
+        which kernel it claims. SSH in as learner and study the
+        research notes beside /usr/local/bin/exploit-sim; two of the
+        three candidates carry written reasons they cannot work on
+        this build. Decide which single candidate survives the
+        analysis, run the simulator with --simulate and that CVE
+        identifier, and submit the FLAG value it prints.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'The sysinfo endpoint lives on port 8000 of the target: GET http://target:8000/api/sysinfo. It labels its kernel line as simulated, which is the authoritative version for this room.'
+        - cost: 10
+          text: 'The notes sit at /opt/exploit-sim/NOTES.md. Each candidate ends with a VERDICT line; elimination reasons reference the pipe code arriving in 5.8 and a missing setuid pkexec helper.'
+        - cost: 25
+          text: 'The surviving candidate is CVE-2021-3490, the eBPF verifier bounds bug. Run /usr/local/bin/exploit-sim --simulate CVE-2021-3490 and it validates the recorded conditions, then prints FLAG{...}.'
+      solution: |
+        1. From the workstation, GET http://target:8000/api/sysinfo.
+           The JSON reports kernel 5.4.0-42-generic and marks the
+           value as simulated for this appliance slice.
+        2. SSH in as learner (password learner) and open
+           /opt/exploit-sim/NOTES.md. Three candidates are listed.
+        3. Candidate CVE-2022-0847 fails because the vulnerable pipe
+           buffer flags code only exists from 5.8 onward; this kernel
+           predates it. Candidate CVE-2021-4034 fails because polkit
+           was stripped from the image, leaving no setuid pkexec to
+           abuse. Candidate CVE-2021-3490 matches: 5.4.x sits in the
+           affected range and the notes confirm eBPF is reachable.
+        4. Run `/usr/local/bin/exploit-sim --simulate CVE-2021-3490`.
+           The simulator checks its recorded conditions (kernel
+           string, eBPF availability, unprivileged BPF setting),
+           then prints the room flag from the root-only file.
+        5. Submit the FLAG value.
+      validator:
+        type: per_session_flag
