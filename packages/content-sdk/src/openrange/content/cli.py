@@ -186,11 +186,18 @@ def schemas(
             (out / name).write_text(text)
         console.print(f"[green]wrote schemas to {out}[/green]")
         return
-    stale = [
-        name
-        for name, text in generated.items()
-        if not (out / name).exists() or (out / name).read_text() != text
-    ]
+
+    def matches(name: str, text: str) -> bool:
+        path = out / name
+        if not path.exists():
+            return False
+        # Compare semantically so formatter-only churn never fails CI.
+        try:
+            return json.loads(path.read_text()) == json.loads(text)
+        except json.JSONDecodeError:
+            return False
+
+    stale = [name for name, text in generated.items() if not matches(name, text)]
     if stale:
         console.print(f"[red]stale schemas: {', '.join(stale)}; run `cyberrange schemas`[/red]")
         raise typer.Exit(1)
