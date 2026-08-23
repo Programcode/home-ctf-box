@@ -1,0 +1,49 @@
+/**
+ * OpenRange design tokens.
+ *
+ * Dark-first, restrained technical palette:
+ * near-black background, one lime accent used sparingly for interactive and
+ * success states, red for danger, amber for warnings. Monospace stack is
+ * reserved for code, flags and timers.
+ */
+:root {
+  /* Surfaces */
+  --or-bg: #0b0d10;
+  --or-panel: #12151a;
+  --or-raised: #171b21;
+  --or-border: #232a33;
+  --or-border-strong: #303945;
+
+  /* Text */
+  --or-text: #e7eaee;
+  --or-muted: #8b93a1;
+
+  /* Signals (single accent, used sparingly) */
+  --or-accent: #9fef00;
+  --or-accent-ink: #0b0d10;
+  --or-danger: #ff4747;
+  --or-warning: #e8b03f;
+
+  /* Typography */
+  --or-font-sans:
+    Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --or-font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* Shape and focus */
+  --or-radius-sm: 4px;
+  --or-radius-md: 6px;
+  --or-radius-lg: 10px;
+  --or-focus-ring: 0 0 0 2px var(--or-bg), 0 0 0 4px var(--or-accent);
+
+  /* Motion */
+  --or-speed-fast: 120ms;
+  --or-speed-normal: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --or-speed-fast: 0ms;
+    --or-speed-normal: 0ms;
+  }
+}

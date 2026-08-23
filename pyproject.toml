@@ -15,6 +15,15 @@ dev = [
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
+# Node-based packages/apps are pnpm workspace members, not uv members.
+exclude = [
+  "apps/web",
+  "apps/lab-gateway",
+  "apps/worker",
+  "packages/ui",
+  "packages/contracts",
+  "packages/tsconfig",
+]
 
 [tool.uv.sources]
 openrange-config = { workspace = true }

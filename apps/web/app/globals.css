@@ -1,0 +1,41 @@
+@import 'tailwindcss';
+@import '@openrange/ui/tokens.css';
+@import '@openrange/ui/components.css';
+
+@theme inline {
+  --color-bg: var(--or-bg);
+  --color-panel: var(--or-panel);
+  --color-raised: var(--or-raised);
+  --color-edge: var(--or-border);
+  --color-edge-strong: var(--or-border-strong);
+  --color-content: var(--or-text);
+  --color-muted: var(--or-muted);
+  --color-accent: var(--or-accent);
+  --color-accent-ink: var(--or-accent-ink);
+  --color-danger: var(--or-danger);
+  --color-warning: var(--or-warning);
+  --font-sans: var(--or-font-sans);
+  --font-mono: var(--or-font-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--or-bg);
+  color: var(--or-text);
+}
+
+::selection {
+  background: rgba(159, 239, 0, 0.28);
+}
+
+/* Visible focus for every interactive element, including Tailwind-styled ones. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--or-focus-ring);
+}
