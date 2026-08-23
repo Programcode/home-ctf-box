@@ -10,13 +10,12 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from openrange.content.harness import solve_room
 from openrange.content.linting import Finding, lint_path, lint_room
 from openrange.content.loader import LoadError, load_bundle
-from openrange.content.models import PathBundle
 from rich.console import Console
 from rich.table import Table
 
@@ -158,23 +157,44 @@ def solve(bundle: Path) -> None:
     raise typer.Exit(0 if result.solved else 1)
 
 
+def _generated_schemas() -> dict[str, str]:
+    from openrange.content import models as content_models
+
+    schema_models: list[tuple[str, Any]] = [
+        ("room.schema.json", content_models.RoomBundle),
+        ("module.schema.json", content_models.ModuleBundle),
+        ("path.schema.json", content_models.PathBundle),
+    ]
+    generated: dict[str, str] = {}
+    for name, model in schema_models:
+        schema = model.model_json_schema()
+        schema["$id"] = f"https://openrange.local/schemas/{name}"
+        generated[name] = json.dumps(schema, indent=2) + "\n"
+    return generated
+
+
 @app.command()
 def schemas(
     out: Annotated[Path, typer.Option()] = Path("packages/content-sdk/schemas"),
+    check_diff: Annotated[bool, typer.Option("--check-diff")] = False,
 ) -> None:
-    """Emit JSON Schema files generated from the bundle models."""
-    from openrange.content.models import ModuleBundle, RoomBundle
-
-    out.mkdir(parents=True, exist_ok=True)
-    for name, model in [
-        ("room.schema.json", RoomBundle),
-        ("module.schema.json", ModuleBundle),
-        ("path.schema.json", PathBundle),
-    ]:
-        schema = model.model_json_schema()
-        schema["$id"] = f"https://openrange.local/schemas/{name}"
-        (out / name).write_text(json.dumps(schema, indent=2) + "\n")
-    console.print(f"[green]wrote schemas to {out}[/green]")
+    """Generate JSON Schemas, or verify checked-in ones are current."""
+    generated = _generated_schemas()
+    if not check_diff:
+        out.mkdir(parents=True, exist_ok=True)
+        for name, text in generated.items():
+            (out / name).write_text(text)
+        console.print(f"[green]wrote schemas to {out}[/green]")
+        return
+    stale = [
+        name
+        for name, text in generated.items()
+        if not (out / name).exists() or (out / name).read_text() != text
+    ]
+    if stale:
+        console.print(f"[red]stale schemas: {', '.join(stale)}; run `cyberrange schemas`[/red]")
+        raise typer.Exit(1)
+    console.print("[green]schemas are up to date[/green]")
 
 
 @app.command()

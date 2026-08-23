@@ -10,7 +10,13 @@ from openrange.content.harness import solve_room
 
 def main(argv: list[str]) -> int:
     roots = [Path(a) for a in argv] or [Path("content/rooms")]
-    rooms = sorted(p for root in roots for p in root.glob("*") if (p / "room.yaml").exists())
+    rooms: list[Path] = []
+    for root in roots:
+        if (root / "room.yaml").exists():
+            rooms.append(root)
+        else:
+            rooms.extend(p for p in sorted(root.glob("*")) if (p / "room.yaml").exists())
+    rooms = sorted(set(rooms))
     if not rooms:
         print("no room bundles found", file=sys.stderr)
         return 2
