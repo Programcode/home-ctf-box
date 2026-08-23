@@ -32,6 +32,52 @@ jobs:
       - name: Unit tests
         run: uv run pytest -m "not integration and not e2e and not slow"
 
+  api-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: openrange
+          POSTGRES_PASSWORD: openrange
+          POSTGRES_DB: openrange
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U openrange"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      OPENRANGE_DATABASE_URL: postgresql+asyncpg://openrange:openrange@localhost:15432/openrange_test
+      OPENRANGE_REDIS_URL: redis://localhost:16379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install workspace
+        run: uv sync --all-packages
+      - name: Create test database
+        run: |
+          PGPASSWORD=openrange psql -h localhost -p 15432 -U openrange -d openrange \
+            -c "CREATE DATABASE openrange_test"
+      - name: Apply migrations
+        working-directory: apps/api
+        run: uv run --project ../.. alembic upgrade head
+      - name: Integration tests
+        run: uv run pytest apps/api/tests packages/config/tests -m integration
+
   node-check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
