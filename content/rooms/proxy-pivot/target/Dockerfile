@@ -9,7 +9,7 @@ RUN apt-get update -o Acquire::Retries=5 \
 RUN useradd -m -s /bin/bash learner \
  && echo 'learner:learner' | chpasswd \
  && mkdir /run/sshd \
- && printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication no\nPermitRootLogin no\n' \
+ && printf 'PasswordAuthentication yes\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowTcpForwarding local\nPermitOpen 127.0.0.1:9001\n' \
       > /etc/ssh/sshd_config.d/lab.conf \
  && sed -i 's/^session\s*required\s*pam_loginuid.so/session optional pam_loginuid.so/' /etc/pam.d/sshd
 

@@ -60,23 +60,33 @@ spec:
         - cost: 10
           text: 'Try query type 255 (ANY) for a name to see every record it holds, or type 252 (AXFR) against the zone origin lab.internal to ask for the whole zone. The careless server answers both.'
         - cost: 25
-          text: 'Send an AXFR for lab.internal to udp/53, parse the answer count from bytes 6-8 of the reply, walk each answer record (skip names, read type, class, ttl, rdlength), decode the TXT character-strings, and submit the FLAG{...} you find.'
+          text: >-
+            AXFR is a TCP verb: connect to tcp/53, prefix your query with
+            its two-byte length, and read each reply message the same way.
+            Parse the answer count from bytes 6-8 of each message, walk each
+            answer record (skip names, read type, class, ttl, rdlength),
+            decode the TXT character-strings, and stop once the opening SOA
+            repeats - that repeated SOA closes the transfer.
       solution: |
         1. Build a minimal DNS client with stdlib struct: header
            `>HHHHHH` (id, flags 0x0100, qdcount 1), question as
-           length-prefixed labels plus qtype/qclass. Send to
-           target:53 over UDP.
+           length-prefixed labels plus qtype/qclass. Send the
+           reconnaissance queries to target:53 over UDP.
         2. Reconnaissance pass: query portal.lab.internal with type 1
            (A) and confirm answers come back. Query
            flag.lab.internal with type 255 (ANY) to notice a TXT
            record exists there.
-        3. Intended path: send query type 252 (AXFR) for lab.internal.
-           The server returns every record in the zone in one reply.
-        4. Parse the reply: skip the 12 byte header and question
+        3. Intended path: connect TCP to target:53 and send query
+           type 252 (AXFR) for lab.internal, prefixed with its
+           two-byte length. The server streams every record in the
+           zone back as length-prefixed messages.
+        4. Parse each message: skip the 12 byte header and question
            section, then for each answer skip the owner name (watch
            for compression pointers, two bytes starting 0xC0), read
            type/class/ttl/rdlength as >HHIH, and slice rdata. For TXT
-           (type 16) rdata is length-prefixed strings.
+           (type 16) rdata is length-prefixed strings. Stop reading
+           once a message repeats the opening SOA record; that
+           terminal SOA ends the transfer.
         5. The TXT record at flag.lab.internal contains FLAG{...}.
            Submit it.
       validator:

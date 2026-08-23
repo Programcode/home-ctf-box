@@ -34,8 +34,13 @@ class LabResolver(BaseResolver):
         qname = request.q.qname
         qtype = request.q.qtype
         if qtype == QTYPE.AXFR:
+            if _handler.protocol != "tcp":
+                reply.header.rcode = 5  # REFUSED: zone transfers belong on TCP
+                return reply
             for record in ZONE_RECORDS:
                 reply.add_answer(record)
+            # RFC 5936: the transfer ends with a second copy of the opening SOA.
+            reply.add_answer(ZONE_RECORDS[0])
             return reply
         for record in ZONE_RECORDS:
             if record.rname == qname and qtype in (QTYPE.ANY, record.rtype):

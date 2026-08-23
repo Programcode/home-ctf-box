@@ -102,18 +102,15 @@ def build_capture() -> bytes:
         "221 Goodbye",
     )
     cseq, sseq = 1000, 5000
-    ack_c, ack_s = 5001, 1001
     index = 0
     for command in commands:
-        frame, cseq_next = _segment(command + "\r\n", cseq, ack_s, True)
+        frame, cseq = _segment(command + "\r\n", cseq, sseq, True)
         emit(frame, index)
         index += 1
-        ack_s = cseq_next
     for response in responses:
-        frame, sseq_next = _segment(response + "\r\n", sseq, ack_c, False)
+        frame, sseq = _segment(response + "\r\n", sseq, cseq, False)
         emit(frame, index)
         index += 1
-        ack_c = sseq_next
     return b"".join(out)
 
 

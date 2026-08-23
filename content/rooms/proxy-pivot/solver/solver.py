@@ -1,5 +1,6 @@
 """Intended-path solver: paramiko direct-tcpip channel to the loopback console."""
 
+import socket
 import urllib.parse
 
 import paramiko
@@ -7,6 +8,7 @@ import paramiko
 from openrange.content.solver import SolveResult, TaskResult, find_flags
 
 REQUEST = b"GET /admin HTTP/1.1\r\nHost: 127.0.0.1:9001\r\nConnection: close\r\n\r\n"
+CHANNEL_TIMEOUT = 15
 
 
 def _target(ctx) -> tuple[str, int]:  # type: ignore[no-untyped-def]
@@ -25,12 +27,16 @@ def solve(ctx) -> SolveResult:  # type: ignore[no-untyped-def]
         password="learner",
         look_for_keys=False,
         allow_agent=False,
-        timeout=15,
+        timeout=CHANNEL_TIMEOUT,
     )
     try:
         channel = client.get_transport().open_channel(
-            "direct-tcpip", ("127.0.0.1", 9001), ("127.0.0.1", 0)
+            "direct-tcpip",
+            ("127.0.0.1", 9001),
+            ("127.0.0.1", 0),
+            timeout=CHANNEL_TIMEOUT,
         )
+        channel.settimeout(CHANNEL_TIMEOUT)
         channel.sendall(REQUEST)
         chunks: list[bytes] = []
         while True:
@@ -39,6 +45,16 @@ def solve(ctx) -> SolveResult:  # type: ignore[no-untyped-def]
                 break
             chunks.append(data)
         channel.close()
+    except socket.timeout as exc:
+        return SolveResult(
+            results=[
+                TaskResult(
+                    task_id="reach-the-console",
+                    ok=False,
+                    detail=f"direct-tcpip channel timed out: {exc}",
+                )
+            ]
+        )
     finally:
         client.close()
 

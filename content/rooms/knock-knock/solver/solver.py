@@ -35,11 +35,15 @@ def solve(ctx) -> SolveResult:  # type: ignore[no-untyped-def]
     if token is None:
         detail = f"no token from knock sequence: {' | '.join(replies)[:200]}"
     else:
-        res = httpx.get(f"{ctx.url('target')}/vault/{token}", timeout=10)
-        flags = find_flags(res.text)
-        captured = flags[0] if flags else None
-        if not captured:
-            detail = "vault page did not contain a flag"
+        try:
+            res = httpx.get(f"{ctx.url('target')}/vault/{token}", timeout=10)
+        except httpx.HTTPError as exc:
+            detail = f"vault request failed: {exc}"
+        else:
+            flags = find_flags(res.text)
+            captured = flags[0] if flags else None
+            if not captured:
+                detail = "vault page did not contain a flag"
     return SolveResult(
         results=[
             TaskResult(

@@ -18,16 +18,21 @@ VAULT_WINDOW_SECONDS = 60.0
 
 _lock = threading.Lock()
 _progress = 0
+_last_knock_at = 0.0
 _vault_token = ""
 _vault_until = 0.0
 
 
 def _register_knock(index: int, payload: str) -> str:
-    global _progress, _vault_token, _vault_until
+    global _progress, _last_knock_at, _vault_token, _vault_until
     with _lock:
+        now = time.monotonic()
+        if _progress and now - _last_knock_at > SEQUENCE_WINDOW_SECONDS:
+            _progress = 0
         expected_port, expected_payload = KNOCK_SEQUENCE[_progress]
         if index == _progress and payload == expected_payload:
             _progress += 1
+            _last_knock_at = now
             if _progress == len(KNOCK_SEQUENCE):
                 _vault_token = secrets.token_hex(16)
                 _vault_until = time.time() + VAULT_WINDOW_SECONDS

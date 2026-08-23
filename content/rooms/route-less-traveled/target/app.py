@@ -1,5 +1,6 @@
 """Gateway simulator: metrics leak, deliberate routing. Room target only."""
 
+from html import escape
 import os
 
 from flask import Flask, Response, request
@@ -70,7 +71,9 @@ def metrics():
 
 @app.post("/route")
 def route():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     subnet = str(data.get("subnet") or request.form.get("subnet") or "").strip()
     if not subnet:
         return _page(
@@ -91,7 +94,7 @@ def route():
             f"""
 <div class="box">
 <h1>No such segment</h1>
-<p>The gateway has no interface serving <code>{subnet}</code>. Known
+<p>The gateway has no interface serving <code>{escape(subnet)}</code>. Known
 segments are <code>{known}</code>; the metrics endpoint explains what
 each one is.</p>
 </div>""",
