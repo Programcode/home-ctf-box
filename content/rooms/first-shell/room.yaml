@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: first-shell
+  title: 'First Shell'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 20
+  tags: [ssh, linux, enumeration]
+spec:
+  track: linux-networking
+  type: guided
+  summary: >-
+    Your lab network contains a plain Linux box that accepts SSH logins.
+    You get a low-privilege account in the welcome banner, connect from
+    the terminal workstation, look around the home directory with a few
+    core commands, and read an objective file that your own account is
+    allowed to open. This room teaches the connect-enumerate-capture
+    rhythm every later shell room builds on.
+  objectives:
+    - 'Connect to a Linux target over SSH with a password from a terminal.'
+    - 'Enumerate a home directory with ls, pwd, and cat.'
+    - 'Read a file your account owns and capture the per-session flag inside it.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; every login session drops to the unprivileged
+      learner account (uid 1000), which is inherent to OpenSSH. The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The flag file
+      is owned by learner, so the exercise involves no privilege escalation.
+  target:
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: first-login
+      title: 'Log in over SSH and read the objective file'
+      prompt: >-
+        Connect to the box at ssh://target:22 with the account printed in
+        the login banner, list what is in the account's home directory,
+        and read the flag.txt file sitting there. Submit the FLAG value.
+      points: 75
+      hints:
+        - cost: 0
+          text: 'The connect banner names the lab account. The password is the same word as the username.'
+        - cost: 10
+          text: 'After logging in, pwd shows where you are and ls -la lists the files around you, including hidden ones.'
+        - cost: 25
+          text: 'The file ~/flag.txt belongs to your user, so cat /home/learner/flag.txt prints its contents directly.'
+      solution: |
+        1. From the workstation, run `ssh learner@target`. The banner in
+           /etc/motd confirms the lab credentials: learner / learner.
+        2. Once connected, run `whoami`, `pwd`, and `ls -la` to see that
+           you are learner in /home/learner and that flag.txt is present
+           and owned by you.
+        3. Run `cat /home/learner/flag.txt`. The file prints FLAG{...}.
+        4. Submit the flag value exactly as shown.
+      validator:
+        type: per_session_flag

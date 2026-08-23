@@ -1,0 +1,77 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: suid-story
+  title: 'SUID Story'
+  version: 1.0.0
+  difficulty: easy
+  points: 225
+  estimated_minutes: 30
+  tags: [ssh, linux, suid, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    This reporting server ships a helper binary at /usr/local/bin/reportgen
+    that runs with the SUID bit set so it can read protected notes for its
+    reports. Whoever wrote it wired its --dump mode straight to a shell
+    call, and the path it dumps now points at the flag file in /root. You
+    will sweep the filesystem for SUID binaries, inspect what reportgen
+    offers, and let the binary hand you the flag itself.
+  objectives:
+    - 'Sweep for SUID binaries with find and interpret the permission bits that make them special.'
+    - 'Probe an unknown setuid binary safely with its help output before using it.'
+    - 'Invoke the intended code path of a misconfigured SUID program to read a root-only file.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The custom SUID binary is a tiny compiled C helper built in
+      the image; its only privileged action is printing one local file.
+  target:
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: reportgen-dump
+      title: 'Make the SUID reporter print the flag'
+      prompt: >-
+        Log in with the account from the banner and enumerate binaries
+        carrying the SUID bit across the filesystem. Among them sits a
+        custom reporting tool under /usr/local/bin. Learn what modes it
+        supports, then use the one that makes it dump its target file,
+        which happens to be /root/flag.txt. Submit the FLAG value from
+        the dump output.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'find / -perm -4000 lists every binary with the setuid bit. Filter out noise by looking for anything under /usr/local.'
+        - cost: 10
+          text: 'Run /usr/local/bin/reportgen with no arguments or --summary first. It tells you which options exist without doing anything privileged.'
+        - cost: 25
+          text: '/usr/local/bin/reportgen --dump runs its dump path as root because of the SUID bit, and that path cats /root/flag.txt straight to your terminal.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run `find / -perm -4000 -type f 2>/dev/null`. The usual
+           system binaries appear, plus /usr/local/bin/reportgen.
+        3. `ls -l /usr/local/bin/reportgen` shows -rwsr-xr-x root:root,
+           so any user who runs it executes it with root privileges.
+        4. Probe it: running it bare prints usage, and --summary prints
+           an innocent status line. The usage reveals a --dump mode.
+        5. Run `/usr/local/bin/reportgen --dump`. The dump path shells
+           out to cat on /root/flag.txt, which only root could normally
+           read, and prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

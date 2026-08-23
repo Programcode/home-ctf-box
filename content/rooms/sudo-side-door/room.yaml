@@ -1,0 +1,75 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: sudo-side-door
+  title: 'Sudo Side Door'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 25
+  tags: [ssh, linux, sudo, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    Someone decided the learner account on this box needs to run find
+    without a password prompt, so a drop-in file in /etc/sudoers.d grants
+    exactly that. The trouble with granting a general-purpose tool is
+    that many tools can run other tools. You will confirm what your
+    account may run as root, use find's -exec action to make the system
+    read a root-only file for you, and capture what it prints.
+  objectives:
+    - 'Inspect sudo grants with sudo -l and read a sudoers drop-in.'
+    - 'Understand why -exec turns an allowed command into arbitrary execution.'
+    - 'Use sudo find with -exec cat to read /root/flag.txt and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The sudo grant is limited to one binary inside this
+      container only; the intended abuse is a single cat of the flag file.
+  target:
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: sudo-find
+      title: 'Abuse the passwordless find grant'
+      prompt: >-
+        Log in with the account from the banner and list what that
+        account may run through sudo without a password. One granted
+        binary has an option that executes other commands on files it
+        finds. Use it against /root/flag.txt and submit the FLAG value
+        it prints.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'sudo -l prints every grant for your account without needing a password on this box.'
+        - cost: 10
+          text: 'The grant covers /usr/bin/find. find supports -exec CMD ; which runs CMD once per match, as whatever user find runs as.'
+        - cost: 25
+          text: 'From any directory you can read: sudo /usr/bin/find . -exec cat /root/flag.txt \\; . The cat output contains FLAG{...}.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run `sudo -l`. It shows (root) NOPASSWD for /usr/bin/find,
+           sourced from /etc/sudoers.d/learner.
+        3. find is allowed, and its -exec action runs arbitrary commands
+           on each matched path with find's own privileges.
+        4. Run `sudo /usr/bin/find . -exec cat /root/flag.txt \;` from
+           your home directory. Every matched entry triggers a root cat
+           of the flag file.
+        5. The output prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag
