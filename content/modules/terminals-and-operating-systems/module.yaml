@@ -1,0 +1,308 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: terminals-and-operating-systems
+  title: 'Terminals and operating systems'
+  version: 0.1.0
+  difficulty: beginner
+  points: 140
+  estimated_minutes: 70
+  tags:
+    - terminal-skills
+    - linux-basics
+    - windows-basics
+    - powershell-basics
+spec:
+  track: web-foundations
+  summary: >-
+    Security work happens in terminals far more often than in windows and
+    menus. This module gets you dangerous enough with a shell to navigate any
+    lab machine, teaches the Linux command set you will use hourly, shows the
+    PowerShell equivalents that make Windows less foreign, and ends with a
+    notebook workflow you will keep using for years.
+  objectives:
+    - Move through a filesystem with pwd, ls, cd, and relative paths without hesitation.
+    - Use ten core Linux commands to inspect processes, users, disks, and manuals.
+    - Run equivalent inspection commands in PowerShell on Windows hosts.
+    - Translate file locations between Unix and Windows layout conventions.
+    - Answer checkpoint questions covering both operating systems correctly.
+    - Maintain a dated lab notebook directory as your default working habit.
+  sections:
+    - id: the-terminal-is-your-workbench
+      title: 'The terminal is your workbench'
+      blocks:
+        - type: prose
+          markdown: |
+            Graphical interfaces show you what the designer expected you to do.
+            Terminals let you ask the machine anything. In security work the
+            second ability wins every time, because targets rarely come with a
+            convenient GUI, and remote machines expose exactly one thing: a
+            shell. Every room on this platform assumes terminal comfort, so we
+            build it first.
+
+            Three commands anchor everything. `pwd` prints where you are.
+            `ls` lists what is there. `cd` moves you somewhere else. Paths can
+            be absolute, starting from the root `/`, or relative, starting from
+            where you stand, with `..` meaning one level up. Fluency here is not
+            about memorizing flags; it is about always knowing two things
+            instantly: where am I, and what is around me.
+        - type: code
+          language: bash
+          code: |
+            $ pwd
+            /home/lab
+
+            $ ls -la
+            total 28
+            drwxr-xr-x 3 lab lab 4096 Aug 23 10:40 .
+            drwxr-xr-x 3 root root 4096 Aug 21 09:12 ..
+            -rw------- 1 lab lab  220 Aug 21 09:12 .bash_history
+            drwxr-xr-x 2 lab lab 4096 Aug 23 10:41 evidence
+
+            $ cd evidence && pwd
+            /home/lab/evidence
+        - type: callout
+          tone: tip
+          markdown: |
+            Press Tab to complete file and command names, and press the up arrow
+            to reuse history. These two reflexes more than double your speed and
+            cut typos that send commands somewhere unintended.
+    - id: linux-in-ten-commands
+      title: 'Linux in ten commands'
+      blocks:
+        - type: prose
+          markdown: |
+            A surprising amount of professional Linux work runs through a small
+            set of commands. `cat FILE` prints a file, `less FILE` pages through
+            it comfortably, `head` and `tail` show its ends, and `tail -f`
+            follows it live as lines arrive. `ps aux` lists running processes,
+            `id` shows who the system thinks you are, `df -h` reports disk
+            space, and `man COMMAND` opens the manual for anything else.
+
+            None of these change the machine; they only reveal it. That makes
+            them safe to practice aggressively. When you sit down at an unfamiliar
+            box, running this inspection set takes two minutes and tells you
+            what kind of machine you are standing on, which is half of
+            situational awareness in any lab.
+        - type: code
+          language: bash
+          code: |
+            $ id
+            uid=1000(lab) gid=1000(lab) groups=1000(lab),27(sudo)
+
+            $ ps aux | head -4
+            USER   PID %CPU %MEM    VSZ   RSS TTY   STAT START COMMAND
+            root     1  0.0  0.3 167300 11856 ?     Ss   09:11 /sbin/init
+            root    342  0.0  0.2  15480  8232 ?     Ss   09:12 sshd: /usr/sbin/sshd
+            lab     990  0.0  0.1   7360  5120 pts/0 Ss  10:44 -bash
+
+            $ df -h /
+            Filesystem      Size  Used Avail Use% Mounted on
+            /dev/sda1        20G  6.1G   13G  33% /
+        - type: prose
+          markdown: |
+            Read the `id` output carefully because it rewards you later. This
+            user is uid 1000, named lab, belongs to group lab, and carries the
+            sudo group membership, which hints that administrative commands are
+            one password away. The first process listed with PID 1 is init or
+            systemd, the ancestor of everything else. Small details like these
+            are how operators read systems rather than merely use them.
+    - id: windows-through-powershell-glass
+      title: 'Windows through a PowerShell glass'
+      blocks:
+        - type: prose
+          markdown: |
+            Windows answers the same questions with PowerShell, a shell built
+            around objects instead of text lines. Cmdlets follow a Verb-Noun
+            naming pattern: `Get-Process` lists processes, `Get-Service` lists
+            services, `Get-ChildItem` lists directory contents, `Get-Content`
+            reads files. Because cmdlets return structured objects, you filter
+            and sort them precisely rather than parsing text with hope.
+
+            Open PowerShell on any Windows machine, real or virtual, and try
+            the inspection trio below. The experience should feel familiar even
+            when the names differ: same questions as the Linux section, new
+            vocabulary. By the time you reach the Windows Operator path, this
+            vocabulary will already be partly yours. If no Windows machine is
+            available today, read the output carefully anyway; recognizing the
+            shape of an answer table is half the skill when you finally sit in
+            front of the real thing.
+        - type: code
+          language: powershell
+          code: |
+            PS> whoami
+            desktop-7x2q1\lab
+
+            PS> Get-Process | Select-Object -First 3
+             NPM(K)    PM(M)   WS(M) CPU(s)      Id  ProcessName
+             ------    -----   ----- ------      --  -----------
+                 31    92.10  120.44   1.20    3188  chrome
+                 22    61.77   88.02   0.55    4912  explorer
+                 15    48.30   62.10   0.10    1024  svchost
+
+            PS> Get-PSDrive C | Select-Object Used,Free
+            Used       Free
+            ----       ----
+            61080012800 13841203200
+        - type: callout
+          tone: info
+          markdown: |
+            `Get-Help Get-Process -Examples` is your permanent tutor on Windows.
+            Unlike internet snippets, help output matches the exact version of
+            PowerShell you are running.
+    - id: two-filesystems-one-map
+      title: 'Two filesystems, one map'
+      blocks:
+        - type: prose
+          markdown: |
+            Both operating systems store everything in files; they disagree
+            about geography. Linux hangs everything from one root `/`.
+            Configuration lives under `/etc`, logs under `/var/log`, user homes
+            under `/home`, and removable media appear under `/mnt` or `/media`.
+            Everything is a path, including devices and process information
+            under `/proc`, which lets the same navigation skills reach strange
+            places.
+
+            Windows splits drives by letter. The system lives in `C:\Windows`,
+            configuration hides in the registry rather than text files, program
+            files sit in `C:\Program Files`, per-user data lands in
+            `C:\Users\NAME`, and logs concentrate in
+            `C:\Windows\System32\winevt\Logs`. Drive letters are usually mounts
+            of partitions or network shares.
+
+            Keeping a translation table in your notebook pays off the first
+            time you pivot between systems during an exercise and need the
+            config or logs location immediately.
+        - type: code
+          language: text
+          code: |
+            Question            Linux                Windows
+            ------------------  -------------------  --------------------------------
+            configuration       /etc/...             registry + C:\ProgramData
+            logs                /var/log/...         C:\Windows\System32\winevt\Logs
+            user home           /home/name           C:\Users\name
+            installed programs  /usr/bin, /usr/local C:\Program Files
+            temporary files     /tmp                 C:\Users\name\AppData\Local\Temp
+        - type: callout
+          tone: warning
+          markdown: |
+            Case sensitivity differs too. Linux treats Notes.txt and notes.txt
+            as different files; Windows considers them the same. Scripts copied
+            between systems break quietly over this difference.
+    - id: quiz-two-worlds
+      title: 'Quiz: two worlds'
+      blocks:
+        - type: prose
+          markdown: >
+            Answer from memory before scrolling back. The goal is a working
+            recall of the handful of facts this module exists to plant.
+        - type: quiz
+          question_id: term-pwd-meaning
+          question: 'What does the pwd command tell you?'
+          options:
+            - id: a
+              text: 'Your password expiry date'
+            - id: b
+              text: 'The absolute path of your current working directory'
+            - id: c
+              text: 'Which users are logged in'
+            - id: d
+              text: 'The permissions of the current directory'
+          answer_ids: [b]
+          explanation: >
+            pwd prints the working directory, the answer to "where am I".
+            Combined with ls it forms the orientation pair you should run on
+            autopilot in any new shell.
+        - type: quiz
+          question_id: term-pid-one
+          question: 'In ps aux output, why does the process with PID 1 matter?'
+          options:
+            - id: a
+              text: 'It is always the most recently started process'
+            - id: b
+              text: 'It uses the most memory by definition'
+            - id: c
+              text: 'It is the ancestor of all other processes, typically init or systemd'
+            - id: d
+              text: 'Killing it reboots into recovery mode safely'
+          answer_ids: [c]
+          explanation: >
+            PID 1 starts first and parents the user space. Identifying it tells
+            you which service manager you are dealing with, which shapes every
+            later step such as checking units with systemctl.
+        - type: quiz
+          question_id: term-windows-config
+          question: 'Where does Windows keep most configuration state?'
+          options:
+            - id: a
+              text: 'In text files under /etc'
+            - id: b
+              text: 'In the registry, a hierarchical database of keys and values'
+            - id: c
+              text: "Inside each program's own zip archive"
+            - id: d
+              text: 'Only in cloud-synced policy files'
+          answer_ids: [b]
+          explanation: >
+            The registry is the Windows configuration store. You will learn to
+            read and respect it in the Windows Operator path; for now, knowing
+            it replaces the role of /etc is the takeaway.
+    - id: build-your-lab-notebook
+      title: 'Build your lab notebook'
+      blocks:
+        - type: prose
+          markdown: |
+            Close the module by turning habits into files. Create a dedicated
+            notes tree with one dated file per session, then write today's
+            entry: the three commands you expect to use most, the one
+            PowerShell cmdlet you want to remember, and the filesystem location
+            you are most likely to forget. Writing decisions down converts a
+            tutorial into a personal reference, and future sessions start from
+            your notes instead of from zero.
+
+            From now on, every module in this platform ends with an entry like
+            this one. The testers who improve fastest are rarely the ones with
+            the most talent; they are the ones whose notebooks let yesterday's
+            work compound.
+
+            Add one closing line per session from here forward: what you would
+            try next if you had another hour. Future sessions then start warm,
+            with momentum borrowed from your past self, and the notebook slowly
+            becomes the most valuable file on your machine.
+        - type: code
+          language: bash
+          code: |
+            $ mkdir -p ~/lab/notes && cd ~/lab/notes
+            $ printf '# Session 2026-08-23\n\nTop commands: ls -la, tail -f, id\n' > session.md
+            $ cat session.md
+            # Session 2026-08-23
+
+            Top commands: ls -la, tail -f, id
+        - type: callout
+          tone: tip
+          markdown: >
+            You are ready to move on when navigating feels boring rather than
+            tense. Boring means fluent, and fluent is exactly what the
+            busted-login capstone at the end of this path assumes.
+  cheat_sheet: |
+    # Terminals and operating systems
+
+    Orientation (Linux):
+        pwd ; ls -la ; cd DIR        # where am I, what is here
+        id                           # who am I, which groups
+        ps aux                       # what is running
+        df -h                        # disk space
+        man CMD                      # manual pages
+        tail -f /var/log/syslog      # follow a file live
+
+    Orientation (PowerShell):
+        whoami ; Get-Location        # identity, cwd
+        Get-Process                  # processes
+        Get-Service                  # services
+        Get-ChildItem                # list directory
+        Get-Help CMDLET -Examples    # built-in tutor
+
+    Path map:
+        config   /etc          registry, C:\ProgramData
+        logs     /var/log      C:\Windows\System32\winevt\Logs
+        home     /home/u       C:\Users\u

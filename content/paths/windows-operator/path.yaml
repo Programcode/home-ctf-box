@@ -1,0 +1,28 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: windows-operator
+  title: 'Windows Operator'
+  version: 0.1.0
+  difficulty: easy
+  points: 450
+  estimated_minutes: 250
+  tags:
+    - windows
+    - powershell
+    - registry
+    - services
+    - event-logs
+    - identity
+spec:
+  track: windows-ad
+  summary: >-
+    Get fluent on Windows the way defenders and testers both need to be.
+    You learn PowerShell as a tool you can think with, map the registry and
+    the services that keep Windows running, read event logs like a detective,
+    understand identity from local accounts up to domain concepts, and see
+    how remote administration actually works before you ever rely on it.
+  modules:
+    - slug: powershell-fundamentals
+    - slug: windows-registry-and-services
+    - slug: windows-identity-and-event-logs

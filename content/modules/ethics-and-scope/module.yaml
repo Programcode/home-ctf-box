@@ -1,0 +1,300 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: ethics-and-scope
+  title: 'Ethics, scope, and evidence habits'
+  version: 0.1.0
+  difficulty: beginner
+  points: 120
+  estimated_minutes: 50
+  tags:
+    - ethics
+    - authorization
+    - documentation
+spec:
+  track: web-foundations
+  summary: >-
+    Before you touch a single target, this module settles the questions that
+    separate a security professional from a criminal. You learn why written
+    authorization matters, how to read and respect a scope statement, and how
+    to record your work so the evidence would survive a skeptical reviewer.
+  objectives:
+    - Explain in plain language why authorization must come before any testing activity.
+    - Read a scope statement and classify targets as allowed, forbidden, or unclear.
+    - Capture timestamped, hash-verified evidence for every meaningful action.
+    - Keep a lab notebook that lets another person reproduce your steps.
+    - Answer judgment-call questions about permission, scope, and disclosure correctly.
+    - Write a personal code of conduct you actually intend to follow.
+  sections:
+    - id: why-ethics-come-first
+      title: 'Why ethics come first'
+      blocks:
+        - type: prose
+          markdown: |
+            Security work gives you powers most computer users never have. You can
+            make systems confess things their owners would rather keep private.
+            The difference between a professional and a criminal is not skill.
+            It is permission. A professional tests systems they are authorized to
+            test, at times they agreed to, using methods they disclosed. Everyone
+            else is committing a crime with extra steps.
+
+            Laws like the Computer Fraud and Abuse Act in the United States and
+            similar statutes across Europe do not care that you were curious, that
+            you found the door open, or that you planned to report it. Accessing a
+            system without authorization is illegal even when you break nothing.
+            Curiosity is a fine reason to book time in a lab range like this one,
+            and a terrible legal defense anywhere else.
+        - type: callout
+          tone: danger
+          markdown: |
+            Never test systems you do not own or have written permission to test.
+            That includes your school's network, your employer's production
+            systems, your neighbor's Wi-Fi, and random internet hosts. If nobody
+            handed you a written approval, the answer is no.
+        - type: prose
+          markdown: |
+            In this platform every room states its scope up front, and every
+            target lives inside an isolated lab network built to be attacked.
+            Practicing here means practicing on consent. That habit transfers.
+            When you later receive your first real engagement letter, reading it
+            carefully will already feel natural, because you will have read a
+            hundred scope statements in rooms like these.
+    - id: scope-and-rules-of-engagement
+      title: 'Scope and rules of engagement'
+      blocks:
+        - type: prose
+          markdown: |
+            Scope is the boundary of permission. It says which machines, networks,
+            accounts, and techniques are approved, and everything outside that
+            line stays off limits no matter how interesting it looks. Real
+            engagements write scope into a contract called rules of engagement.
+            Rooms on this platform do the same thing in miniature inside each
+            room manifest.
+
+            A useful scope statement answers five questions. Which targets are
+            allowed? What is explicitly forbidden? When may testing happen?
+            Which techniques are out of bounds, for example denial of service or
+            social engineering? Who do you contact when something breaks or when
+            you find something scary? If any answer is missing, you stop and ask
+            before acting, never after.
+        - type: code
+          language: text
+          code: |
+            Engagement: Nimbus portal review
+            Allowed:   http://target:8000 only
+            Forbidden: control plane, other labs, the internet, the host machine
+            Window:    during your booked session
+            Out of scope techniques: denial of service, phishing real people
+            Contact:   lab operator channel if a target crashes
+
+            Reading it back: one URL is fair game. Everything else, including
+            scanning nearby ports on other hosts, would leave scope.
+        - type: prose
+          markdown: |
+            Scope also protects you. When something breaks inside an approved
+            target during an approved window, the agreement you both signed is
+            what keeps an accident from becoming an accusation. Testers who stay
+            inside scope get invited back; testers who wander become the reason
+            contracts now include clauses named after them.
+        - type: callout
+          tone: warning
+          markdown: |
+            Unclear scope is out of scope until clarified. Nobody was ever fired
+            for asking whether the staging server was included. People have been
+            prosecuted for assuming it was.
+    - id: evidence-habits-that-hold-up
+      title: 'Evidence habits that hold up'
+      blocks:
+        - type: prose
+          markdown: |
+            Findings only matter if someone can trust them. Evidence habits are
+            what make your work believable months later, when memories have faded
+            and the target has been rebuilt twice. Three practices carry almost
+            all the weight: record timestamps as you work, capture output at the
+            moment you see it, and hash files whose contents you may need to
+            defend later.
+
+            A timestamp fixes when something happened. Universal Time Coordinate
+            time avoids arguments about time zones. A cryptographic hash such as
+            SHA-256 fingerprints a file so anyone can later verify the bytes did
+            not change. Neither trick requires special tools. Both take seconds.
+        - type: code
+          language: bash
+          code: |
+            $ date -u
+            Sun Aug 23 10:14:02 UTC 2026
+
+            $ sha256sum creds-dump.txt
+            9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  creds-dump.txt
+
+            $ date -u > evidence/timeline.txt && cat evidence/timeline.txt
+            Sun Aug 23 10:15:47 UTC 2026
+        - type: prose
+          markdown: |
+            Notice the shape of that example. One command stamps the moment. One
+            command proves file integrity. One command writes the timestamp into
+            an evidence file so the record builds itself while you work. In rooms
+            on this platform, your flag captures are the same idea in miniature:
+            the platform records what you captured and when, and your notes
+            explain how. Reviewers, instructors, and future you all read the
+            same trail.
+    - id: write-it-down-as-you-go
+      title: 'Write it down as you go'
+      blocks:
+        - type: prose
+          markdown: |
+            Memory is not evidence. The strongest testers lose hours reconstructing
+            what they did yesterday, and beginners lose whole sessions because
+            nothing was written down. A lab notebook solves this cheaply. It can
+            be a markdown file, a paper notebook, whatever you will actually use.
+            What matters is that entries happen during the work, not after.
+
+            Each entry should let a stranger repeat your steps. That takes four
+            parts: when you worked, what you tried, what happened, and what you
+            concluded. Commands belong verbatim, including the ones that failed.
+            Failed attempts are evidence too. They prove what you ruled out and
+            often hand you the idea that finally works.
+
+            Pick a location you will not lose: a git repository, a synced folder,
+            anything with history. Notebooks that live only on one machine die
+            with that machine, and the whole point is outliving your memory.
+        - type: code
+          language: markdown
+          code: |
+            ## 2026-08-23 10:20 UTC - busted-login
+
+            Tried: POST /login with admin/x, got 401.
+            Observed: error text echoes the single quote I sent.
+            Hypothesis: input lands inside a SQL string unescaped.
+            Next: classic tautology payload ' OR 1=1-- .
+
+            Captured: FLAG sent to platform, hash noted in flags.txt.
+        - type: callout
+          tone: tip
+          markdown: |
+            Start every session with `date -u >> notes.md` and a heading. Ending
+            sessions with two sentences about what you would try next makes your
+            next session start warm instead of cold.
+    - id: quiz-your-judgment
+      title: 'Quiz your judgment'
+      blocks:
+        - type: prose
+          markdown: |
+            Rules feel obvious until they collide with a tempting situation.
+            These scenarios are small versions of decisions you will face in
+            every engagement. Pick the answer a professional would defend in
+            front of a court or a client.
+        - type: quiz
+          question_id: ethics-auth-before-touch
+          question: 'You find a login page of a company that never gave you permission. The SQL injection works on the first try. What is the correct move?'
+          options:
+            - id: a
+              text: 'Submit the payload, then report it responsibly since you meant well.'
+            - id: b
+              text: 'Stop. Without authorization, running the exploit is already a crime.'
+            - id: c
+              text: 'Test it once from a VPN so it cannot be traced back.'
+            - id: d
+              text: 'Ask on a forum whether someone else has exploited it before deciding.'
+          answer_ids: [b]
+          explanation: >
+            Intent does not create authorization. Even one unauthorized request
+            that alters or accesses data crosses the legal line. The professional
+            move is to stop and, if you want to help, disclose through a proper
+            channels such as a security contact or bug bounty program.
+        - type: quiz
+          question_id: ethics-scope-drift
+          question: 'Your scope allows http://target:8000 only. A port scan reveals a juicy database console on a second host in the same lab network. What now?'
+          options:
+            - id: a
+              text: 'It is in the same lab, so it is effectively covered by the spirit of scope.'
+            - id: b
+              text: 'Probe it lightly; light touching is not real testing.'
+            - id: c
+              text: 'Note its existence in your report and ask the owner to expand scope first.'
+            - id: d
+              text: 'Skip mentioning it entirely to avoid awkward conversations.'
+          answer_ids: [c]
+          explanation: >
+            Scope boundaries bind even when curiosity spikes. Documenting the
+            discovery without touching it is exactly how professionals handle
+            out-of-scope findings, and asking to expand scope is normal and
+            welcome in real engagements.
+        - type: quiz
+          question_id: ethics-evidence-hash
+          question: 'Why run sha256sum over a file you collected during testing?'
+          options:
+            - id: a
+              text: 'It encrypts the file so nobody else can read it.'
+            - id: b
+              text: "It proves later that the file's contents did not change since collection."
+            - id: c
+              text: 'It compresses the file to save disk space.'
+            - id: d
+              text: 'It hides the file name from directory listings.'
+          answer_ids: [b]
+          explanation: >
+            A SHA-256 hash is a fingerprint of the exact bytes. Recomputing the
+            hash later and matching it demonstrates integrity, which is the
+            property reviewers and courts actually care about.
+    - id: reflect-and-commit
+      title: 'Reflect and commit'
+      blocks:
+        - type: prose
+          markdown: |
+            Ethics stick when they are personal. Boilerplate codes of conduct get
+            skimmed and forgotten; sentences you wrote yourself tend to hold.
+            Take ten minutes with your notebook and answer three questions in
+            your own words. What kind of tester do you want to be known as? What
+            will you do when a target tempts you past scope? Whom will you tell
+            if you think you broke something?
+
+            Then set up the notebook itself. Create a notes directory, stamp it
+            with today's date, and write your first entry describing this module.
+            Clumsy is fine. Started beats perfect.
+
+            Revisit the statement after your first ten rooms. You will be a
+            different tester by then, and rewriting your own words against real
+            experience is how principles stop being homework and start being
+            character.
+        - type: code
+          language: bash
+          code: |
+            $ mkdir -p ~/lab/notes && cd ~/lab/notes
+            $ echo "# Lab notebook" >> README.md
+            $ date -u >> session-2026-08-23.md
+            $ ls -la
+            total 12
+            drwxr-xr-x 2 lab lab 4096 Aug 23 10:30 .
+            drwxr-xr-x 3 lab lab 4096 Aug 23 10:28 ..
+            -rw-r--r-- 1 lab lab   14 Aug 23 10:30 README.md
+            -rw-r--r-- 1 lab lab   30 Aug 23 10:31 session-2026-08-23.md
+        - type: callout
+          tone: info
+          markdown: |
+            You are ready for the next module when you can state, without
+            looking, the five questions a scope statement must answer and the
+            three evidence habits from earlier sections. The busted-login room
+            waits at the end of this path, and it expects exactly those habits.
+  cheat_sheet: |
+    # Ethics, scope, and evidence
+
+    Five questions every scope statement must answer:
+    - Targets allowed
+    - Targets forbidden
+    - Time window
+    - Techniques excluded
+    - Contact person
+
+    Evidence commands:
+        date -u                     # timestamp, UTC
+        sha256sum FILE              # integrity fingerprint
+        date -u >> notes.md         # append stamp to notebook
+
+    Notebook entry skeleton:
+        Tried / Observed / Hypothesis / Next
+
+    Iron rules:
+    - No authorization, no testing. Ever.
+    - Unclear scope is out of scope until clarified.
+    - Record failures alongside successes.

@@ -1,0 +1,324 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: linux-logs-networking-scripting
+  title: 'Linux logs, networking, and scripting'
+  version: 0.1.0
+  difficulty: medium
+  points: 180
+  estimated_minutes: 85
+  tags:
+    - logs
+    - journalctl
+    - networking
+    - bash-scripting
+spec:
+  track: linux-networking
+  summary: >-
+    Operators finish jobs; investigators explain them. This module teaches
+    you to interrogate logs from both syslog files and the journal, map a
+    machine's network posture from inside, then automate the boring parts with
+    small hardened bash scripts. It closes the Linux Operator path right
+    before the first-shell capstone room.
+  objectives:
+    - Locate and search classic log files under /var/log with targeted grep patterns.
+    - Query the systemd journal by unit, priority, and time window.
+    - Map interfaces, addresses, routes, and listening sockets from a shell.
+    - Write bash scripts using variables, conditionals, loops, and exit codes.
+    - Harden scripts with strict mode, safe quoting, and shellcheck feedback.
+    - Pass a checkpoint covering log triage, socket reading, and script safety.
+  sections:
+    - id: logs-live-in-var-log
+      title: 'Logs live in /var/log'
+      blocks:
+        - type: prose
+          markdown: |
+            Before journald, every Linux service wrote plain text under /var/log,
+            and plenty still do. The two files you will open most are auth.log,
+            which records logins, sudo use, and ssh activity on Debian-family
+            systems, and syslog, which collects general system messages. RedHat
+            family names them secure and messages instead, so learn the pattern
+            rather than one filename.
+
+            Reading logs is a grep discipline. Search for usernames to trace an
+            account's day, for Failed or Invalid to find rejected attempts, and
+            combine with tail when you only care about now. Timestamps in these
+            files lack a year but include everything else you need, so pair
+            your searches with `date` to anchor them to real time. Every hit
+            goes into your notebook with the command that found it.
+        - type: code
+          language: bash
+          code: |
+            $ sudo grep -c 'Failed password' /var/log/auth.log
+            17
+
+            $ sudo grep 'Failed password' /var/log/auth.log | tail -2
+            Aug 23 11:58:12 web01 sshd[2201]: Failed password for invalid user admin from 10.10.10.66 port 41022 ssh2
+            Aug 23 11:58:19 web01 sshd[2210]: Failed password for root from 10.10.10.66 port 41044 ssh2
+
+            $ date -u
+            Sun Aug 23 11:59:02 UTC 2026
+        - type: callout
+          tone: tip
+          markdown: |
+            Seventeen failed passwords from one source address in minutes is
+            noise worth escalating. Counting first with grep -c tells you
+            whether you are looking at an incident or a typo before you read a
+            single line.
+    - id: query-the-journal-like-a-db
+      title: 'Query the journal like a database'
+      blocks:
+        - type: prose
+          markdown: |
+            Systemd's journal stores structured logs with metadata: unit, pid,
+            priority, timestamp. That turns filtering into queries instead of
+            text spelunking. `journalctl -u UNIT` scopes to one service,
+            `-p err` limits to error priority and above, `--since` and `--until`
+            take friendly times like today or 2026-08-23 09:00, and `-f`
+            follows live exactly like tail -f.
+
+            Priorities run 0 through 7 from emergency down to debug; `-p
+            warning` shows warnings plus everything more severe. Combine flags
+            freely, since they intersect. The killer feature for incident work
+            is boot scoping: `-b` restricts output to the current boot, `-b -1`
+            reads the previous one, which answers what happened before that
+            crash without archaeology across rotated files.
+        - type: code
+          language: bash
+          code: |
+            $ journalctl -u ssh --since today --no-pager | tail -3
+            Aug 23 11:52:01 web01 sshd[2140]: Accepted publickey for lab from 10.10.10.42
+            Aug 23 11:58:12 web01 sshd[2201]: Failed password for invalid user admin
+            Aug 23 11:58:19 web01 sshd[2210]: Failed password for root
+
+            $ journalctl -p err -b --no-pager | wc -l
+            4
+        - type: prose
+          markdown: >
+            Notice how the same story from the previous section appears here
+            with richer structure and zero permission gymnastics on many
+            systems, since journal access can be granted per group. Choosing
+            between files and journal is not ideological; it is whichever
+            answers the question faster, and now you speak both.
+    - id: network-posture-from-inside
+      title: 'Network posture from the inside'
+      blocks:
+        - type: prose
+          markdown: |
+            Asked what a machine exposes, an operator answers in four commands.
+            `ip -br addr` lists interfaces and addresses in compact form.
+            `ip route` repeats the routing decisions from your foundations
+            module. `cat /etc/resolv.conf` names the resolver this host trusts.
+            The star is `ss -tulpn`, which prints every listening TCP and UDP
+            socket with the process bound to it, effectively a self-audit of
+            exposed doors.
+
+            Read ss columns deliberately: t means TCP, u UDP, l listening
+            only, p resolve processes, n numeric ports. A row like
+            0.0.0.0:22 means ssh accepts connections on every interface;
+            127.0.0.1:5432 means postgres listens locally only, which is a
+            hardening win you can verify at a glance. Outbound checks stay
+            simple too: ping proves reachability, and curl to a known URL
+            proves egress better than any assumption.
+        - type: code
+          language: bash
+          code: |
+            $ ip -br addr
+            lo        UNKNOWN  127.0.0.1/8
+            eth0      UP       10.10.10.5/24
+
+            $ ss -tulpn | head -4
+            Netid State  Local Address:Port  Process
+            tcp   LISTEN 0.0.0.0:22           sshd
+            tcp   LISTEN 127.0.0.1:5432      postgres
+            tcp   LISTEN 0.0.0.0:8000        python3
+        - type: quiz
+          question_id: net-socket-scope
+          question: 'ss shows postgres on 127.0.0.1:5432. What does that imply?'
+          options:
+            - id: a
+              text: 'Postgres accepts connections from any network'
+            - id: b
+              text: 'Postgres listens only for local connections on loopback'
+            - id: c
+              text: 'The database is down'
+            - id: d
+              text: 'Port 5432 is firewalled outbound'
+          answer_ids: [b]
+          explanation: >
+            Binding to the loopback address makes the service reachable solely
+            from the machine itself. Remote clients cannot connect regardless
+            of firewall rules, which is why binding scope is a favorite
+            hardening check.
+    - id: bash-script-fundamentals
+      title: 'Bash scripting fundamentals'
+      blocks:
+        - type: prose
+          markdown: |
+            Anything you typed twice deserves a script. A bash script is a text
+            file whose first line, the shebang `#!/usr/bin/env bash`, names its
+            interpreter. Variables hold strings without spaces around the equals
+            sign, `$1` and friends receive arguments, `$?` carries the previous
+            command's exit status where zero means success, and square-bracket
+            tests drive if statements. Loops iterate over lists with the same
+            word-splitting rules you met in the foundations module.
+
+            Build scripts in the same act-verify loop as everything else: write
+            three lines, run them, extend. Keep each script single-purpose and
+            let pipelines do heavy lifting inside. Your first useful scripts
+            will be boring ones, backup trees, log summaries, quick audits,
+            and boring is precisely why they survive into next year.
+        - type: code
+          language: bash
+          code: |
+            #!/usr/bin/env bash
+            # summarize-fails.sh: count ssh failures per source IP today
+
+            LOG=/var/log/auth.log
+            PATTERN='Failed password'
+
+            if [[ ! -r "$LOG" ]]; then
+              echo "cannot read $LOG" >&2
+              exit 1
+            fi
+
+            grep "$PATTERN" "$LOG" | awk '{print $(NF-3)}' | sort | uniq -c
+        - type: callout
+          tone: info
+          markdown: |
+            Run it with `sudo ./summarize-fails.sh` after chmod u+x. The >&2
+            line sends the complaint to stderr, keeping stdout clean for data,
+            which lets other tools consume this script's output in pipelines.
+    - id: harden-your-scripts
+      title: 'Harden your scripts'
+      blocks:
+        - type: prose
+          markdown: |
+            Scripts fail in production for predictable reasons: unset variables
+            silently expanding empty, a failing command buried mid-pipeline,
+            filenames with spaces detonating unquoted expansions. Bash has a
+            standard countermeasure trio. `set -u` errors on unset variables.
+            `set -e` stops at the first failing command. `set -o pipefail`
+            makes a pipeline report failure if any stage fails, not just the
+            last. Writing `set -euo pipefail` near the top is the professional
+            default for anything longer than a throwaway.
+
+            Quote every variable expansion unless you specifically want word
+            splitting: "$DIR" survives spaces, $DIR may not. Then borrow a
+            stricter reviewer than yourself. shellcheck analyzes scripts and
+            explains each finding with the fix and the reasoning, catching the
+            classic traps including unquoted expansions and useless cat pipes.
+            Install it once; run it on everything you intend to keep.
+        - type: code
+          language: bash
+          code: |
+            $ shellcheck summarize-fails.sh && echo clean
+            clean
+
+            $ ./strict-demo.sh ; echo "exit=$?"
+            ./strict-demo.sh: line 3: UNSET_VAR: unbound variable
+            exit=1
+        - type: quiz
+          question_id: scr-pipefail-meaning
+          question: 'With set -o pipefail active, when does a | b | c return nonzero?'
+          options:
+            - id: a
+              text: 'Only when c, the last command, fails'
+            - id: b
+              text: 'When any of a, b, or c fails'
+            - id: c
+              text: 'Never, pipefail affects redirections only'
+            - id: d
+              text: 'Only when all three fail simultaneously'
+          answer_ids: [b]
+          explanation: >
+            Plain bash reports only the last pipeline stage's status, so a
+            failure in a or b hides behind a successful c. pipefail propagates
+            the worst status across stages, which stops silent partial runs.
+    - id: checkpoint-investigator-skills
+      title: 'Checkpoint: investigator skills'
+      blocks:
+        - type: prose
+          markdown: |
+            This closes the Linux Operator path modules. The first-shell room
+            ahead expects you to combine everything: navigate, read permissions,
+            inspect processes and services, parse logs, read sockets, and wrap
+            findings in evidence-grade notes. Answer the final questions honestly
+            and revisit sections where you hesitate, because the capstone gives
+            no multiple choice.
+        - type: quiz
+          question_id: chk-auth-log-file
+          question: 'On Ubuntu, which file records failed ssh login attempts?'
+          options:
+            - id: a
+              text: '/var/log/syslog'
+            - id: b
+              text: '/var/log/auth.log'
+            - id: c
+              text: '/etc/ssh/failures'
+            - id: d
+              text: '/var/log/kern.log'
+          answer_ids: [b]
+          explanation: >
+            Debian-family systems route authentication events to auth.log.
+            RedHat-family equivalents land in /var/log/secure, and either way
+            journalctl -u ssh reaches the same events structurally.
+        - type: quiz
+          question_id: chk-listen-audit
+          question: 'Which single command best answers: what network services does this machine expose?'
+          options:
+            - id: a
+              text: 'ps aux'
+            - id: b
+              text: 'ip -br addr'
+            - id: c
+              text: 'ss -tulpn'
+            - id: d
+              text: 'cat /etc/resolv.conf'
+          answer_ids: [c]
+          explanation: >
+            Listening sockets with owning processes are the exposure surface.
+            Process lists show programs, addresses show interfaces, but only
+            ss joins both halves into a per-door answer.
+        - type: quiz
+          question_id: chk-strict-trio
+          question: 'What does set -euo pipefail change about script behavior?'
+          options:
+            - id: a
+              text: 'Scripts print every command before running it'
+            - id: b
+              text: 'Unset variables error out, first failing command aborts, pipeline failures propagate'
+            - id: c
+              text: 'All output is redirected to syslog'
+            - id: d
+              text: 'Variables become readonly after assignment'
+          answer_ids: [b]
+          explanation: >
+            The trio encodes fail-fast defaults: -u catches typos in variable
+            names, -e stops on error, pipefail refuses to hide mid-pipeline
+            breakage. Together they convert silent corruption into loud exits.
+  cheat_sheet: |
+    # Linux logs, networking, scripting
+
+    Classic logs:
+        sudo less /var/log/auth.log     (Debian) / /var/log/secure (RHEL)
+        sudo grep -c 'Failed password' /var/log/auth.log
+        sudo tail -f /var/log/auth.log
+
+    Journal:
+        journalctl -u UNIT --since today
+        journalctl -p warning -b        # current boot, warn+
+        journalctl -f                   # follow live
+        journalctl -b -1                # previous boot
+
+    Network posture:
+        ip -br addr ; ip route ; cat /etc/resolv.conf
+        ss -tulpn                       # who listens, where
+        0.0.0.0:P = everywhere, 127.0.0.1:P = local only
+
+    Script skeleton:
+        #!/usr/bin/env bash
+        set -euo pipefail
+        "$VAR" always quoted
+        exit $? codes: 0 ok, nonzero problem
+        shellcheck script.sh            # free senior review

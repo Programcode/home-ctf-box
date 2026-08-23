@@ -1,0 +1,341 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: windows-registry-and-services
+  title: 'Windows registry and services'
+  version: 0.1.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - registry
+    - services
+    - powershell
+    - sc-exe
+spec:
+  track: windows-ad
+  summary: >-
+    The registry and the service control manager are where Windows keeps its
+    memory and its muscle. This module maps both: hives, keys, values, and
+    value types on one side; service types, start modes, dependencies, and
+    recovery behavior on the other. You inspect everything with PowerShell and
+    sc.exe, change nothing without a backup plan, and finish with a checkpoint.
+  objectives:
+    - Navigate registry hives and distinguish keys from values and their data types.
+    - Read and export registry values safely with PowerShell providers.
+    - Enumerate services and classify them by status and start mode.
+    - Query deep service configuration including dependencies with sc.exe.
+    - Back up registry branches and explain service recovery options before changing either.
+    - Pass a checkpoint covering hive names, start modes, and safe-change procedure.
+  sections:
+    - id: registry-layout-and-types
+      title: 'Registry layout and value types'
+      blocks:
+        - type: prose
+          markdown: |
+            The registry is Windows' configuration database, organized as a tree
+            of keys holding named values. Five root hives anchor the tree, and
+            three matter daily. HKEY_LOCAL_MACHINE, HKLM, stores machine-wide
+            settings. HKEY_CURRENT_USER, HKCU, stores the logged-in user's
+            preferences. HKEY_CLASSES_ROOT merges class registrations for file
+            associations and COM. Values carry typed data: REG_SZ strings,
+            REG_DWORD 32-bit numbers, REG_QWORD 64-bit numbers, REG_BINARY,
+            and REG_MULTI_SZ string lists.
+
+            A precise vocabulary prevents real mistakes. Keys are folders;
+            values are name-type-data triples inside them; the special value
+            named Default exists per key. Paths use backslashes, so a full
+            address reads like HKLM\SYSTEM\CurrentControlSet\Services\nginx.
+            Reading is harmless and teaches layout fastest; writing is where
+            backups earn their keep.
+
+            Transaction files and group policy complicate the picture in real
+            environments: many keys you will see are written by policy at every
+            refresh, meaning hand edits quietly revert on their own schedule.
+            When a change refuses to stick later in your career, check whether
+            policy owns that key before doubting your method.
+        - type: code
+          language: text
+          code: |
+            Hive (root)              Purpose                       Shortcut
+            -----------------------  ----------------------------  --------
+            HKEY_LOCAL_MACHINE       machine-wide config           HKLM
+            HKEY_CURRENT_USER        this user's settings          HKCU
+            HKEY_CLASSES_ROOT        file + COM registrations      HKCR
+
+            Value types you will meet constantly:
+            REG_SZ      plain string          "C:\Program Files\app"
+            REG_DWORD   32-bit number         0x00000001
+            REG_QWORD   64-bit number         0x0000000000001000
+            REG_BINARY  raw bytes             01 00 02 9a
+            REG_MULTI_SZ list of strings      line1\0line2\0
+        - type: callout
+          tone: info
+          markdown: |
+            CurrentControlSet is a pointer to the control set used by this
+            boot, typically ControlSet001. Tools resolve it for you, which is
+            why scripts should always reference CurrentControlSet rather than
+            guessing numbered sets.
+    - id: reading-registry-with-powershell
+      title: 'Reading the registry with PowerShell'
+      blocks:
+        - type: prose
+          markdown: |
+            PowerShell exposes the registry as drives through its provider
+            system, so file cmdlets work unchanged: Get-ChildItem lists subkeys,
+            Get-ItemProperty reads values, Set-Location navigates. The provider
+            prefixes are HKLM: and HKCU:. Listing a key shows its subkeys plus
+            properties view of values, and Format-List * reveals every value
+            name, type, and data at once.
+
+            Two practical recipes cover most needs. Checking whether a program
+            auto-starts usually means reading Run keys under both HKLM and HKCU
+            software\microsoft\windows\currentversion\run, a favorite audit and
+            persistence location. And before editing anything, exporting the
+            branch with reg export creates a .reg restore file, turning risky
+            edits into reversible experiments.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+
+            OneDrive            : "C:\Users\lab\OneDrive.exe" /background
+            SecurityHealth      : %windir%\system32\SecurityHealthSystray.exe
+
+            PS> Get-Item 'HKLM:\SYSTEM\CurrentControlSet\Services\Spooler' |
+                  Select-Object -ExpandProperty Property
+
+            PS> reg export HKLM\SOFTWARE\NimbusCorp nimbus-backup.reg /y
+            The operation completed successfully.
+        - type: quiz
+          question_id: reg-run-keys-purpose
+          question: 'Why do auditors read the Run keys under HKLM and HKCU?'
+          options:
+            - id: a
+              text: 'They list recently opened documents'
+            - id: b
+              text: 'Programs listed there launch automatically at sign-in, making them an autostart and persistence point'
+            - id: c
+              text: 'They store saved Wi-Fi passwords'
+            - id: d
+              text: 'They control firewall rules per application'
+          answer_ids: [b]
+          explanation: >
+            Both legitimate software and malware use Run entries to execute at
+            logon. Reviewing machine-wide and per-user variants catches each
+            half, since HKLM covers all users while HKCU covers just one.
+    - id: services-the-muscle-of-windows
+      title: 'Services: the muscle of Windows'
+      blocks:
+        - type: prose
+          markdown: |
+            Services are long-running programs managed by the Service Control
+            Manager, starting at boot without anyone signing in. Each has a
+            name, a display name, an executable path, an account context, a
+            start type, and a current status. Start types split into Automatic,
+            boot-time or logon eager; Manual, only when asked or triggered; and
+            Disabled, refusing to run at all.
+
+            PowerShell answers the everyday questions fast. `Get-Service`
+            lists status per service, `Get-CimInstance Win32_Service` adds the
+            owning account and full binary path, which matters because a
+            service running as LocalSystem with a writable binary path is a
+            classic privilege escalation finding in later studies. Filtering
+            by StartMode builds instant posture pictures of any box.
+
+            Service accounts deserve attention in their own right. Most
+            services run as LocalSystem, the machine's near-omnipotent built-in
+            identity; some run as dedicated virtual accounts like
+            NT SERVICE\spooler or managed service accounts from the domain.
+            The account determines what a compromised service can reach, so
+            operators reading a new server start here before anything breaks.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-Service Spooler | Select-Object Status, StartType
+
+            Status StartType
+            ------ ---------
+            Running Automatic
+
+            PS> Get-CimInstance Win32_Service -Filter "Name='Spooler'" |
+                  Select-Object StartMode, StartName, PathName
+
+            StartMode StartName        PathName
+            --------- ---------        --------
+            Auto      LocalSystem      C:\Windows\System32\spoolsv.exe
+        - type: callout
+          tone: warning
+          markdown: |
+            Restarting services sounds harmless and regularly breaks print
+            servers mid-job. Announce restarts, prefer reload-style operations
+            where offered, and never bounce a production queue on a Friday.
+    - id: deep-config-with-sc-exe
+      title: 'Deep config with sc.exe'
+      blocks:
+        - type: prose
+          markdown: |
+            PowerShell shows state beautifully; sc.exe, the veteran Service
+            Control tool, still answers deeper configuration questions in one
+            line. `sc qc NAME` prints config detail: binary path, start type,
+            account, and importantly DEPENDENCIES, the other services that must
+            be running first. `sc query NAME` shows runtime state, and
+            `sc failure NAME` reveals what happens after repeated crashes.
+
+            Dependencies explain mysterious startup orders: a service refuses
+            to start not because it broke but because something beneath it did.
+            Failure actions matter for resilience reviews, since a critical
+            service configured to restart on crash survives gremlins that would
+            otherwise page humans at night. Reading these two views together
+            gives the complete biography of any service on the box.
+        - type: code
+          language: text
+          code: |
+            C:\> sc qc EventLog
+            [SC] QueryServiceConfig SUCCESS
+
+            TYPE               : 20 WIN32_SHARE_PROCESS
+            START_TYPE         : 2 AUTO_START
+            BINARY_PATH_NAME   : C:\Windows\System32\svchost.exe ...
+            DEPENDENCIES       :
+            SERVICE_START_NAME : LocalSystem
+
+            C:\> sc failure Spooler
+            FAILURE_ACTIONS = RESTART -- Delay = 60000 milliseconds
+        - type: quiz
+          question_id: svc-dependency-meaning
+          question: 'A service fails to start, and sc qc lists DEPENDENCIES: LanmanWorkstation. What first?'
+          options:
+            - id: a
+              text: 'Reinstall the failing service immediately'
+            - id: b
+              text: 'Check whether the dependency service itself is running'
+            - id: c
+              text: 'Reboot the whole machine'
+            - id: d
+              text: 'Delete the dependency entry blind'
+          answer_ids: [b]
+          explanation: >
+            Dependencies gate startup order. When a required service is stopped
+            or broken, dependents refuse to start, so verifying the dependency's
+            own status resolves the majority of such failures.
+    - id: safe-changes-and-backouts
+      title: 'Safe changes and backouts'
+      blocks:
+        - type: prose
+          markdown: |
+            Professionals are defined less by the changes they make than by how
+            reversibly they make them. For registry edits the pattern is fixed:
+            export the exact key with reg export first, note the original value
+            with Get-ItemProperty output pasted into your notebook, apply the
+            smallest possible edit, verify behavior, and keep the .reg file
+            until the next reboot proves stability. Restoring is then one
+            double-click or `reg import`.
+
+            For services the equivalent discipline records current start type
+            and account before Set-Service touches anything, previews intent
+            where supported, and prefers enabling existing disabled features
+            over inventing new ones. Recovery settings deserve the same care:
+            tightening failure actions on a flaky dev box differs wildly from
+            doing it on domain controllers, and scope notes belong in your
+            evidence trail either way.
+        - type: code
+          language: powershell
+          code: |
+            PS> $svc = Get-Service W32Time
+            PS> "$($svc.Name) was $($svc.StartType)" | Tee-Object -FilePath svc-notes.txt
+            W32Time was Manual
+
+            PS> Set-Service W32Time -StartupType Automatic
+            PS> reg import .\nimbus-backup.reg
+            The operation completed successfully.
+        - type: callout
+          tone: danger
+          markdown: |
+            Never edit the registry under SYSTEM(CurrentControlSet) hives on a
+            machine you cannot afford to rebuild, without an exported backup
+            sitting on different storage. Wrong ControlSet edits can render
+            Windows unbootable, and no undo dialog appears beforehand.
+    - id: checkpoint-registry-services
+      title: 'Checkpoint: registry and services'
+      blocks:
+        - type: prose
+          markdown: |
+            These questions mirror what the remaining modules assume: fluent
+            hive navigation, honest respect for start modes and accounts, and
+            the backup-before-edit reflex. Miss one and reread its section now;
+            identity and event logs build directly on this floor.
+        - type: quiz
+          question_id: chk-hklm-scope
+          question: 'A setting under HKLM applies to whom?'
+          options:
+            - id: a
+              text: 'Only the administrator account'
+            - id: b
+              text: 'Every user of this machine'
+            - id: c
+              text: 'Only the currently signed-in user'
+            - id: d
+              text: 'All machines in the domain automatically'
+          answer_ids: [b]
+          explanation: >
+            HKLM holds machine-wide state shared by all local users. Per-user
+            equivalents live under each profile's HKCU, which is why both get
+            checked during audits of autostart locations.
+        - type: quiz
+          question_id: chk-starttype-manual
+          question: 'What does StartType Manual mean?'
+          options:
+            - id: a
+              text: 'A human must click it at each boot'
+            - id: b
+              text: 'The service starts only when requested by a trigger, another service, or an API call'
+            - id: c
+              text: 'The service is permanently disabled'
+            - id: d
+              text: 'It runs only in Safe Mode'
+          answer_ids: [b]
+          explanation: >
+            Manual services wait for demand, whether from dependent services,
+            triggers like device arrival, or applications. It is not disabled;
+            it is lazy by design, which conserves boot time and resources.
+        - type: quiz
+          question_id: chk-backup-first-order
+          question: 'Correct order for changing a registry-backed setting?'
+          options:
+            - id: a
+              text: 'Edit, test, export if problems appear'
+            - id: b
+              text: 'Export key, record old value, edit, verify, keep backup'
+            - id: c
+              text: 'Delete the key and recreate it correctly'
+            - id: d
+              text: 'Edit directly; System Restore handles everything'
+          answer_ids: [b]
+          explanation: >
+            Evidence-grade changes capture the prior state before touching it.
+            Export plus a noted old value makes any edit reversible in seconds
+            even if System Restore points are missing or stale.
+  cheat_sheet: |
+    # Registry and services
+
+    Registry map:
+        HKLM machine-wide     HKCU this user    HKCR file+COM classes
+        Types: REG_SZ string   DWORD 32-bit   QWORD   BINARY   MULTI_SZ
+
+    Read safely:
+        Get-ItemProperty 'HKLM:\...\Run'
+        Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Services'
+        reg export HKLM\KEY backup.reg /y      # BEFORE any edit
+        reg import backup.reg                   # instant rollback
+
+    Services:
+        Get-Service NAME                        # status + StartType
+        Get-CimInstance Win32_Service           # + account + path
+        sc qc NAME                              # deps, path, start type
+        sc query NAME ; sc failure NAME
+        Set-Service NAME -StartupType Automatic # note old value first
+
+    Posture checks worth memorizing:
+        Auto + LocalSystem + writable path = escalation candidate
+        Run keys under HKLM and HKCU = autostart audit point
