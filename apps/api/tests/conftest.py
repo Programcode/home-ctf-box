@@ -13,6 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 TEST_DB_URL = "postgresql+asyncpg://openrange:openrange@localhost:15432/openrange_test"
 
 TABLES = [
+    "certificates",
+    "hint_events",
+    "notes",
+    "quiz_attempts",
+    "section_progress",
+    "enrollments",
     "user_roles",
     "roles",
     "sessions",
