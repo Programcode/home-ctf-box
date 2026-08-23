@@ -122,6 +122,23 @@ def _aggregate(events: Iterable[ScoreEventLike]) -> dict[uuid.UUID, _UserAggrega
     return users
 
 
+def leaderboard_row_view(row: LeaderboardRow) -> dict[str, Any]:
+    """JSON-safe dict form of a leaderboard row.
+
+    The single serializer for both live route responses and frozen
+    ``LeaderboardSnapshot`` payloads so the two shapes cannot drift.
+    """
+    return {
+        "rank": row.rank,
+        "user_id": str(row.user_id),
+        "points": row.points,
+        "xp": row.xp,
+        "event_count": row.event_count,
+        "last_event_at": row.last_event_at.isoformat() if row.last_event_at else None,
+        "first_bloods": row.first_bloods,
+    }
+
+
 def project_leaderboard(
     events: Iterable[ScoreEventLike], *, metric: str = "points"
 ) -> list[LeaderboardRow]:

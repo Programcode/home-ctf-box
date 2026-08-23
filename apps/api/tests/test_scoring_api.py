@@ -21,6 +21,16 @@ pytestmark = pytest.mark.integration
 
 STRONG = "correct-horse-battery"
 
+_clients: list[AsyncClient] = []
+
+
+@pytest.fixture(autouse=True)
+async def _close_clients() -> AsyncIterator[None]:
+    """Close every client opened by _make_user even if an assertion fails."""
+    yield
+    while _clients:
+        await _clients.pop().aclose()
+
 
 async def _make_user(username: str) -> tuple[AsyncClient, dict[str, str], uuid.UUID]:
     """Isolated client per user so cookie jars never collide."""
@@ -29,6 +39,7 @@ async def _make_user(username: str) -> tuple[AsyncClient, dict[str, str], uuid.U
 
     app = create_app()
     client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test", timeout=120)
+    _clients.append(client)
     res = await client.post("/api/auth/register", json={"username": username, "password": STRONG})
     assert res.status_code == 201, res.text
     headers = {"x-csrf-token": res.json()["csrf_token"]}
@@ -69,7 +80,7 @@ async def _ingest(db: Any, **kwargs: Any) -> Any:
 async def test_idempotent_ingestion_double_award_guard(db_engine: Any) -> None:
     from openrange.api.scoring.models import ScoreEvent
 
-    user, _h, uid = await _make_user("scorer1")
+    _user, _h, uid = await _make_user("scorer1")
     key = f"room-solve:{uid}:room-a"
     async with _db() as db:
         first, created_first = await _ingest(
@@ -101,14 +112,13 @@ async def test_idempotent_ingestion_double_award_guard(db_engine: Any) -> None:
     assert created_second is False
     assert first.id == second.id
     assert int(count) == 1
-    await user.aclose()
 
 
 async def test_velocity_signal_and_dedupe(db_engine: Any) -> None:
     from openrange.api.scoring.models import AntiCheatSignal
     from openrange.api.scoring.service import VELOCITY_THRESHOLD
 
-    user, _h, uid = await _make_user("speedster")
+    _user, _h, uid = await _make_user("speedster")
     now = datetime.now(UTC)
 
     async def solves(n: int, prefix: str) -> None:
@@ -143,7 +153,38 @@ async def test_velocity_signal_and_dedupe(db_engine: Any) -> None:
 
     await solves(3, "v2")
     assert await signal_count() == 1  # no duplicate open signals
-    await user.aclose()
+
+
+async def test_velocity_detection_is_insertion_order_independent(db_engine: Any) -> None:
+    from openrange.api.scoring.models import AntiCheatSignal
+    from openrange.api.scoring.service import VELOCITY_THRESHOLD
+
+    _user, _h, uid = await _make_user("speedster-reversed")
+    base = datetime(2026, 8, 1, 12, 0, 0, tzinfo=UTC)
+
+    async with _db() as db:
+        # Newest first: a window ending at each insert misses the crowd.
+        for i in reversed(range(VELOCITY_THRESHOLD + 1)):
+            await _ingest(
+                db,
+                user_id=uid,
+                kind="room_solve",
+                ref_slug=f"room-r{i}",
+                points=10,
+                idempotency_key=f"rev:{uid}:{i}",
+                created_at=base + timedelta(seconds=i * 2),
+            )
+        await db.commit()
+
+    async with _db() as db:
+        signals = (
+            (await db.execute(select(AntiCheatSignal).where(AntiCheatSignal.user_id == uid)))
+            .scalars()
+            .all()
+        )
+    assert len(signals) == 1
+    assert signals[0].kind == "impossible_timing"
+    assert signals[0].details["observed"] == VELOCITY_THRESHOLD + 1
 
 
 async def test_me_score_xp_separation_and_tracks(db_engine: Any) -> None:
@@ -172,13 +213,12 @@ async def test_me_score_xp_separation_and_tracks(db_engine: Any) -> None:
     assert score["xp"] == 0  # 10 + 50 - 70 floors at zero
     assert score["tracks"] == {"general": 25, "web": 100}  # blood carries no track
     assert score["first_bloods"] == ["room-web-1"]
-    await learner.aclose()
 
 
 async def test_leaderboards_scopes_tiebreaks_and_boards(db_engine: Any) -> None:
     alice, _ha, aid = await _make_user("lb-alice")
-    bob, _hb, bid = await _make_user("lb-bob")
-    carol, _hc, cid = await _make_user("lb-carol")
+    _bob, _hb, bid = await _make_user("lb-bob")
+    _carol, _hc, cid = await _make_user("lb-carol")
 
     aug = lambda day: datetime(2026, 8, day, tzinfo=UTC)  # noqa: E731
     jul = datetime(2026, 7, 15, tzinfo=UTC)
@@ -232,7 +272,7 @@ async def test_leaderboards_scopes_tiebreaks_and_boards(db_engine: Any) -> None:
 
     all_time = (await alice.get("/api/scoring/leaderboards/all_time")).json()
     ids = [row["user_id"] for row in all_time["rows"]]
-    assert ids == [str(cid), str(aid), str(bid)]  # 550; tie: alice earlier last event
+    assert ids == [str(cid), str(aid), str(bid)]  # carol 575; tie: alice earlier last event
     assert [row["rank"] for row in all_time["rows"]] == [1, 2, 3]
     assert all_time["period_key"] == "all"
 
@@ -243,6 +283,12 @@ async def test_leaderboards_scopes_tiebreaks_and_boards(db_engine: Any) -> None:
 
     missing_period = await alice.get("/api/scoring/leaderboards/monthly")
     assert missing_period.status_code == 422
+
+    bad_monthly_period = await alice.get("/api/scoring/leaderboards/monthly?period=2026-13")
+    assert bad_monthly_period.status_code == 422
+
+    bad_room_period = await alice.get("/api/scoring/leaderboards/room/room-a?period=nope")
+    assert bad_room_period.status_code == 422
 
     seasonal = (await alice.get("/api/scoring/leaderboards/seasonal?period=season-one")).json()
     assert seasonal["period_key"] == "season-one"
@@ -259,14 +305,11 @@ async def test_leaderboards_scopes_tiebreaks_and_boards(db_engine: Any) -> None:
 
     empty_path = (await alice.get("/api/scoring/leaderboards/path/path-none")).json()
     assert empty_path["rows"] == []
-    await alice.aclose()
-    await bob.aclose()
-    await carol.aclose()
 
 
 async def test_path_board_ranks_xp_with_hint_floor(db_engine: Any) -> None:
     dana, _hd, did = await _make_user("path-dana")
-    eve, _he, eid = await _make_user("path-eve")
+    _eve, _he, eid = await _make_user("path-eve")
     async with _db() as db:
         await _ingest(
             db, user_id=did, kind="xp_award", ref_slug="path-pentest", xp=120, idempotency_key="p1"
@@ -285,8 +328,6 @@ async def test_path_board_ranks_xp_with_hint_floor(db_engine: Any) -> None:
     assert rows[0]["xp"] == 120
     by_eve = next(row for row in rows if row["user_id"] == str(eid))
     assert by_eve["xp"] == 0
-    await dana.aclose()
-    await eve.aclose()
 
 
 async def test_achievements_data_driven_award_once(db_engine: Any) -> None:
@@ -330,6 +371,17 @@ async def test_achievements_data_driven_award_once(db_engine: Any) -> None:
     )
     assert invalid.status_code == 422
 
+    bad_reward = await admin.post(
+        "/api/scoring/admin/achievements",
+        json={
+            "slug": "bad-reward",
+            "name": "Bad Reward",
+            "rule": {"type": "count", "event": "room_solve", "threshold": 1, "points": "50"},
+        },
+        headers=admin_h,
+    )
+    assert bad_reward.status_code == 422
+
     for i in range(7):
         async with _db() as db:
             await _ingest(
@@ -366,8 +418,6 @@ async def test_achievements_data_driven_award_once(db_engine: Any) -> None:
     mine = (await learner.get("/api/scoring/me/achievements")).json()
     assert [a["slug"] for a in mine] == ["web-five"]
     assert mine[0]["name"] == "Web Runner II"
-    await admin.aclose()
-    await learner.aclose()
 
 
 async def test_adjustments_arithmetic_audit_trail_and_rbac(db_engine: Any) -> None:
@@ -429,6 +479,30 @@ async def test_adjustments_arithmetic_audit_trail_and_rbac(db_engine: Any) -> No
     )
     assert unknown_ref.status_code == 404
 
+    _other, _oh, oid = await _make_user("adj-other")
+    async with _db() as db:
+        foreign_event, _created = await _ingest(
+            db,
+            user_id=oid,
+            kind="room_solve",
+            ref_slug="room-cheat",
+            points=10,
+            idempotency_key=f"adj:{oid}",
+        )
+        await db.commit()
+
+    cross_user = await admin.post(
+        "/api/scoring/admin/score-adjustments",
+        json={
+            "user_id": str(lid),
+            "points": -1,
+            "reason": "linked to someone else",
+            "original_event_id": foreign_event.id,
+        },
+        headers=admin_h,
+    )
+    assert cross_user.status_code == 422
+
     # Learner hits every admin endpoint: always 403.
     csrf = {"x-csrf-token": learner_h["x-csrf-token"]}
     r = await learner.post(
@@ -451,15 +525,13 @@ async def test_adjustments_arithmetic_audit_trail_and_rbac(db_engine: Any) -> No
         headers=csrf,
     )
     assert r.status_code == 403
-    await admin.aclose()
-    await learner.aclose()
 
 
 async def test_signals_listing_and_review_flow(db_engine: Any) -> None:
     from openrange.api.scoring import service as svc
 
     admin, admin_h, _admin_uid = await _make_admin("sig-admin")
-    suspect, _sh, sid = await _make_user("sig-suspect")
+    _suspect, _sh, sid = await _make_user("sig-suspect")
 
     async with _db() as db:
         signal = await svc.record_signal(
@@ -467,8 +539,22 @@ async def test_signals_listing_and_review_flow(db_engine: Any) -> None:
         )
         await db.commit()
 
+    async with _db() as db:
+        second = await svc.record_signal(
+            db, user_id=sid, kind="answer_spray", details={"sprayed": 9}
+        )
+        await db.commit()
+
     open_list = (await admin.get("/api/scoring/admin/anti-cheat/signals?status=open")).json()
-    assert [s["id"] for s in open_list] == [signal.id]
+    assert [s["id"] for s in open_list] == [second.id, signal.id]
+
+    page_one = (await admin.get("/api/scoring/admin/anti-cheat/signals?status=open&limit=1")).json()
+    assert [s["id"] for s in page_one] == [second.id]
+
+    page_two = (
+        await admin.get("/api/scoring/admin/anti-cheat/signals?status=open&limit=1&offset=1")
+    ).json()
+    assert [s["id"] for s in page_two] == [signal.id]
 
     dismissed = await admin.post(
         f"/api/scoring/admin/anti-cheat/signals/{signal.id}/review",
@@ -478,7 +564,7 @@ async def test_signals_listing_and_review_flow(db_engine: Any) -> None:
     assert dismissed.status_code == 200
     assert dismissed.json()["status"] == "dismissed"
     still_open = (await admin.get("/api/scoring/admin/anti-cheat/signals?status=open")).json()
-    assert still_open == []
+    assert [s["id"] for s in still_open] == [second.id]  # dismissal left the spray untouched
 
     escalated = await admin.post(
         f"/api/scoring/admin/anti-cheat/signals/{signal.id}/review",
@@ -494,8 +580,6 @@ async def test_signals_listing_and_review_flow(db_engine: Any) -> None:
         headers=admin_h,
     )
     assert missing.status_code == 404
-    await admin.aclose()
-    await suspect.aclose()
 
 
 async def test_anonymous_requests_rejected(client: AsyncClient) -> None:

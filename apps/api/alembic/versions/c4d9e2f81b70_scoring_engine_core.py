@@ -28,7 +28,12 @@ def upgrade() -> None:
         sa.Column("points", sa.Integer(), nullable=False),
         sa.Column("xp", sa.Integer(), nullable=False),
         sa.Column("meta", JSONB(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("idempotency_key", sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(
             ["user_id"],

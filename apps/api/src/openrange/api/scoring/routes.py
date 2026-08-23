@@ -11,7 +11,7 @@ from openrange.api.auth.dependencies import CurrentUser, DbSession, require_perm
 from openrange.api.auth.service import AuthError
 from openrange.api.scoring import service
 from openrange.api.scoring.models import AntiCheatSignal
-from openrange.api.scoring.projection import LeaderboardRow
+from openrange.api.scoring.projection import leaderboard_row_view
 from openrange.api.users.models import User
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -43,23 +43,14 @@ class SignalReviewIn(BaseModel):
     note: str = ""
 
 
-def _row_view(row: LeaderboardRow) -> dict[str, Any]:
-    return {
-        "rank": row.rank,
-        "user_id": str(row.user_id),
-        "points": row.points,
-        "xp": row.xp,
-        "event_count": row.event_count,
-        "last_event_at": row.last_event_at.isoformat() if row.last_event_at else None,
-        "first_bloods": row.first_bloods,
-    }
-
-
 def _window(period: str | None) -> tuple[datetime | None, datetime | None]:
     """(since, until) for an optional YYYY-MM filter; UTC months."""
     if not period:
         return None, None
-    start, end = service.period_window(period)
+    try:
+        start, end = service.period_window(period)
+    except service.ScoringError as exc:
+        raise AuthError(exc.code, exc.status) from exc
     return start, end
 
 
@@ -102,7 +93,10 @@ async def leaderboard(
     elif scope == "monthly":
         if not period:
             raise AuthError("monthly leaderboards require period=YYYY-MM", 422)
-        start, end = service.period_window(period)
+        try:
+            start, end = service.period_window(period)
+        except service.ScoringError as exc:
+            raise AuthError(exc.code, exc.status) from exc
         period_key, since, until = period, start, end
     else:
         # seasonal: period_key is an opaque season slug; season date
@@ -113,7 +107,11 @@ async def leaderboard(
     rows = await service.compute_leaderboard(
         db, scope=scope, period_key=period_key, since=since, until=until
     )
-    return {"scope": scope, "period_key": period_key, "rows": [_row_view(r) for r in rows]}
+    return {
+        "scope": scope,
+        "period_key": period_key,
+        "rows": [leaderboard_row_view(r) for r in rows],
+    }
 
 
 @router.get("/leaderboards/{scope}/{ref}")
@@ -139,7 +137,7 @@ async def ref_board(
         until=until,
         kinds=kinds,
     )
-    return {"scope": scope, "ref": ref, "rows": [_row_view(r) for r in rows]}
+    return {"scope": scope, "ref": ref, "rows": [leaderboard_row_view(r) for r in rows]}
 
 
 @router.post("/admin/achievements")
@@ -194,10 +192,17 @@ async def list_signals(
     admin: AdminUser,
     db: DbSession,
     status: Annotated[Literal["open", "dismissed", "escalated"] | None, Query()] = "open",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> list[dict[str, Any]]:
-    stmt = select(AntiCheatSignal).order_by(AntiCheatSignal.created_at.desc()).limit(200)
+    stmt = select(AntiCheatSignal)
     if status is not None:
         stmt = stmt.where(AntiCheatSignal.status == status)
+    stmt = (
+        stmt.order_by(AntiCheatSignal.created_at.desc(), AntiCheatSignal.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     rows = (await db.execute(stmt)).scalars().all()
     return [
         {

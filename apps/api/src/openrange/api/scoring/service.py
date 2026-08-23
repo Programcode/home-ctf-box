@@ -24,6 +24,7 @@ from openrange.api.scoring.projection import (
     LeaderboardRow,
     MeScore,
     ScoreEventLike,
+    leaderboard_row_view,
     project_leaderboard,
     project_me,
 )
@@ -110,20 +111,32 @@ async def record_score_event(
 
 
 async def _check_solve_velocity(db: AsyncSession, *, user_id: uuid.UUID, at: datetime) -> None:
-    window_start = at - VELOCITY_WINDOW
-    observed = (
-        await db.execute(
-            select(func.count())
-            .select_from(ScoreEvent)
-            .where(
-                ScoreEvent.user_id == user_id,
-                ScoreEvent.kind == "room_solve",
-                ScoreEvent.created_at > window_start,
-                ScoreEvent.created_at <= at,
+    """Flag impossible solve rates regardless of ledger insertion order.
+
+    Every VELOCITY_WINDOW that contains the new event is re-evaluated,
+    so backfilled or out-of-order events still trip the threshold.
+    """
+    stamps = list(
+        (
+            await db.execute(
+                select(ScoreEvent.created_at)
+                .where(
+                    ScoreEvent.user_id == user_id,
+                    ScoreEvent.kind == "room_solve",
+                    ScoreEvent.created_at >= at - VELOCITY_WINDOW,
+                    ScoreEvent.created_at <= at + VELOCITY_WINDOW,
+                )
+                .order_by(ScoreEvent.created_at.asc())
             )
-        )
-    ).scalar_one()
-    if int(observed) <= VELOCITY_THRESHOLD:
+        ).scalars()
+    )
+    observed = 0
+    start = 0
+    for position, end_at in enumerate(stamps):
+        while stamps[start] <= end_at - VELOCITY_WINDOW:
+            start += 1
+        observed = max(observed, position - start + 1)
+    if observed <= VELOCITY_THRESHOLD:
         return
     existing = (
         await db.execute(
@@ -208,6 +221,12 @@ def validate_achievement_rule(rule: dict[str, Any]) -> None:
     threshold = rule.get("threshold")
     if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold < 1:
         raise ScoringError("rule.threshold must be a positive integer", 422)
+    for field_name in ("points", "xp"):
+        value = rule.get(field_name)
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ScoringError(f"rule.{field_name} must be an integer", 422)
 
 
 async def upsert_achievement(
@@ -263,7 +282,8 @@ async def _evaluate_achievements(db: AsyncSession, *, user_id: uuid.UUID) -> Non
 
     Each award appends an ``achievement`` ledger event keyed
     ``achv:<slug>:<user>`` so double awards are impossible even across
-    races; the unique (user, slug) constraint backstops the rest.
+    races; concurrent evaluators lose the INSERT race harmlessly via
+    ON CONFLICT DO NOTHING instead of failing the triggering event.
     """
     rules = (
         (await db.execute(select(AchievementCatalog).where(AchievementCatalog.active)))
@@ -293,7 +313,15 @@ async def _evaluate_achievements(db: AsyncSession, *, user_id: uuid.UUID) -> Non
         ).scalar_one()
         if int(count) < int(rule["threshold"]):
             continue
-        db.add(UserAchievement(user_id=user_id, slug=entry.slug))
+        award_stmt = (
+            pg_insert(UserAchievement)
+            .values(user_id=user_id, slug=entry.slug)
+            .on_conflict_do_nothing(index_elements=[UserAchievement.user_id, UserAchievement.slug])
+            .returning(UserAchievement.id)
+        )
+        awarded_id = (await db.execute(award_stmt)).scalar_one_or_none()
+        if awarded_id is None:
+            continue
         await record_score_event(
             db,
             user_id=user_id,
@@ -326,6 +354,8 @@ async def create_adjustment(
         original = await db.get(ScoreEvent, original_event_id)
         if original is None:
             raise ScoringError("unknown original event", 404)
+        if original.user_id != target_user_id:
+            raise ScoringError("original event belongs to another user", 422)
     adjustment_event, _created = await record_score_event(
         db,
         user_id=target_user_id,
@@ -402,18 +432,7 @@ async def compute_leaderboard(
     """
     events = await load_events(db, kinds=kinds, ref_slug=ref_slug, since=since, until=until)
     rows = project_leaderboard(events, metric=metric)
-    payload = [
-        {
-            "rank": r.rank,
-            "user_id": str(r.user_id),
-            "points": r.points,
-            "xp": r.xp,
-            "event_count": r.event_count,
-            "last_event_at": r.last_event_at.isoformat() if r.last_event_at else None,
-            "first_bloods": r.first_bloods,
-        }
-        for r in rows
-    ]
+    payload = [leaderboard_row_view(r) for r in rows]
     snapshot_stmt = (
         pg_insert(LeaderboardSnapshot)
         .values(scope=scope, period_key=period_key, payload=payload)
