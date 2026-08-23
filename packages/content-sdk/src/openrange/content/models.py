@@ -115,6 +115,16 @@ class TargetSpec(StrictModel):
     flag_env: str = "ROOM_FLAG"
     flag_path: str | None = None
     egress_allowlist: list[str] = Field(default_factory=list)
+    privilege_profile: Annotated[
+        Literal["locked", "elevated"],
+        Field(
+            description=(
+                "locked: cap_drop ALL + no-new-privileges (default, web targets). "
+                "elevated: bounded capability set without no-new-privileges for "
+                "targets that need setuid (sshd privsep, sudo, SUID binaries)."
+            )
+        ),
+    ] = "locked"
 
     @field_validator("healthcheck")
     @classmethod

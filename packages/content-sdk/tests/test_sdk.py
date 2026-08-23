@@ -90,3 +90,37 @@ def test_load_error_is_actionable(tmp_path: Path) -> None:
 def test_solve_context_shape() -> None:
     ctx = SolveContext(base_urls={"target": "http://x"}, expected_flags={"t": "FLAG{A}"})
     assert ctx.url() == "http://x"
+
+
+def test_privilege_profile_default_is_locked() -> None:
+    bundle = load_bundle(FIXTURE / "room.yaml")
+    assert bundle.spec.target.privilege_profile == "locked"
+
+
+def test_elevated_target_requires_reviewer_justification(tmp_path: Path) -> None:
+    import shutil
+
+    shutil.copytree(FIXTURE, tmp_path / "room", dirs_exist_ok=True)
+    manifest = tmp_path / "room" / "room.yaml"
+    text = manifest.read_text().replace(
+        "  target:",
+        "  target:\n    privilege_profile: elevated",
+        1,
+    )
+    text = text.replace(
+        "reviewer_notes: 'SQLite-backed Flask app; injection stays inside the room network.'",
+        "reviewer_notes: short",
+    )
+    manifest.write_text(text)
+    findings = lint_room(tmp_path / "room")
+    assert "privilege-profile" in {f.rule for f in findings}
+
+    notes = (
+        "sshd needs setuid for privilege separation and the learner shell; "
+        "caps are bounded to the ssh server profile."
+    )
+    manifest.write_text(
+        manifest.read_text().replace("reviewer_notes: short", f"reviewer_notes: {notes}")
+    )
+    findings = lint_room(tmp_path / "room")
+    assert "privilege-profile" not in {f.rule for f in findings}

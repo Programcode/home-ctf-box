@@ -124,6 +124,17 @@ def lint_room(bundle_dir: Path) -> list[Finding]:
             )
         )
 
+    # Elevated targets need a written justification for reviewers.
+    if spec.target.privilege_profile == "elevated" and len(spec.safety.reviewer_notes) < 40:
+        findings.append(
+            Finding(
+                "error",
+                "privilege-profile",
+                "privilege_profile elevated requires a safety.reviewer_notes "
+                "justification of at least 40 characters",
+            )
+        )
+
     # Prose quality gates.
     for md in _prose_sources(bundle_dir):
         content = md.read_text()
