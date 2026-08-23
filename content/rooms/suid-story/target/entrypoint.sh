@@ -2,7 +2,7 @@
 # Room entrypoint: prepares the box and runs the SSH server.
 set -eu
 
-FLAG="${ROOM_FLAG:-FLAG{FLAGNOTSET0000000000000000}}"
+FLAG="${ROOM_FLAG:-FLAGNOTSET0000000000000000}"
 
 umask 022
 printf '%s\n' "$FLAG" > /root/flag.txt

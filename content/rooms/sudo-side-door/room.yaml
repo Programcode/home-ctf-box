@@ -50,7 +50,7 @@ spec:
     - id: sudo-find
       title: 'Abuse the passwordless find grant'
       prompt: >-
-        Log in with the account from the banner and list what that
+        Log in as learner with password learner and list what your
         account may run through sudo without a password. One granted
         binary has an option that executes other commands on files it
         finds. Use it against /root/flag.txt and submit the FLAG value

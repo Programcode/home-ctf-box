@@ -50,7 +50,7 @@ spec:
     - id: reportgen-dump
       title: 'Make the SUID reporter print the flag'
       prompt: >-
-        Log in with the account from the banner and enumerate binaries
+        Log in as learner with password learner and enumerate binaries
         carrying the SUID bit across the filesystem. Among them sits a
         custom reporting tool under /usr/local/bin. Learn what modes it
         supports, then use the one that makes it dump its target file,
