@@ -1,0 +1,69 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: token-forger
+  title: 'Token Forger'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 30
+  tags: [jwt, authn, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    TokenForge signs session tokens with HS256 but lets the token itself
+    name the algorithm the verifier should use. You will log in as a
+    guest, confirm how the hand-rolled check works, then forge a token
+    that declares a weaker algorithm and carries role=admin so the
+    admin console opens without ever touching the signing key.
+  objectives:
+    - 'Explain why the verifier, not the token header, must choose the algorithm.'
+    - 'Forge an unsigned admin token the service accepts.'
+    - 'Capture the per-session flag the admin console prints.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Flask app on the room network; forging tokens touches only the lab container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: forge-admin-token
+      title: 'Open the admin console without the signing key'
+      prompt: >-
+        Log in as the guest to see how issued tokens are built. Craft a
+        token whose header names its own algorithm and whose payload
+        sets role=admin, then send it to GET /admin in an Authorization
+        header. Submit the FLAG value the console prints.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'The verifier reads the alg field from the token you send. Nothing stops you from naming a different algorithm than the issuer used.'
+        - cost: 10
+          text: 'Set the header to {"alg":"none","typ":"JWT"} and leave the signature section empty. The payload still needs role=admin to pass the console check.'
+        - cost: 25
+          text: 'Base64url-encode header and payload without padding, join them as header.payload. (keep the trailing dot), and GET /admin with Authorization: Bearer <token>.'
+      solution: |
+        1. POST /login with username=guest, password=guest-pass and read
+           the returned token: base64url(header) + "." + base64url(payload)
+           + "." + HMAC signature.
+        2. Build header {"alg":"none","typ":"JWT"} and payload
+           {"sub":"guest","role":"admin"}. Base64url-encode each segment
+           and strip the padding.
+        3. Send GET /admin with Authorization: Bearer <header>.<payload>.
+           The verifier sees alg=none with an empty signature and a
+           role=admin payload, and renders the console page containing
+           the room flag.
+      validator:
+        type: per_session_flag

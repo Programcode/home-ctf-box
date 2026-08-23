@@ -1,0 +1,72 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: double-trouble
+  title: 'Double Trouble'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 20
+  tags: [hpp, web, authz]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Cartly's checkout reads the discount parameter twice: the coupon
+    check inspects the first occurrence while the price calculation
+    charges the last. Sending the same parameter twice splits the two
+    reads apart, and a coupon that passes inspection can over-charge
+    into a negative total. You will confirm the split, push the total
+    below zero, and read the refund reference the order page prints.
+  objectives:
+    - 'Detect differing handling of repeated query parameters on one endpoint.'
+    - 'Craft a request whose validated value and used value disagree.'
+    - 'Capture the per-session flag printed when the total goes negative.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask app; requests stay inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: polluted-checkout
+      title: 'Pass inspection with one coupon, pay with another'
+      prompt: >-
+        The /checkout endpoint rejects coupons above 50 percent, yet its
+        arithmetic and its validation read different copies of the
+        discount parameter. Submit one request with two discount values
+        so validation sees the honest one and the total sees the
+        generous one. Submit the FLAG value from the refund page.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Nothing stops you from naming a query parameter twice. Servers and frameworks disagree on which copy wins.'
+        - cost: 10
+          text: 'The endpoint parses the raw query string into a list. The guard reads the first discount, the arithmetic reads the last.'
+        - cost: 25
+          text: 'GET /checkout?price=50&discount=10&discount=100. The 10 passes the check, the 100 drives the total negative, and the refund page prints the flag.'
+      solution: |
+        1. Open http://target:8000 and read the checkout usage. A
+           discount of 51 alone is rejected with "coupon too generous".
+        2. The handler parses the raw query string with parse_qs, which
+           keeps repeated parameters as a list. The validation reads
+           d["discount"][0] while the calculation reads
+           d["discount"][-1].
+        3. Send GET /checkout?price=50&discount=10&discount=100. The
+           first value 10 passes the 50 percent guard; the last value
+           100 is subtracted, leaving a total of -50.
+        4. A negative total triggers the refund page, which prints the
+           room flag as the refund reference. Submit it.
+      validator:
+        type: per_session_flag

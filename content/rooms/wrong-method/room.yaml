@@ -1,0 +1,62 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: wrong-method
+  title: 'Wrong Method'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 10
+  tags: [http-methods, verb-tampering, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    The Nimbus admin console refuses plain browser requests, yet it judges a
+    call by its HTTP verb alone. Change the method of the very same request to
+    PUT or DELETE and the filter waves you through to whatever the console
+    protects.
+  objectives:
+    - 'Confirm the console rejects ordinary GET traffic.'
+    - 'Reach the same path with a method the verb check lets through.'
+    - 'Capture the per-session flag from the console page.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask console; verb tampering stays inside the lab network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: verb-bypass
+      title: 'Reach the console with a different verb'
+      prompt: >-
+        The console at /admin-console blocks browser traffic. Send the request
+        with a method it does not suspect and submit the FLAG value printed.
+      points: 75
+      hints:
+        - cost: 0
+          text: 'Try the obvious way first: a plain GET to /admin-console. Read what the refusal says about who may pass.'
+        - cost: 10
+          text: 'The guard inspects only request.method. Any verb outside the blocked set lands in the tooling branch of the same handler.'
+        - cost: 25
+          text: 'curl -X PUT http://target:8000/admin-console (DELETE works too) renders the console page with FLAG{...}.'
+      solution: |
+        1. GET /admin-console. The route answers 403 and mentions logging,
+           which confirms the path exists behind a verb-only check.
+        2. Repeat the identical request with another method:
+           curl -X PUT http://target:8000/admin-console
+        3. Only request.method changed, but the handler now takes the
+           tooling branch and prints the room flag. Submit it.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,67 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: brace-yourself
+  title: 'Brace Yourself'
+  version: 1.0.0
+  difficulty: easy
+  points: 125
+  estimated_minutes: 15
+  tags: [format-string, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    The portal greets visitors by splicing the name parameter into a
+    template string and running str.format over it with server-side
+    context as the keyword arguments. Anything in braces gets replaced,
+    including fields you were never meant to see. You will submit a
+    name that is itself a placeholder and read the flag straight out
+    of the greeting.
+  objectives:
+    - 'Recognize user input flowing into str.format with server context.'
+    - 'Use a format placeholder to read a context field from the response.'
+    - 'Capture the per-session flag printed by the greeting page.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Read-only template injection inside the lab container; no state changes possible.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: format-string-leak
+      title: 'Make the greeting print the flag'
+      prompt: >-
+        The welcome endpoint formats your name parameter against
+        server-side context. Send a name that is a placeholder for the
+        hidden flag field so GET /welcome renders it on the page.
+        Submit the FLAG value.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'The page shows Your plan: free even though you never sent a plan. Some formatting step fills placeholders from data you cannot edit directly.'
+        - cost: 10
+          text: 'Your input lands inside a string that later goes through .format(**context). A literal {flag} in your name becomes a lookup when that call runs.'
+        - cost: 25
+          text: 'GET /welcome?name=%7Bflag%7D (or pass name={flag} with proper URL encoding). The rendered heading contains FLAG{...}.'
+      solution: |
+        1. Load /welcome?name=Ada and notice the plan line is filled in
+           without any input from you, which means the response string
+           passes through str.format with server-side context.
+        2. Send the name as a placeholder: GET /welcome?name={flag}
+           (URL-encoded as %7Bflag%7D).
+        3. Format replaces {flag} with the context value before the page
+           is returned, so the greeting prints the flag. Submit it.
+      validator:
+        type: per_session_flag

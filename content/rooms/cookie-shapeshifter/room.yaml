@@ -1,0 +1,64 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: cookie-shapeshifter
+  title: 'Cookie Shapeshifter'
+  version: 1.0.0
+  difficulty: beginner
+  points: 100
+  estimated_minutes: 15
+  tags: [cookies, authn, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Crumb & Co. hands every visitor a base64 JSON cookie and treats whatever it
+    says as the truth. Nothing signs the value, so you can decode the profile,
+    reshape the role claim, and read the reward the staff counter reserves for
+    admins.
+  objectives:
+    - 'Decode a base64 JSON session cookie and see which claims the app trusts.'
+    - 'Re-encode the profile with role set to admin.'
+    - 'Capture the per-session flag from the staff area.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask shop; the forged cookie never leaves the lab network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: forge-admin-cookie
+      title: 'Reshape the profile cookie into an admin'
+      prompt: >-
+        Craft a profile cookie whose decoded JSON carries role admin, present it
+        to /admin-panel, and submit the FLAG value the staff page prints.
+      points: 100
+      hints:
+        - cost: 0
+          text: 'The homepage names the cookie and its format. Decode one with any base64 tool and look at the fields inside.'
+        - cost: 10
+          text: 'Nothing authenticates the value. The staff page only checks that the decoded JSON has a role field equal to admin.'
+        - cost: 25
+          text: 'Send Cookie: profile=<base64 of {"username":"guest","role":"admin"}> to /admin-panel. The response contains FLAG{...}.'
+      solution: |
+        1. Read the homepage. It says identity lives entirely in the base64
+           JSON `profile` cookie and points staff at /admin-panel.
+        2. Build the payload yourself:
+           echo -n '{"username":"guest","role":"admin"}' | base64
+           which produces eyJ1c2VybmFtZSI6Imd1ZXN0Iiwicm9sZSI6ImFkbWluIn0=
+        3. Request /admin-panel with Cookie: profile=<that value>. No signature
+           check stands in the way, so the page greets an admin and prints
+           the room flag. Submit it.
+      validator:
+        type: per_session_flag

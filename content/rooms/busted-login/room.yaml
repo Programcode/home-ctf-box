@@ -1,0 +1,64 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: busted-login
+  title: 'Busted Login'
+  version: 1.0.0
+  difficulty: beginner
+  points: 100
+  estimated_minutes: 20
+  tags: [sqli, authn, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Nimbus Corp's employee portal signs people in with a query the
+    summer intern concatenated by hand. You will confirm the flaw from
+    the login page behavior, bypass authentication with a classic
+    tautology payload, and read the flag the portal prints for the
+    account it thought it authenticated.
+  objectives:
+    - 'Recognize string-concatenated SQL from the way the login form reacts to quotes.'
+    - 'Bypass the password check with a tautology and comment-out payload.'
+    - 'Capture the per-session flag the portal reveals after the bypass.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'SQLite-backed Flask app; injection stays inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: login-bypass
+      title: 'Sign in without knowing any password'
+      prompt: >-
+        Submit the login form with a payload that makes the password
+        check always true. The portal prints the flag on the page it
+        shows the (fictional) signed-in employee. Submit the FLAG value.
+      points: 100
+      hints:
+        - cost: 0
+          text: 'Type a single quote as the username and watch the error change. The query is built by gluing strings together.'
+        - cost: 10
+          text: "A payload like ' OR 1=1-- closes the string, adds a condition that is always true, and comments out the rest."
+        - cost: 25
+          text: "POST username=' OR 1=1-- and any password to /login. The response page contains FLAG{...}."
+      solution: |
+        1. Open the portal and submit a quote as the username. The SQLite
+           error proves the input reaches a query unescaped.
+        2. POST to /login with username=`' OR 1=1--` and any password.
+           The query becomes SELECT ... WHERE username='' OR 1=1--' AND
+           password='...', which returns the first user row.
+        3. The authenticated page prints the room flag. Submit it.
+      validator:
+        type: per_session_flag

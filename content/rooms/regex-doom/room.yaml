@@ -1,0 +1,61 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: regex-doom
+  title: 'Regex Doom'
+  version: 1.0.0
+  difficulty: easy
+  points: 125
+  estimated_minutes: 20
+  tags: [regex, injection, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    The Signal Vault compares your entry against its access code with a regular
+    expression, but it compiles your input as the pattern and the code as the
+    subject. A pattern that matches anything opens the door without ever
+    learning the code.
+  objectives:
+    - 'Spot that player input becomes the regex while the fixed code is the matched string.'
+    - 'Craft a pattern that fullmatches any subject and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Flask keypad against a short fixed subject; no user data is ever matched as the string side.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: regex-unlock
+      title: 'Open the vault without the code'
+      prompt: >-
+        Submit a pattern to /unlock that matches the secret code no matter what
+        the code is. The vault prints the FLAG value when the comparison passes.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'The keypad page states the exact comparison: re.fullmatch(your_input, secret_code). Your input sits on the pattern side.'
+        - cost: 10
+          text: 'You never need to know the code. Any expression that matches every possible string wins the comparison.'
+        - cost: 25
+          text: 'POST code=.* to /unlock. The .* pattern fullmatches the whole secret, so the vault releases FLAG{...}.'
+      solution: |
+        1. Open the keypad page. It documents the flaw in plain sight: input
+           is used as the pattern in re.fullmatch(input, secret).
+        2. Send a pattern that cannot lose:
+           curl -d 'code=.*' http://target:8000/unlock
+        3. fullmatch('.*', secret) succeeds for any secret, so the unlocked
+           page prints the room flag. Submit it.
+      validator:
+        type: per_session_flag

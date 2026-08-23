@@ -1,0 +1,69 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: pickle-jar
+  title: 'Pickle Jar'
+  version: 1.0.0
+  difficulty: medium
+  points: 275
+  estimated_minutes: 35
+  tags: [deserialization, pickle, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    PickleJar restores session state by feeding base64 client input
+    straight into pickle.loads, which happily executes code hidden in
+    the byte stream. You will craft a pickle whose reduce method calls
+    back into the interpreter, make the service read its own flag file
+    during restore, and collect the flag from the restored-state echo.
+  objectives:
+    - 'Explain why pickle data is executable, not just data.'
+    - 'Craft a payload whose __reduce__ runs code inside the service.'
+    - 'Capture the per-session flag echoed back from the restore call.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Deserialization stays inside the lab container; the payload only reads the room flag file.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: restore-malicious-session
+      title: 'Restore a session that reads the flag file'
+      prompt: >-
+        POST a base64-encoded pickle to /load whose __reduce__ makes the
+        service evaluate an expression that reads /flag.txt. The
+        restored-state page prints whatever the pickle evaluated to.
+        Submit the FLAG value it shows.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'A pickle can carry instructions, not just values. The __reduce__ method of a pickled object decides which callable runs when the stream is loaded.'
+        - cost: 10
+          text: "Define a class whose __reduce__ returns the callable eval paired with the expression open('/flag.txt').read(). Pickle an instance, base64-encode the bytes, and the loader evaluates the expression for you."
+        - cost: 25
+          text: 'In the solver: class Exploit: def __reduce__(self): return (eval, ("open(''/flag.txt'').read()",)). POST base64.b64encode(pickle.dumps(Exploit())) to /load and read the flag from the response.'
+      solution: |
+        1. Confirm the endpoint restores ordinary pickles: pickle a dict,
+           base64 it, POST the bytes to /load, and read the restored
+           state line.
+        2. Craft the payload: a class whose __reduce__ returns the tuple
+           (eval, ("open('/flag.txt').read()",)). During unpickling the
+           loader calls eval with that expression and the file contents
+           become the restored value.
+        3. POST base64.b64encode(pickle.dumps(Exploit())) to /load. The
+           restored-state page echoes the flag file's contents. Submit
+           the FLAG value.
+      validator:
+        type: per_session_flag

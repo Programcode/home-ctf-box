@@ -1,0 +1,68 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: idor-invoices
+  title: 'IDOR Invoices'
+  version: 1.0.0
+  difficulty: beginner
+  points: 125
+  estimated_minutes: 15
+  tags: [idor, authz, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Ledgerly is a small invoicing tool that serves any record the URL
+    names, even invoices belonging to other customers. Signed in as one
+    employee, you will read the identifier pattern from your own bills,
+    step to the next number, and find a stranger's invoice printing an
+    internal release code it should never show you.
+  objectives:
+    - 'Map the invoice identifier pattern from links on your own dashboard.'
+    - 'Request an invoice outside your account by changing the URL.'
+    - "Capture the per-session flag printed on another customer's invoice."
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Static in-memory dataset; no real customer data leaves or enters the container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: invoice-access
+      title: 'Read an invoice you do not own'
+      prompt: >-
+        Your dashboard lists three invoices. The URL pattern behind those
+        links also serves records the app never linked for you. Request
+        the next invoice number after your highest one, read the internal
+        release code on the bill that comes back, and submit the FLAG
+        value.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'Hover the dashboard links and note how each invoice URL is built from its record number.'
+        - cost: 10
+          text: 'The handler loads whatever /invoice/<number> names and never compares the record owner to the signed-in user.'
+        - cost: 25
+          text: 'GET http://target:8000/invoice/1044. That page belongs to another customer and prints FLAG{...} in its line items.'
+      solution: |
+        1. Open http://target:8000 and note your three invoices link to
+           /invoice/1041, /invoice/1042, and /invoice/1043.
+        2. The invoice route looks up INVOICES.get(invoice_id) with no
+           ownership check, so any existing number renders.
+        3. GET /invoice/1044. The response shows Bob Farago's pending
+           catering invoice, whose line items include the internal
+           release code.
+        4. Copy the FLAG value printed on that invoice and submit it.
+      validator:
+        type: per_session_flag

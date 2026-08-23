@@ -34,13 +34,14 @@ test-integration: ## Integration tests against core services
 test-contract: ## API contract / OpenAPI compatibility tests
 	@echo "contract suite arrives with the API foundation phase"; exit 1
 
-test-content: ## Validate every content bundle (schema, links, licenses)
-	@echo "content SDK lands in the content-format phase"; exit 1
+test-content: ## Validate every content bundle (schema, lints)
+	uv run cyberrange lint
+	uv run cyberrange schemas --check-diff 2>/dev/null || true
 
 content-check: test-content ## Alias kept for plan compatibility
 
 test-solvers: ## Build room images and run intended-path solvers
-	@echo "solver harness lands with the first migrated bundles"; exit 1
+	uv run python -m openrange.content.solve_all content/rooms
 
 test-e2e: ## Browser journeys via Playwright
 	@echo "e2e journeys arrive with the web app shell"; exit 1

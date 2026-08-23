@@ -1,0 +1,67 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: open-closet
+  title: 'Open Closet'
+  version: 1.0.0
+  difficulty: beginner
+  points: 50
+  estimated_minutes: 15
+  tags: [info-disclosure, web, recon]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Nimbus CRM keeps its nightly database dumps on an ops host where the
+    /backups/ directory lists everything to anyone who asks. You will
+    browse the unauthenticated index, pick the freshest dump from the
+    file names, and read the vault secret the SQL export embedded in
+    plain text.
+  objectives:
+    - 'Recognize sensitive files exposed by an unauthenticated directory listing.'
+    - 'Judge which backup artifact is worth reading from its name and age.'
+    - 'Capture the per-session flag embedded in the SQL dump.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask app; reads stay inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: closet-dump
+      title: 'Read the dump the closet never protected'
+      prompt: >-
+        The ops host serves a directory index of nightly backups with no
+        sign-in and no index file hiding it. Find the most recent SQL
+        dump, read it, and submit the FLAG value stored in the vault
+        table.
+      points: 50
+      hints:
+        - cost: 0
+          text: 'The home page points at /backups/. A web server lists a directory when no index file guards it.'
+        - cost: 10
+          text: 'Open /backups/ and compare the file names. The newest SQL dump is the one worth reading first.'
+        - cost: 25
+          text: 'GET /backups/db_dump_2026.sql and submit the FLAG{...} string inside its INSERT statement.'
+      solution: |
+        1. Open http://target:8000 and follow the pointer to /backups/.
+        2. The listing shows db_dump_2026.sql, db_dump_2025.sql, and
+           notes.md. The 2026 dump is the current export; the 2025 one
+           is stale and notes.md holds no secrets.
+        3. Fetch GET /backups/db_dump_2026.sql. The body is a SQL dump
+           whose INSERT INTO vault statement contains the room flag in
+           plain text.
+        4. Submit the FLAG{...} string.
+      validator:
+        type: per_session_flag

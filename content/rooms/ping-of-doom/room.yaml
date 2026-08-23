@@ -1,0 +1,69 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: ping-of-doom
+  title: 'Ping of Doom'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 25
+  tags: [command-injection, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    NetCheck 3000 is a diagnostics page that pings whatever host an
+    employee types in. Behind the form the service builds a shell
+    command by string formatting, so metacharacters in the host field
+    reach the shell untouched. You will prove the injection, run your
+    own command through it, and read the environment variable that
+    holds the room flag.
+  objectives:
+    - 'Recognize shell command construction from user input in a web form.'
+    - 'Inject a second command with shell metacharacters and read its output.'
+    - 'Capture the per-session flag exposed through the injected command.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Shell injection stays inside one disposable container with dropped capabilities.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: command-injection
+      title: 'Make the diagnostics page run your command'
+      prompt: >-
+        Submit the NetCheck form with a host value that smuggles a
+        second shell command past the ping invocation. Use it to print
+        the ROOM_FLAG environment variable of the service and submit
+        the FLAG value from the output.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'Ping a normal host first and read the raw output block. The page shows exactly what the command produced.'
+        - cost: 10
+          text: 'The host value is pasted into a shell command string, so a semicolon starts a brand new command after the ping.'
+        - cost: 25
+          text: 'POST host=127.0.0.1; printenv ROOM_FLAG to /ping. The response block contains FLAG{...}.'
+      solution: |
+        1. Open http://target:8000 and ping 127.0.0.1 to see the output
+           format the page renders.
+        2. The handler builds f"ping -c 2 -W 1 {host}" and runs it with
+           shell=True, so any metacharacters in host are interpreted by
+           the shell.
+        3. POST to /ping with host=`127.0.0.1; printenv ROOM_FLAG`.
+           The shell runs ping, then runs printenv, and both outputs
+           land in the response block.
+        4. Read the FLAG value printed by printenv and submit it.
+      validator:
+        type: per_session_flag
