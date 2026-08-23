@@ -13,6 +13,7 @@ members = [
     "openrange",
     "openrange-api",
     "openrange-config",
+    "openrange-runner",
 ]
 
 [[package]]
@@ -1236,6 +1237,35 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
+
+[[package]]
+name = "openrange-runner"
+version = "0.1.0"
+source = { editable = "apps/lab-runner" }
+dependencies = [
+    { name = "docker" },
+    { name = "fastapi" },
+    { name = "openrange-config" },
+    { name = "pydantic" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "docker", specifier = ">=7.1" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "openrange-config", editable = "packages/config" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.34" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.3" }]
 
 [[package]]
 name = "packaging"

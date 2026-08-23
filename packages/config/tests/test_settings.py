@@ -8,7 +8,8 @@ def test_dev_mode_fills_safe_defaults() -> None:
     assert s.edition == "community"
 
 
-def test_production_rejects_missing_runner_token() -> None:
+def test_production_rejects_missing_runner_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENRANGE_RUNNER_API_TOKEN", raising=False)
     with pytest.raises(ConfigError, match="runner_api_token"):
         Settings(
             env="production",

@@ -1,0 +1,22 @@
+# Lab runner agent: the only component allowed to talk to Docker.
+# Start with: docker compose --profile runner up -d
+name: openrange
+
+services:
+  lab-runner:
+    image: python:3.12-slim
+    profiles: ['runner']
+    command:
+      - sh
+      - -c
+      - pip install --no-cache-dir /workspace/packages/config /workspace/apps/lab-runner && exec openrange-runner
+    environment:
+      OPENRANGE_ENV: dev
+      OPENRANGE_RUNNER_HOST: 0.0.0.0
+      OPENRANGE_RUNNER_API_TOKEN: ${OPENRANGE_RUNNER_API_TOKEN:-dev-only-runner-token}
+    ports:
+      - '127.0.0.1:8771:8771'
+    volumes:
+      - ../..:/workspace:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped

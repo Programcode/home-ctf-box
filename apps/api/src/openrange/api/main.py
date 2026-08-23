@@ -13,6 +13,7 @@ from openrange.api.auth.webauthn_routes import router as webauthn_router
 from openrange.api.db import dispose_engine, init_engine
 from openrange.api.errors import register_error_handlers
 from openrange.api.health import router as health_router
+from openrange.api.labs.routes import router as labs_router
 from openrange.api.middleware import RateLimitMiddleware, RequestContextMiddleware
 from openrange.api.setup.routes import router as setup_router
 
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(auth_router)
     app.include_router(auth_me_router)
+    app.include_router(labs_router)
     app.include_router(webauthn_router)
     app.include_router(oidc_router)
     app.include_router(setup_router)
