@@ -45,3 +45,7 @@ backups/
 
 # Solver pycache from harness runs
 content/rooms/*/solver/__pycache__/
+
+# Playwright artifacts
+test-results/
+playwright-report/

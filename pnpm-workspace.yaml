@@ -1,3 +1,11 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# esbuild needs a postinstall to place its platform binary.
+onlyBuiltDependencies:
+  - esbuild
+
+allowBuilds:
+  esbuild: true
+  sharp: true
