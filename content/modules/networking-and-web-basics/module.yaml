@@ -1,0 +1,285 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: networking-and-web-basics
+  title: 'Networking and web basics'
+  version: 0.1.0
+  difficulty: beginner
+  points: 130
+  estimated_minutes: 60
+  tags:
+    - networking-basics
+    - dns
+    - http
+    - curl
+spec:
+  track: web-foundations
+  summary: >-
+    Every attack travels over a network, so every tester needs a working
+    mental model of how data finds its way. This module walks a request from
+    your machine to a target and back: addresses and routes, name resolution,
+    the shape of HTTP messages, and the URLs, parameters, and cookies that
+    carry application state.
+  objectives:
+    - Trace how a packet reaches another host using addresses, routes, and ARP.
+    - Resolve names to addresses with getent and dig and explain which server answered.
+    - Break an HTTP request and response into method, path, headers, status, and body.
+    - Identify the parts of a URL and predict how query strings change server behavior.
+    - Explain what cookies do and manage them deliberately with curl.
+    - Produce a written map of a simple service from observation alone.
+  sections:
+    - id: how-packets-find-their-way
+      title: 'How packets find their way'
+      blocks:
+        - type: prose
+          markdown: |
+            When you send data to another machine, the operating system wraps it
+            in packets and hands each one an address. IP addresses name the
+            destination host. A routing table decides where each packet goes
+            next, usually either straight to a local neighbor or up to your
+            default gateway. On a local network, Address Resolution Protocol
+            then maps the next hop's IP address to a hardware MAC address so the
+            frame can physically leave.
+
+            You can watch all three layers of this decision with one command.
+            Reading `ip route` output is a skill worth ten minutes of practice,
+            because in lab ranges, corporate networks, and cloud environments
+            alike, wrong assumptions about routes explain a huge share of
+            unreachable-target confusion.
+        - type: code
+          language: bash
+          code: |
+            $ ip route show
+            default via 10.10.10.1 dev eth0 proto dhcp metric 100
+            10.10.10.0/24 dev eth0 proto kernel scope link src 10.10.10.42
+
+            $ ip neigh show
+            10.10.10.1 dev eth0 lladdr 02:42:0a:0a:0a:01 REACHABLE
+        - type: prose
+          markdown: |
+            Read those lines out loud and they almost explain themselves. The
+            first says: for destinations I have no better rule, send packets to
+            10.10.10.1 through device eth0, and my own address there is
+            10.10.10.42. The second line covers the directly connected subnet.
+            The neighbor table entry confirms the gateway answered an ARP lookup
+            recently and its hardware address is known. If a target is on
+            10.10.10.0/24, traffic goes direct; anything else rides the default.
+        - type: callout
+          tone: tip
+          markdown: |
+            When a target seems down, check the route before blaming the service.
+            `ip route get TARGET_IP` prints exactly which rule applies to that
+            destination, which turns guessing into reading.
+    - id: dns-names-to-addresses
+      title: 'DNS: names to addresses'
+      blocks:
+        - type: prose
+          markdown: |
+            Humans remember names; networks need numbers. The Domain Name System
+            bridges the two by storing records that map names like target.local
+            to addresses like 10.10.10.5. Resolution happens in steps: your
+            system first checks local caches and its hosts file, then asks the
+            configured resolver, which may recurse through other servers until
+            someone returns an answer.
+
+            Two query tools cover most needs. `getent hosts` uses the same
+            resolution path applications take, including the hosts file, so it
+            tells you what this machine would actually connect to. `dig` speaks
+            to a DNS server directly and shows the full response, which makes it
+            the better tool when you want to see records rather than outcomes.
+        - type: code
+          language: bash
+          code: |
+            $ getent hosts target
+            10.10.10.5      target
+
+            $ dig +short target.lab.internal
+            10.10.10.5
+
+            $ grep target /etc/hosts
+            10.10.10.5   target
+        - type: callout
+          tone: warning
+          markdown: |
+            Mismatched answers between tools usually mean the hosts file is
+            shadowing DNS, or a stale cache is lying. In labs, a leftover
+            `/etc/hosts` entry pointing at yesterday's container is the classic
+            cause of connecting to nothing while everything looks fine.
+    - id: http-request-response-anatomy
+      title: 'HTTP requests and responses up close'
+      blocks:
+        - type: prose
+          markdown: |
+            The web speaks HTTP: a plain-text protocol where a client sends a
+            request message and a server answers with a response. A request has
+            a method such as GET or POST, a path, headers describing the client
+            and its intentions, and sometimes a body carrying submitted data. A
+            response has a status code classifying the outcome, headers
+            describing the payload, and usually a body.
+
+            `curl` with the `-i` flag prints both sides of the conversation,
+            which makes it the single most useful teaching tool in web security.
+            Run it against any room target and read the message like text,
+            because that is exactly what it is.
+        - type: code
+          language: bash
+          code: |
+            $ curl -sS -i http://target:8000/
+            HTTP/1.1 200 OK
+            Server: Werkzeug/3.0.1 Python/3.11.4
+            Content-Type: text/html; charset=utf-8
+            Content-Length: 512
+
+            <html>
+              <head><title>Nimbus Portal</title></head>
+              <body><h1>Sign in</h1></body>
+            </html>
+        - type: prose
+          markdown: |
+            Status codes come in families worth memorizing now. Codes starting
+            with 2 mean success, 3 mean redirection, 4 mean the client did
+            something wrong, and 5 mean the server stumbled. Error pages deserve
+            special attention in security work because verbose ones leak
+            internals: framework versions, stack traces, fragments of queries.
+            In the busted-login room at the end of this path, the difference
+            between one error string and another is precisely the signal you
+            will use.
+    - id: urls-params-and-cookies
+      title: 'URLs, parameters, and cookies'
+      blocks:
+        - type: prose
+          markdown: |
+            A URL packs several decisions into one line. Take
+            `http://target:8000/login?next=/admin`. The scheme says use HTTP.
+            The host is target, port 8000. The path /login selects a handler.
+            Everything after the question mark is a query string of key-value
+            pairs, here asking the login page to redirect to /admin afterwards.
+            Servers routinely turn parameters into database lookups, file reads,
+            or redirects, which is why parameter tampering fills half of the
+            rooms on this platform.
+
+            Cookies carry state across requests. The server issues one with a
+            Set-Cookie response header, your client stores it, and later
+            requests present it back automatically. Sessions live in cookies in
+            practically every web app, so testers must control them
+            deliberately instead of letting tools shuffle them invisibly.
+        - type: code
+          language: bash
+          code: |
+            $ curl -sS -i -c jar.txt http://target:8000/login | grep -i set-cookie
+            Set-Cookie: session=eyJsb2dpbiI6IGZhbHNlfQ; Path=/
+
+            $ curl -sS -b jar.txt -d "user=demo&pass=demo" \
+                http://target:8000/login -o /dev/null -w "%{http_code}\n"
+            302
+        - type: callout
+          tone: info
+          markdown: >
+            `-c jar.txt` saves cookies, `-b jar.txt` sends them back. Keeping a
+            named jar per session lets you hold two identities side by side,
+            which becomes essential the moment a room gives you a low-privilege
+            account to attack from.
+    - id: quiz-the-round-trip
+      title: 'Quiz the round trip'
+      blocks:
+        - type: prose
+          markdown: |
+            Check the model in your head against these questions before moving
+            on. Each one maps to a section above, and honest misses are more
+            useful than lucky guesses.
+        - type: quiz
+          question_id: net-route-decision
+          question: 'Your machine is 10.10.10.42/24. You connect to 10.10.10.5. What does the routing table do?'
+          options:
+            - id: a
+              text: 'Sends the packet to the default gateway 10.10.10.1'
+            - id: b
+              text: 'Delivers directly on the local subnet via eth0'
+            - id: c
+              text: 'Drops the packet because no route matches'
+            - id: d
+              text: 'Tunnels it through loopback first'
+          answer_ids: [b]
+          explanation: >
+            The 10.10.10.0/24 link route matches the destination exactly, so
+            delivery is direct on eth0 after an ARP lookup. The default gateway
+            only handles destinations no other rule claims.
+        - type: quiz
+          question_id: net-dns-shadowing
+          question: 'getent resolves app.local to 10.10.10.9 but dig says 10.10.10.7. Most likely cause?'
+          options:
+            - id: a
+              text: 'The DNS server is offline'
+            - id: b
+              text: 'An /etc/hosts entry shadows the DNS answer'
+            - id: c
+              text: 'getent cannot resolve .local names'
+            - id: d
+              text: 'IPv6 is disabled'
+          answer_ids: [b]
+          explanation: >
+            getent follows the full Name Service Switch order including the
+            hosts file, while dig bypasses it and asks DNS directly. Divergent
+            answers point at a hosts-file override long before exotic causes.
+        - type: quiz
+          question_id: net-status-families
+          question: 'A response arrives with status 302. What happened?'
+          options:
+            - id: a
+              text: 'The request succeeded normally'
+            - id: b
+              text: 'The client sent a malformed request'
+            - id: c
+              text: 'The server redirected the client elsewhere'
+            - id: d
+              text: 'The server crashed handling the request'
+          answer_ids: [c]
+          explanation: >
+            3xx codes are redirects. After a successful login many apps answer
+            302 with a Location header, which is why watching status codes
+            during authentication testing reveals far more than page bodies.
+    - id: reflect-and-map-a-service
+      title: 'Reflect: map a small service'
+      blocks:
+        - type: prose
+          markdown: |
+            Knowledge settles when you produce something with it. Point your
+            tools at any simple web service available to you, ideally a room
+            target, and write a five-line map in your notebook: address and
+            port, technologies visible in headers, interesting paths you found,
+            cookies issued, and one question the service left you with. Use only
+            commands from this module. The discipline of mapping before
+            attacking is the habit that separates professionals from button
+            mashers.
+
+            Then answer in one sentence each: which route would a packet to
+            10.20.0.1 follow from your lab machine, and how could you confirm
+            it without sending traffic to that address? Writing the answer
+            forces the routing table back into memory where it belongs.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep your map under six lines. Short maps force choices about what
+            matters, and knowing what matters is the actual skill. You will
+            reuse this exact exercise in the busted-login capstone, where the
+            map you write is the plan you attack along.
+  cheat_sheet: |
+    # Networking and web basics
+
+    Routing and neighbors:
+        ip route show            # routing table
+        ip route get ADDR        # which rule covers ADDR
+        ip neigh show            # ARP cache
+
+    Name resolution:
+        getent hosts NAME        # what apps will use
+        dig +short NAME          # ask DNS directly
+        cat /etc/hosts           # local overrides
+
+    HTTP with curl:
+        curl -sS -i URL                  # show response head+body
+        curl -c jar.txt URL              # save cookies
+        curl -b jar.txt -d "k=v" URL     # POST with cookies
+        curl -o /dev/null -w "%{http_code}\n" URL
+
+    Status families: 2xx ok, 3xx redirect, 4xx client error, 5xx server error.

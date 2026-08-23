@@ -1,0 +1,32 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: start-here
+  title: 'Start Here: Cyber Foundations'
+  version: 0.1.0
+  difficulty: beginner
+  points: 400
+  estimated_minutes: 240
+  tags:
+    - foundations
+    - ethics
+    - networking-basics
+    - linux-basics
+    - windows-basics
+    - web-basics
+    - terminal-skills
+spec:
+  track: web-foundations
+  summary: >-
+    The on-ramp for absolute beginners. You learn the rules of safe practice,
+    how networks and the web actually move data, and enough Linux, Windows,
+    and terminal skill to work in a lab without breaking it. Every section
+    builds an evidence habit you will keep for the rest of your career. The
+    path ends in the busted-login room, where you capture a real flag using
+    nothing but what you learned here.
+  modules:
+    - slug: ethics-and-scope
+    - slug: networking-and-web-basics
+    - slug: terminals-and-operating-systems
+  capstones:
+    - busted-login

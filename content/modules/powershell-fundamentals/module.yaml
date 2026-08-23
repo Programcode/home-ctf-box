@@ -1,0 +1,341 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: powershell-fundamentals
+  title: 'PowerShell fundamentals'
+  version: 0.1.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - powershell
+    - pipeline
+    - windows
+spec:
+  track: windows-ad
+  summary: >-
+    PowerShell is the native language of Windows administration, and both
+    defenders and testers speak it fluently. This module teaches cmdlet naming,
+    object pipelines, variables and operators, safe script execution with
+    WhatIf and execution policy, then assembles a small inventory script that
+    ties every concept together.
+  objectives:
+    - Predict cmdlet names from verb and noun conventions and find help fast.
+    - Filter, sort, and shape objects through pipelines instead of parsing text.
+    - Use variables, arrays, and comparison operators in expressions.
+    - Run scripts safely using execution policy awareness and -WhatIf previews.
+    - Build a working inventory script combining loops and object output.
+    - Answer checkpoint questions about objects, safety switches, and help.
+  sections:
+    - id: verbs-nouns-and-help
+      title: 'Verbs, nouns, and help everywhere'
+      blocks:
+        - type: prose
+          markdown: |
+            PowerShell names commands so you can guess them. Every cmdlet is
+            Verb-Noun: Get-Process retrieves processes, Stop-Service stops a
+            service, Set-ExecutionPolicy changes a setting. Verbs come from an
+            approved list you can list yourself with Get-Verb. Once you know
+            roughly twenty verbs and can name a Windows concept, you can often
+            invent the correct command before ever looking it up.
+
+            Guessing gets verified instantly. `Get-Help Get-Process -Examples`
+            shows worked examples for any cmdlet, `Get-Command *firewall*`
+            finds commands matching a fragment, and `Get-Member` reveals what
+            an object can do once you hold one. Tab completion works on
+            parameter names too, which turns exploration into conversation
+            rather than memorization.
+
+            Aliases deserve one honest paragraph before you meet them in the
+            wild. PowerShell accepts familiar shortcuts like ls, cat, and ps,
+            but they map onto cmdlets whose parameters differ from their Unix
+            cousins. Treat aliases as reading knowledge for other people's
+            scripts and write your own work with full cmdlet names; scripts
+            spelled out survive sharing, while alias-heavy ones confuse anyone
+            running them on a machine with different profile customizations.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-Verb | Where-Object Group -eq 'Security' | Select-Object -First 4
+
+            Verb Group
+            ---- -----
+            Block Security
+            Grant Security
+            Protect Security
+            Revoke Security
+
+            PS> Get-Command *service* -CommandType Cmdlet | Measure-Object | Select-Object Count
+
+            Count
+            -----
+               12
+        - type: callout
+          tone: tip
+          markdown: |
+            Update built-in help once per machine with
+            `Update-Help -ErrorAction SilentlyContinue`. Offline machines accept
+            downloaded files via Save-Help from any connected sibling.
+    - id: pipelines-move-objects
+      title: 'Pipelines move objects, not text'
+      blocks:
+        - type: prose
+          markdown: |
+            Unix pipes carry text; PowerShell pipes carry live .NET objects
+            with properties intact. That difference changes everything
+            downstream. Instead of grep columns by position and pray, you ask
+            objects questions: `Get-Process | Where-Object CPU -gt 100` keeps
+            only hungry processes, `Sort-Object WS -Descending` ranks by memory,
+            and `Select-Object -First 5 Name,CPU` shapes tidy reports.
+
+            Because properties survive, chains stay readable at any length.
+            The same three-stage pattern, get something, filter it, format it,
+            covers most administrative one-liners you will ever need. When a
+            property surprises you, pipe through Get-Member or Format-List *
+            to see every field the object actually carries.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-Process |
+              Where-Object CPU -gt 10 |
+              Sort-Object CPU -Descending |
+              Select-Object -First 3 Name, CPU
+
+            Name     CPU
+            ----     ---
+            chrome   182.44
+            code     121.02
+            explorer  14.55
+        - type: quiz
+          question_id: ps-object-pipeline
+          question: 'Why does Get-Process | Where-Object WS -gt 500MB work without parsing text?'
+          options:
+            - id: a
+              text: 'PowerShell converts all output to CSV internally'
+            - id: b
+              text: 'Cmdlets emit structured objects whose numeric properties compare directly'
+            - id: c
+              text: 'Where-Object reads process memory directly'
+            - id: d
+              text: 'The pipeline compresses data first'
+          answer_ids: [b]
+          explanation: >
+            Objects arrive with typed properties such as WS already numeric.
+            Comparisons act on values, not characters, so units like MB apply
+            cleanly and no column positions are involved.
+    - id: variables-types-and-tests
+      title: 'Variables, types, and tests'
+      blocks:
+        - type: prose
+          markdown: |
+            Variables start with a dollar sign and need no type declaration:
+            `$name = 'lab'`, `$procs = Get-Process`. Strings in double quotes
+            interpolate variables while single quotes stay literal, mirroring
+            bash exactly. Arrays form with commas and index from zero;
+            `$ports = 22,80,443` then `$ports[0]` gives 22. Splatting many
+            parameters into a hashtable comes later; simple assignment covers
+            this module.
+
+            Comparisons read like words and return booleans: `-eq`, `-ne`,
+            `-gt`, `-lt`, plus `-like` for wildcards and `-match` for regex.
+            Case sensitivity hides behind variants such as `-ceq` when you ever
+            need it, since default comparisons ignore case. Logical combine
+            uses `-and` and `-or`. These tests drive both Where-Object filters
+            and if statements, so learning them once pays twice.
+
+            Numbers carry units natively on many properties, which is easy to
+            underestimate. A process working set compares directly against
+            500MB as a real value, dates subtract into TimeSpan objects, and
+            file sizes divide by 1MB to become readable integers. That typed
+            richness is the quiet superpower behind the object pipeline: no
+            awk column arithmetic, just properties behaving like values.
+        - type: code
+          language: powershell
+          code: |
+            PS> $names = @('WEB01','DB01','CA01')
+            PS> $names.Count ; $names[1]
+            3
+            DB01
+
+            PS> if ($env:COMPUTERNAME -like 'WEB*') { 'web tier' } else { 'other' }
+            web tier
+        - type: callout
+          tone: info
+          markdown: |
+            Automatic variables are worth ten minutes: $PSVersionTable, $HOME,
+            $LASTEXITCODE, and $env: mapping the environment block. They appear
+            constantly in scripts written by others.
+    - id: run-scripts-safely
+      title: 'Run scripts safely'
+      blocks:
+        - type: prose
+          markdown: |
+            Two safety layers stand between you and accidental damage, and both
+            deserve respect rather than annoyance. Execution policy controls
+            whether scripts run at all: Restricted blocks everything, RemoteSigned
+            allows local scripts but requires signatures on downloaded ones, and
+            Unrestricted warns per file. Read yours with Get-ExecutionPolicy and
+            change scope deliberately, never by disabling globally to make one
+            file happy.
+
+            The second layer lives inside dangerous cmdlets themselves. Commands
+            that change state commonly support `-WhatIf`, which prints what
+            would happen without doing it, and `-Confirm` which asks before each
+            action. Building the habit of previewing destructive operations with
+            WhatIf first costs seconds now and prevents career stories later.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-ExecutionPolicy
+            RemoteSigned
+
+            PS> Remove-Item C:\Temp\oldlogs -Recurse -WhatIf
+            What if: Performing the operation "Remove Directory" on target
+            "C:\Temp\oldlogs".
+        - type: quiz
+          question_id: ps-exec-policy-meaning
+          question: 'What does execution policy actually govern?'
+          options:
+            - id: a
+              text: 'Which users may log on remotely'
+            - id: b
+              text: 'Whether and which .ps1 scripts are allowed to run'
+            - id: c
+              text: 'Firewall rules for PowerShell traffic'
+            - id: d
+              text: 'Antivirus scanning depth'
+          answer_ids: [b]
+          explanation: >
+            It is a script gate, not a security boundary; determined users can
+            bypass it, which is why Microsoft documents it as safety training
+            wheels rather than defense against adversaries.
+    - id: build-an-inventory-script
+      title: 'Build an inventory script'
+      blocks:
+        - type: prose
+          markdown: |
+            Time to assemble. The script below gathers the four facts every
+            Windows triage starts with: machine identity, operating system
+            version, uptime via LastBootUpTime, and top processes by working
+            set. Notice the shape rather than the specifics: collect objects,
+            wrap them in one custom object, emit it. Emitting objects keeps
+            your script composable, letting future you filter or export its
+            output without touching the original code.
+
+            Save it as Get-LabInventory.ps1, run it under your execution
+            policy, then extend it once with a disk free check of your own.
+            Extension after comprehension beats copying long scripts blind,
+            and the failure you debug teaches more than the ten lines that ran
+            first try.
+
+            The calculated property in that Select-Object line, @{n='WS_MB';
+            e={...}}, is worth a second look. It renames and reshapes data at
+            output time without touching source objects, a pattern you will
+            reuse whenever someone wants a report in specific units or column
+            names. Formatting belongs at the edge of a pipeline, never in the
+            middle where filtering still has to happen.
+        - type: code
+          language: powershell
+          code: |
+            $os   = Get-CimInstance Win32_OperatingSystem
+            $top  = Get-Process | Sort-Object WS -Descending |
+                    Select-Object -First 3 Name, @{n='WS_MB';e={[int]($_.WS/1MB)}}
+            [PSCustomObject]@{
+              Hostname = $env:COMPUTERNAME
+              Version  = $os.Caption + ' ' + $os.Version
+              UptimeH  = [int]((Get-Date) - $os.LastBootUpTime).TotalHours
+              TopMem   = $top
+            }
+
+            PS> .\Get-LabInventory.ps1
+            Hostname : DESKTOP-7X2Q1
+            Version  : Windows 11 Pro 10.0.22631
+            UptimeH  : 37
+            TopMem   : {@{Name=chrome; WS_MB=120}, ...}
+        - type: callout
+          tone: warning
+          markdown: >
+            Scripts downloaded from the internet carry the Zone.Identifier
+            mark and will refuse to run under RemoteSigned. Unblock-File after
+            reading the code, never before.
+    - id: checkpoint-powershell-core
+      title: 'Checkpoint: PowerShell core'
+      blocks:
+        - type: prose
+          markdown: |
+            Everything later in this path, registry walks, service audits, event
+            log hunts, remote sessions, assumes these fundamentals feel boring.
+            Boring means fluent. Check yourself below; any wobble sends you back
+            to the specific section rather than forward into deeper water.
+        - type: quiz
+          question_id: chk-ps-get-member-use
+          question: 'You hold a mystery object in $x. What reveals its capabilities fastest?'
+          options:
+            - id: a
+              text: '$x | Get-Member'
+            - id: b
+              text: 'echo $x'
+            - id: c
+              text: 'Restart-Computer'
+            - id: d
+              text: 'Get-Date $x'
+          answer_ids: [a]
+          explanation: >
+            Get-Member lists the object's type plus every property and method,
+            which turns unknown objects into documented ones in one line.
+        - type: quiz
+          question_id: chk-ps-whatif-value
+          question: 'Before Remove-Item on a folder tree, why add -WhatIf?'
+          options:
+            - id: a
+              text: 'It speeds up deletion by skipping checks'
+            - id: b
+              text: 'It previews exactly what would be removed without deleting anything'
+            - id: c
+              text: 'It logs the action to the event log'
+            - id: d
+              text: 'It makes the command case-sensitive'
+          answer_ids: [b]
+          explanation: >
+            WhatIf performs a dry run printing intended targets. Reading that
+            preview catches wrong paths and overbroad wildcards before damage,
+            not after.
+        - type: quiz
+          question_id: chk-ps-quote-rule
+          question: "$msg = 'home is $HOME'. What does $msg contain?"
+          options:
+            - id: a
+              text: "home is C:\\Users\\lab"
+            - id: b
+              text: 'home is $HOME literally'
+            - id: c
+              text: 'An empty string'
+            - id: d
+              text: 'A syntax error at save time'
+          answer_ids: [b]
+          explanation: >
+            Single quotes suppress interpolation entirely. Double quotes would
+            expand $HOME. Matching quote behavior to intent avoids a whole
+            class of quiet string bugs.
+  cheat_sheet: |
+    # PowerShell fundamentals
+
+    Discovery:
+        Get-Verb                     # approved verbs
+        Get-Command *noun*           # find cmdlets
+        Get-Help CMDLET -Examples    # tutor
+        $obj | Get-Member            # inspect objects
+
+    Pipeline pattern (get, filter, shape):
+        Get-Process | Where-Object CPU -gt 100 |
+        Sort-Object CPU -Desc | Select-Object -First 5 Name,CPU
+
+    Language:
+        $v = value                   # double quotes interpolate
+        @('a','b') ; $arr[0]         # arrays, zero index
+        -eq -ne -gt -lt -like -match # tests, default case-insensitive
+
+    Safety:
+        Get-ExecutionPolicy          # Restricted/RemoteSigned/...
+        Dangerous-Cmdlet -WhatIf     # dry run always first
+        Unblock-File FILE.ps1        # after reading code

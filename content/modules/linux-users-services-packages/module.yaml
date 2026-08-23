@@ -1,0 +1,333 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: linux-users-services-packages
+  title: 'Linux users, processes, services, and packages'
+  version: 0.1.0
+  difficulty: easy
+  points: 160
+  estimated_minutes: 70
+  tags:
+    - users
+    - sudo
+    - processes
+    - systemd
+    - apt
+spec:
+  track: linux-networking
+  summary: >-
+    Under every Linux workload sit accounts, processes, service units, and
+    packages. This module teaches you to inspect all four layers, elevate
+    privileges responsibly with sudo, control process lifecycles with signals,
+    manage services through systemd, and install or audit software with apt.
+    These are the everyday verbs of operating and defending a Linux box.
+  objectives:
+    - Read account and group records from id, who, and /etc/passwd.
+    - Elevate with sudo safely and explain what sudo -l reveals.
+    - Inspect and signal processes using ps, pgrep, and kill.
+    - Start, stop, enable, and diagnose services with systemctl.
+    - Install and query packages with apt and dpkg.
+    - Answer checkpoint questions covering identity, signals, units, and packages.
+  sections:
+    - id: users-groups-and-identity
+      title: 'Users, groups, and identity'
+      blocks:
+        - type: prose
+          markdown: |
+            Linux tracks people as numbers. Your username maps to a user id,
+            your memberships map to group ids, and the kernel checks those ids
+            against file ownership on every access. The `id` command shows this
+            triple view at once. Human-readable records live in /etc/passwd,
+            one line per account with seven colon-separated fields including
+            home directory and login shell. Group definitions sit in /etc/group.
+
+            Two account flavors matter. Regular accounts start near uid 1000.
+            System accounts, such as www-data for the web server or postgres
+            for the database, use low ids and usually have no valid password
+            and often nologin shells. Services run under these dedicated
+            identities so a compromise of one daemon does not automatically
+            hand over the whole machine. When you later chase privilege
+            escalation paths, spotting which daemons run as which uid becomes
+            central work.
+        - type: code
+          language: bash
+          code: |
+            $ id
+            uid=1000(lab) gid=1000(lab) groups=1000(lab),27(sudo)
+
+            $ grep -E 'lab|www-data' /etc/passwd
+            www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+            lab:x:1000:1000:Lab User,,,:/home/lab:/bin/bash
+
+            $ who
+            lab      pts/0        2026-08-23 11:20 (10.10.10.42)
+        - type: callout
+          tone: info
+          markdown: |
+            The x in the second field is a placeholder; real password hashes
+            live in /etc/shadow, readable only by root. That split exists so
+            world-readable account listings cannot leak crackable hashes.
+    - id: becoming-root-responsibly
+      title: 'Becoming root responsibly'
+      blocks:
+        - type: prose
+          markdown: |
+            Root is uid 0 and answers to nothing; the kernel skips permission
+            checks for it entirely. Modern distributions avoid shared root
+            logins and hand out administrative power per command through sudo.
+            `sudo COMMAND` runs that one command elevated after checking policy.
+            `sudo -i` opens a full root shell when many commands stack up. The
+            policy lives in /etc/sudoers plus drop-in files under
+            /etc/sudoers.d, edited only through visudo because it validates
+            syntax before saving.
+
+            `sudo -l` is the command worth running on every box you legitimately
+            administer. It prints exactly which commands your account may run
+            elevated. In defensive work it tells you how much blast radius your
+            own account carries. In offensive education it is the first
+            privilege escalation checkpoint, since loose entries such as
+            ALL=(ALL) NOPASSWD: some-interpreter are famous stepping stones.
+        - type: code
+          language: bash
+          code: |
+            $ sudo -l
+            Matching Defaults entries for lab:
+                env_reset, mail_badpass
+
+            User lab may run the following commands:
+                (ALL : ALL) /usr/bin/apt, /usr/bin/journalctl
+
+            $ sudo systemctl restart nginx
+        - type: callout
+          tone: warning
+          markdown: |
+            With great elevation comes typed-with-care commands. Read the full
+            line twice before pressing enter whenever sudo prefixes it. There
+            is no undo for rm -rf executed as root in the wrong directory.
+    - id: processes-and-signals
+      title: 'Processes and signals'
+      blocks:
+        - type: prose
+          markdown: |
+            Every running program is a process with an id, an owning uid, a
+            parent, and a state. `ps aux` photographs them all; add a pipe to
+            grep to filter by name. For interactive watching, top or htop sorts
+            the noise by cpu or memory. Each process also belongs to a session
+            attached to a terminal unless it was deliberately detached, which
+            is why closing an ssh window can murder your long job unless you
+            ran it under nohup or tmux.
+
+            Signals are how you talk to processes. SIGTERM, number 15, asks
+            politely and lets programs flush state. SIGKILL, number 9, is the
+            kernel yanking the process off the board with no cleanup. Default
+            kill sends TERM. Use KILL only after TERM fails, because killed
+            processes leave temp files, locks, and half-written databases
+            behind. Find pids without typing ps yourself via pgrep, then pass
+            the result straight into kill.
+        - type: code
+          language: bash
+          code: |
+            $ sleep 500 & echo $!
+            [1] 2345
+            2345
+
+            $ pgrep -f 'sleep 500'
+            2345
+
+            $ kill 2345 ; sleep 0.2 ; jobs
+            [1]+  Terminated              sleep 500
+        - type: quiz
+          question_id: proc-term-vs-kill
+          question: 'Why prefer SIGTERM over SIGKILL?'
+          options:
+            - id: a
+              text: 'TERM works faster in all cases'
+            - id: b
+              text: 'TERM lets the program close files and release locks cleanly'
+            - id: c
+              text: 'KILL requires root while TERM does not'
+            - id: d
+              text: 'TERM restarts the process automatically'
+          answer_ids: [b]
+          explanation: >
+            SIGTERM is a request the program can handle with graceful shutdown.
+            SIGKILL cannot be caught, so nothing gets cleaned up, which risks
+            corrupted files and stale locks that outlive the process.
+    - id: services-under-systemd
+      title: 'Services under systemd'
+      blocks:
+        - type: prose
+          markdown: |
+            Most distributions run services as systemd units. `systemctl status
+            NAME` shows whether a unit runs, since when, and its last log
+            lines. `start`, `stop`, `restart`, and `reload` change runtime
+            state. `enable` and `disable` change what happens at boot, and
+            `enable --now` does both at once, which is the flag combination you
+            want ninety percent of the time.
+
+            When a unit refuses to come up, the answer lives in its logs:
+            `journalctl -u NAME` prints the unit's history and `-u NAME -n 50`
+            limits to the last fifty lines. Reading startup errors from
+            journalctl output resolves most service mysteries faster than any
+            web search, because the service itself explains what config value
+            it disliked or which port someone else already bound.
+
+            Two distinctions round out daily competence. Runtime state and boot
+            state are separate: a running service is not necessarily enabled,
+            and an enabled one may be stopped right now, so always check both
+            before concluding anything about persistence. And `reload` differs
+            from `restart` where units support it, applying configuration
+            changes without dropping active connections, which matters the day
+            you manage something people are actually using.
+        - type: code
+          language: bash
+          code: |
+            $ sudo systemctl enable --now nginx
+            $ systemctl status nginx --no-pager | head -6
+            * nginx.service - A high performance web server
+                 Loaded: loaded (/lib/systemd/system/nginx.service; enabled)
+                 Active: active (running) since Sat 2026-08-23 11:41:03 UTC
+               Main PID: 3122 (nginx)
+
+            $ sudo journalctl -u nginx -n 3 --no-pager
+            Aug 23 11:41:03 web01 systemd[1]: Starting nginx...
+            Aug 23 11:41:03 web01 nginx[3122]: configuration ok
+            Aug 23 11:41:03 web01 systemd[1]: Started nginx.
+    - id: packages-with-apt
+      title: 'Packages with apt'
+      blocks:
+        - type: prose
+          markdown: |
+            Debian-family systems install software through apt, which resolves
+            dependencies from signed repositories. `sudo apt update` refreshes
+            the package index and is safe to run anytime. `apt install PACKAGE`
+            installs, `apt remove` uninstalls while keeping configs, and
+            `apt purge` sweeps those too. `apt upgrade` applies pending security
+            and feature updates across installed software.
+
+            Querying needs no sudo. `apt show PACKAGE` prints version, size,
+            and description before you commit. `dpkg -l | grep PATTERN` lists
+            installed packages matching a pattern, and `dpkg -L PACKAGE` lists
+            every file a package dropped onto disk, which is gold when hunting
+            where a binary or default config landed. Knowing what is installed
+            and at which version is half of vulnerability triage, since most
+            advisories name affected versions explicitly.
+        - type: code
+          language: bash
+          code: |
+            $ apt show jq | head -5
+            Package: jq
+            Version: 1.7-1build1
+            Priority: optional
+            Section: utils
+            Origin: Ubuntu
+
+            $ dpkg -l | grep -c '^ii'
+            512
+        - type: quiz
+          question_id: svc-enable-now
+          question: 'What does systemctl enable --now ssh do?'
+          options:
+            - id: a
+              text: 'Starts ssh once and forgets it'
+            - id: b
+              text: 'Enables ssh at boot and starts it immediately'
+            - id: c
+              text: 'Reloads ssh configuration without downtime'
+            - id: d
+              text: 'Disables and stops ssh'
+          answer_ids: [b]
+          explanation: >
+            enable writes the boot-time symlink, --now performs the equivalent
+            of start in the same breath. Plain enable would wait for a reboot
+            to take effect.
+        - type: quiz
+          question_id: pkg-list-files
+          question: 'Which command lists every file installed by package nginx?'
+          options:
+            - id: a
+              text: 'apt show nginx'
+            - id: b
+              text: 'dpkg -L nginx'
+            - id: c
+              text: 'apt list --installed'
+            - id: d
+              text: 'find / -name nginx'
+          answer_ids: [b]
+          explanation: >
+            dpkg -L walks the package's own file manifest, giving exact paths
+            for binaries, man pages, and default configs without touching the
+            disk beyond reading metadata.
+    - id: checkpoint-system-control
+      title: 'Checkpoint: system control'
+      blocks:
+        - type: prose
+          markdown: |
+            You now hold the four levers of daily Linux operation: identity,
+            elevation, processes, and services plus the packages that supply
+            them. Before the next module turns to logs and scripting, verify
+            the details below. They are the ones that trip operators during
+            real incidents, when precision matters and guessing wastes minutes
+            you do not have.
+        - type: quiz
+          question_id: sys-sudo-l-purpose
+          question: 'Running sudo -l shows that your user may run /usr/bin/vim as any user without password. Why is that significant?'
+          options:
+            - id: a
+              text: 'It means vim is outdated and should be upgraded'
+            - id: b
+              text: 'Programs like vim can spawn shells, so this entry effectively grants full root'
+            - id: c
+              text: 'It restricts editing to /etc/sudoers only'
+            - id: d
+              text: 'It has no security meaning'
+          answer_ids: [b]
+          explanation: >
+            Editors can execute shell commands from inside. Any sudoers entry
+            granting such a program is equivalent to granting root and is a
+            classic finding in both audits and privilege escalation lessons.
+        - type: quiz
+          question_id: sys-unit-not-starting
+          question: 'A custom service fails to start. What do you check first?'
+          options:
+            - id: a
+              text: 'Reboot the machine'
+            - id: b
+              text: "journalctl -u SERVICENAME for the unit's own error output"
+            - id: c
+              text: 'Reinstall the package blind'
+            - id: d
+              text: 'Disable the service permanently'
+          answer_ids: [b]
+          explanation: >
+            Units log their failure reasons: bad config keys, missing files,
+            occupied ports. One journalctl read beats several blind retries
+            and gives you evidence for your notes as well.
+  cheat_sheet: |
+    # Users, processes, services, packages
+
+    Identity:
+        id                          # uid, gid, groups
+        grep USER /etc/passwd       # 7 fields, shell last
+        who                         # logged-in sessions
+
+    Elevation:
+        sudo CMD                    # one elevated command
+        sudo -i                     # root shell
+        sudo -l                     # what MAY I run
+
+    Processes:
+        ps aux | grep NAME          pgrep -f NAME
+        kill PID                    # polite TERM
+        kill -9 PID                 # last resort
+        nohup CMD & or tmux         # survive disconnects
+
+    systemd:
+        systemctl status|start|stop|restart UNIT
+        systemctl enable --now UNIT
+        journalctl -u UNIT -n 50 --no-pager
+
+    Packages:
+        sudo apt update && sudo apt upgrade
+        apt show PKG                dpkg -L PKG
+        dpkg -l | grep PATTERN

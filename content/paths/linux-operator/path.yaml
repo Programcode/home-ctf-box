@@ -1,0 +1,30 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: linux-operator
+  title: 'Linux Operator'
+  version: 0.1.0
+  difficulty: easy
+  points: 500
+  estimated_minutes: 260
+  tags:
+    - linux
+    - shell
+    - permissions
+    - systemd
+    - logs
+    - bash-scripting
+spec:
+  track: linux-networking
+  summary: >-
+    Operate a Linux machine the way an operator does: move confidently in the
+    shell, manage files and permissions, control users, processes, services,
+    and packages, read logs until they make sense, connect the network dots,
+    and wrap repeatable work into small bash scripts. The path closes with
+    the first-shell room, where you turn all of it into your first foothold.
+  modules:
+    - slug: linux-shell-and-files
+    - slug: linux-users-services-packages
+    - slug: linux-logs-networking-scripting
+  capstones:
+    - first-shell

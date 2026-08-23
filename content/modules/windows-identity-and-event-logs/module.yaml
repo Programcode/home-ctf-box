@@ -1,0 +1,327 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: windows-identity-and-event-logs
+  title: 'Windows identity, event logs, and remote administration'
+  version: 0.1.0
+  difficulty: easy
+  points: 160
+  estimated_minutes: 75
+  tags:
+    - identity
+    - event-logs
+    - winrm
+    - powershell
+spec:
+  track: windows-ad
+  summary: >-
+    Who are you on a Windows machine, and what did you do there? This module
+    answers both sides of that question: local accounts, groups, and access
+    tokens up to domain and Active Directory concepts; then the event log
+    channels where Windows records sign-ins and changes; finally the WinRM and
+    PowerShell remoting concepts every operator relies on.
+  objectives:
+    - Inspect your identity with whoami and explain SIDs and access tokens.
+    - Describe domains, domain controllers, Kerberos basics, and privileged groups.
+    - Name the main event log channels and locate high-value event ids.
+    - Hunt failed sign-ins with Get-WinEvent filter queries.
+    - Explain how WinRM remoting works and why it beats ad-hoc tooling.
+    - Pass the path's final checkpoint connecting identity events to log evidence.
+  sections:
+    - id: accounts-sids-and-tokens
+      title: 'Accounts, SIDs, and tokens'
+      blocks:
+        - type: prose
+          markdown: |
+            Windows never trusts names; it trusts Security Identifiers, long
+            unique numbers issued per account and group. Rename any account and
+            its SID stays constant, which is why permissions survive renames
+            and why two machines' local admin accounts carry different SIDs
+            despite sharing the name Administrator. When you sign in, the
+            system builds an access token carrying your SID, your groups'
+            SIDs, and your privileges; every process you start inherits that
+            token, and checks happen against tokens rather than usernames.
+
+            Local accounts live in the machine's SAM database; domain accounts
+            live in Active Directory instead, so one identity follows you to
+            every joined machine. Built-in groups matter more than their size
+            suggests: Administrators grant local control, Remote Desktop Users
+            gate RDP, and later studies add Domain Admins at forest-shaking
+            power. Knowing which groups you belong to is step zero of any
+            legitimate engagement.
+        - type: code
+          language: text
+          code: |
+            C:\> whoami /user
+
+            USER INFORMATION
+            ----------------
+            User Name     SID
+            ============= =============================================
+            desktop-7x\lab S-1-5-21-1004336348-...-1001
+
+            C:\> whoami /groups | findstr /i "admin remote"
+            BUILTIN\Administrators  S-1-5-32-544 Group
+        - type: callout
+          tone: info
+          markdown: |
+            Well-known SIDs ending in 544 mean Administrators and 545 means
+            Users regardless of language or machine, because those prefixes
+            are reserved constants. Reading SIDs fluently pays off across
+            logs, registry hives, and file ACLs alike.
+    - id: domains-dcs-and-kerberos
+      title: 'Domains, DCs, and Kerberos in five ideas'
+      blocks:
+        - type: prose
+          markdown: |
+            Five ideas make Active Directory navigable. One: a domain is a
+            shared security boundary where AD stores every account and group,
+            so identities stop being per-machine. Two: domain controllers,
+            DCs, are servers holding copies of that directory and answering
+            authentication requests; compromise one and the whole domain is
+            in reach, which is why defenders guard them obsessively.
+
+            Three: Kerberos is the default authentication protocol, built on
+            tickets instead of shipping passwords around the network. A client
+            proves itself once to the DC and receives ticket-granting tickets,
+            then service tickets for each resource. Four: membership in
+            powerful groups like Domain Admins multiplies risk nonlinearly,
+            since anyone holding that group touches every joined machine.
+            Five: trust between domains lets identities cross boundaries under
+            explicit agreements, and misconfigured trusts fill real incident
+            reports. Everything beyond these five ideas is detail layered on
+            solid ground.
+        - type: quiz
+          question_id: id-kerberos-ticket-point
+          question: 'What is the core idea behind Kerberos?'
+          options:
+            - id: a
+              text: 'Passwords travel encrypted to every server on each login'
+            - id: b
+              text: 'A trusted DC issues time-limited tickets so passwords never cross the network per service'
+            - id: c
+              text: 'Each workstation keeps its own password database'
+            - id: d
+              text: 'Authentication happens only over TLS port 443'
+          answer_ids: [b]
+          explanation: >
+            Kerberos centralizes proof at the DC through ticket-granting and
+            service tickets. Credentials stay local to the logon exchange,
+            which removes password reuse from per-service handshakes.
+    - id: event-log-channels-that-matter
+      title: 'Event log channels that matter'
+      blocks:
+        - type: prose
+          markdown: |
+            Windows writes structured events into named channels, each visible
+            in Event Viewer or queryable from PowerShell. Three channels cover
+            most work. System records driver, boot, and service lifecycle
+            noise. Application holds program crashes and custom app messages.
+            Security, the investigator's channel, records auditable actions
+            such as sign-ins, but only for categories someone enabled through
+            policy.
+
+            A handful of event ids carry most of the analysis. Security 4624 marks a
+            successful sign-on, 4625 a failed one, 4720 a new account created;
+            System 7045 announces a new service installed, a classic malware
+            persistence breadcrumb; 4720's cousins 4722 through 4740 track
+            enablement and lockouts. Events arrive as typed fields, not prose,
+            so filters become precise queries rather than grep guesses, which
+            is exactly what the next section exploits. Channel choice also
+            matters when you write findings: citing "Security 4625 from source
+            10.10.10.66" lets any reviewer reproduce your query in seconds.
+        - type: code
+          language: text
+          code: |
+            Channel       Content                          Watch-for ids
+            ------------  -------------------------------  --------------
+            Security      sign-ins, account mgmt, policy   4624 4625 4720
+                                                           4672 4732
+            System        services, drivers, reboots       7045 6005 6006
+            Application   app errors + custom logging      provider-specific
+        - type: callout
+          tone: tip
+          markdown: |
+            Event 4672 flags special privileges assigned at sign-on, which
+            effectively marks admin-type logons. Pairing 4672 with 4624 gives
+            a cheap who-was-really-admin timeline during triage.
+    - id: hunting-failed-signins
+      title: 'Hunt failed sign-ins'
+      blocks:
+        - type: prose
+          markdown: |
+            Get-WinEvent replaces clicking through Event Viewer with repeatable
+            queries. The FilterHashtable form selects channel and id directly
+            and runs server-side fast: `@{LogName='Security'; Id=4625}` grabs
+            failed sign-ons. Adding MaxEvents caps output during triage, and
+            piping into Select-Object trims fields worth keeping. Because
+            results come back as event objects, formatting stays composable
+            with everything you learned in the fundamentals module.
+
+            Read 4625 payload fields like a detective. TargetUserName says who
+            was attacked, IpAddress says from where, and Status sub-codes
+            separate wrong password from locked or disabled targets. Bursts of
+            4625 against many usernames from one source smell like password
+            spraying; steady failures against one account look like a fat
+            fingered script. Same event id, very different stories, entirely
+            distinguishable by counting before concluding.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-WinEvent -FilterHashtable @{
+                  LogName='Security'; Id=4625
+                } -MaxEvents 3 |
+                Select-Object TimeCreated,
+                  @{n='User';e={$_.Properties[5].Value}},
+                  @{n='From';e={$_.Properties[19].Value}} | Format-Table
+
+            TimeCreated           User    From
+            -----------           ----    ----
+            23/08/2026 12:41:02   admin   10.10.10.66
+            23/08/2026 12:40:55   root    10.10.10.66
+            23/08/2026 12:40:48   sa      10.10.10.66
+        - type: quiz
+          question_id: id-spray-vs-script
+          question: 'Hundreds of 4625 events hitting many different usernames from one IP suggest what?'
+          options:
+            - id: a
+              text: 'One user forgot their password'
+            - id: b
+              text: 'Password spraying, one common password tried across many accounts'
+            - id: c
+              text: 'A misconfigured printer'
+            - id: d
+              text: 'Successful brute force'
+          answer_ids: [b]
+          explanation: >
+            Many usernames plus few attempts each equals spraying, which aims
+            to dodge per-account lockouts. One username plus endless attempts
+            would be classic brute force. Counting patterns turns the same raw
+            events into opposite conclusions.
+    - id: remote-administration-concepts
+      title: 'Remote administration concepts'
+      blocks:
+        - type: prose
+          markdown: |
+            Managing ten servers by walking between RDP windows does not scale,
+            so Windows ships a first-class remoting stack: WinRM speaking the
+            WS-Management protocol over HTTP or HTTPS, with PowerShell
+            Remoting as its friendly face. `Enter-PSSession SERVER` drops you
+            onto the far box interactively; `Invoke-Command -ComputerName s1,s2
+            -ScriptBlock { ... }` fans one snippet out to many boxes at once
+            and streams objects back. Authentication rides Kerberos by default
+            inside a domain, so no passwords travel in the commands themselves.
+
+            Two properties make remoting the professional default. It executes
+            remotely by design, meaning scripts run where the data lives and
+            return compact results rather than screenshots. And Just Enough
+            Administration can constrain a remoting endpoint to specific
+            cmdlets and parameters, giving delegation without handing out full
+            shells. Attackers love valid remoting credentials too, which is
+            why monitoring 4624 logon type 3 and guarding WinRM endpoints is
+            standing defender work.
+        - type: code
+          language: powershell
+          code: |
+            PS> Invoke-Command -ComputerName web01,web02 `
+                  -ScriptBlock { (Get-CimInstance Win32_OperatingSystem).Caption }
+
+            web01 : Windows Server 2022 Standard
+            web02 : Windows Server 2022 Standard
+
+            PS> Test-WSMan web01
+            wsmid : http://schemas.dmtf.org/wbem/wsman/identity/1/...
+        - type: callout
+          tone: warning
+          markdown: |
+            Enable remoting only where needed via Enable-PSRemoting, keep
+            HTTPS or domain-joined transport, and treat sudden WinRM use by
+            non-administrative accounts as an incident trigger, not a quirk.
+    - id: checkpoint-identity-and-evidence
+      title: 'Checkpoint: identity and evidence'
+      blocks:
+        - type: prose
+          markdown: >
+            This closes the Windows Operator modules. You now read identity
+            the way Windows does, in SIDs, tokens, and groups; you know where
+            actions land in event logs and how to query them; and you
+            understand the remoting fabric that ties fleets together. Finish
+            the checkpoint below, then write your notebook entry summarizing
+            the five event ids you will watch first on any future box.
+        - type: quiz
+          question_id: chk-4625-meaning
+          question: 'Security event 4625 records what?'
+          options:
+            - id: a
+              text: 'A successful interactive sign-on'
+            - id: b
+              text: 'An account was created'
+            - id: c
+              text: 'A failed sign-on attempt'
+            - id: d
+              text: 'A new service was installed'
+          answer_ids: [c]
+          explanation: >
+            4624 pairs with success and 4625 with failure, making the pair the
+            backbone of sign-in analysis. Creation lives in 4720 and service
+            installs in System channel 7045.
+        - type: quiz
+          question_id: chk-7045-channel
+          question: 'Which channel carries event 7045, new service installed?'
+          options:
+            - id: a
+              text: 'Application'
+            - id: b
+              text: 'System'
+            - id: c
+              text: 'Windows Defender'
+            - id: d
+              text: 'Setup'
+          answer_ids: [b]
+          explanation: >
+            Service lifecycle belongs to the System channel. A fresh 7045 on a
+            server nobody was changing deserves immediate attention, since it
+            doubles as a favorite persistence mechanism.
+        - type: quiz
+          question_id: chk-invoke-command-shape
+          question: 'Why prefer Invoke-Command over opening several RDP sessions for a fleet check?'
+          options:
+            - id: a
+              text: 'It avoids needing any permissions on target machines'
+            - id: b
+              text: 'It runs the same script remotely on many hosts and returns structured objects in one pass'
+            - id: c
+              text: 'It disables logging on targets'
+            - id: d
+              text: 'It works without network connectivity'
+          answer_ids: [b]
+          explanation: >
+            Fan-out remoting scales attention, not just clicks: one command
+            shape, N machines, object output ready for filtering. Permissions
+            still apply, logging still occurs, and networks still matter.
+  cheat_sheet: |
+    # Identity, event logs, remote administration
+
+    Identity:
+        whoami /user /groups /priv     # SID view of self
+        net localgroup Administrators  # local admins
+        Token = user SID + group SIDs + privileges, inherited by processes
+
+    Directory ideas:
+        Domain = shared identity boundary    DC = auth server
+        Kerberos = tickets, not passwords on the wire
+        Domain Admins = everywhere keys; trusts = bridges
+
+    Event quick table:
+        Security 4624 success logon   4625 failure   4672 admin logon
+        Security 4720 user created    4740 lockout
+        System   7045 new service installed
+
+    Query pattern:
+        Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625} -MaxEvents 50
+        ... | Select-Object TimeCreated, @{n='U';e={$_.Properties[5].Value}}
+
+    Remoting:
+        Test-WSMan HOST               Enter-PSSession HOST
+        Invoke-Command -ComputerName a,b -ScriptBlock { ... }
+        Logon type 3 over WinRM = monitor me
