@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: packet-diary
+  title: 'Packet Diary'
+  version: 1.0.0
+  points: 125
+  estimated_minutes: 20
+  difficulty: easy
+  tags: [investigation, pcap, ftp, credential-hygiene]
+spec:
+  track: linux-networking
+  type: investigation
+  summary: >-
+    An evidence bundle from a simulated archive appliance incident is
+    attached to the case page: one capture file with an FTP session in
+    it. FTP predates encryption, so everything on that wire is
+    readable. You will download capture.pcap, read the control channel
+    bytes for the login exchange and the PORT directive, recover the
+    leaked password, and file the report with it.
+  objectives:
+    - 'Fetch and inspect a raw pcap artifact as evidence rather than trusting a summary.'
+    - 'Recognize cleartext application-layer exchanges inside TCP payloads.'
+    - 'Recover a leaked password from the capture and use it to complete the investigation.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The pcap is synthetic byte generation inside the Flask process: fixed headers, fixed transcript, no live traffic and no real credentials. The case app is a single disposable container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: recover-the-password
+      title: 'Read the capture and file the report'
+      prompt: >-
+        Download the evidence capture from the case page and find the
+        FTP control session inside it. The session leaks a password in
+        the clear right after a USER command. Submit that password to
+        the report endpoint to close the case and receive the flag.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'The case page links the capture directly. Save it and try `strings` on the file, or open it in Python; FTP control text sits in TCP payload bytes unencrypted.'
+        - cost: 10
+          text: 'FTP logins look like USER <name> followed by PASS <password>, each ending CRLF. The capture also shows a PORT directive naming the data connection the client opened.'
+        - cost: 25
+          text: "Find b'PASS ' in the pcap bytes and read to the next CRLF, then GET /report?password=<that value> on http://target:8000. A correct password returns the flag."
+      solution: |
+        1. Open http://target:8000/ and follow the link to
+           /evidence/capture.pcap. Keep the bytes local.
+        2. Search the file for control-channel text. Any of: `strings
+           capture.pcap | grep -E 'USER|PASS|PORT'`, or Python:
+           `content.find(b"PASS ")`.
+        3. The login exchange reads USER archivist then PASS
+           maple-syrup-42. The PORT command afterwards shows the
+           client's data endpoint (10,60,0,20 port 200*256+13), which
+           is context, not the answer.
+        4. File the report: GET /report?password=maple-syrup-42.
+        5. The accepted report page prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag
