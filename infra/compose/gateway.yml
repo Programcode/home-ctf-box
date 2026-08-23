@@ -1,0 +1,30 @@
+# Lab gateway: the only public entry point into lab instances (HTTP proxy +
+# browser terminal). Start with: docker compose --profile gateway up -d
+#
+# Same compose project name as runner.yml (`openrange`), so this service
+# joins the same default network and reaches the runner at
+# http://lab-runner:8771. Reaching LAB CONTAINERS additionally requires
+# attaching the gateway to per-lab networks; see docs/contracts/gateway-api.md.
+name: openrange
+
+services:
+  lab-gateway:
+    image: python:3.12-slim
+    profiles: ['gateway']
+    command:
+      - sh
+      - -c
+      - pip install --no-cache-dir /workspace/apps/lab-gateway && exec openrange-gateway
+    environment:
+      OPENRANGE_ENV: dev
+      OPENRANGE_GATEWAY_SECRET: ${OPENRANGE_GATEWAY_SECRET:?set OPENRANGE_GATEWAY_SECRET}
+      RUNNER_URL: ${RUNNER_URL:-http://lab-runner:8771}
+      RUNNER_SERVICE_TOKEN: ${RUNNER_SERVICE_TOKEN:-}
+      OPENRANGE_GATEWAY_HOST: 0.0.0.0
+      OPENRANGE_GATEWAY_PORT: '8772'
+      OPENRANGE_GATEWAY_MAX_SESSIONS: ${OPENRANGE_GATEWAY_MAX_SESSIONS:-4}
+    ports:
+      - '127.0.0.1:8772:8772'
+    volumes:
+      - ../..:/workspace:ro
+    restart: unless-stopped
