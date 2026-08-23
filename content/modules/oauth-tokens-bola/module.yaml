@@ -1,0 +1,380 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: oauth-tokens-bola
+  title: 'OAuth, tokens, and BOLA: identity plumbing under load'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 75
+  tags:
+    - oauth
+    - oidc
+    - jwt
+    - bola
+spec:
+  track: web-foundations
+  summary: >-
+    Delegated identity powers every modern API, and its failure modes are
+    learnable in an afternoon. This module walks OAuth2 roles and flows with
+    the authorization code pattern front and center, layers OIDC on top, opens
+    the JWT anatomy to explain why algorithm confusion keeps working, labs the
+    tricks against a token-forger target, surveys token storage mistakes, then
+    drills BOLA and BOPLA testing with paired accounts until object-level
+    probing feels like breathing.
+  objectives:
+    - Explain OAuth2 roles, grants, and why the authorization code flow dominates.
+    - Describe OIDC additions including ID tokens, scopes versus claims, and discovery.
+    - Decode JWTs and predict validation failures from header, payload, and signature choices.
+    - Demonstrate algorithm confusion attacks safely inside a labbed token service.
+    - Identify token storage and transmission patterns that leak credentials.
+    - Execute BOLA and BOPLA probes across collections, objects, and write operations.
+  sections:
+    - id: oauth2-roles-and-flows
+      title: 'OAuth2 roles and flows'
+      blocks:
+        - type: prose
+          markdown: |
+            OAuth2 answers one question well: how can a service act on your
+            behalf without ever holding your password? Four roles share the
+            stage. The resource owner is you. The client is the application
+            asking to act for you. The authorization server issues permissions,
+            and the resource server accepts them, typically your data API.
+            Instead of sharing credentials, you approve scopes at the
+            authorization server, which hands the client a short-lived proof it
+            can exchange for tokens the API trusts.
+
+            Several grant types existed historically; production converged on
+            authorization code, ideally with PKCE even for confidential
+            clients. You get redirected to login, the server redirects back
+            with a single-use code, the client exchanges code plus its secret
+            for access and refresh tokens server-side. Implicit grant, which
+            returned tokens through browser fragments, is deprecated because
+            fragments leak; password grant handed applications your actual
+            secret and earned retirement faster still.
+        - type: code
+          language: text
+          code: |
+            GET /authorize?response_type=code&client_id=webapp
+                &redirect_uri=https://webapp.example/cb&scope=profile
+                &state=9f8e7d&code_challenge=abc123... HTTP/1.1
+
+            # after user approval:
+            https://webapp.example/cb?code=SplxlOBeZQQYbYS6&state=9f8e7d
+
+            POST /token   (server-to-server)
+              grant_type=authorization_code&code=SplxlOBeZQQYbYS6
+              &redirect_uri=...&client_id=webapp&client_secret=...
+              &code_verifier=plain-of-challenge
+
+            Read any real integration by naming each part: state binds the
+            round trip against CSRF, the challenge binds code exchange to the
+            original request, and the exchange happening server-side keeps
+            secrets out of browsers entirely.
+        - type: prose
+          markdown: |
+            Tester observations begin at redirects. State must be present,
+            random, and verified; redirect_uri must match exactly rather than
+            prefix-match; codes must die after first redemption. Replay a code
+            once and note whether the second exchange fails, since reusable
+            codes convert interceptors into account owners in shared networks.
+            These checks need no exploit framework, just patience and two
+            browser windows.
+        - type: callout
+          tone: info
+          markdown: |
+            Rooms here simulate providers locally so nothing touches real
+            identity services. Practicing observation habits against lab
+            providers transfers perfectly when you later read production
+            configs during authorized work.
+    - id: oidc-on-top
+      title: 'OIDC on top'
+      blocks:
+        - type: prose
+          markdown: |
+            OAuth2 says nothing about who the user is; it authorizes access,
+            not identity. OpenID Connect layers identity over OAuth2 with three
+            additions worth memorizing. An ID token arrives as a JWT carrying
+            authenticated claims about the user. A userinfo endpoint returns
+            profile data keyed to the access token. A discovery document at a
+            well-known path publishes all endpoints and supported features so
+            clients configure themselves.
+
+            Scopes and claims trip people constantly. OAuth scopes delegate
+            what a client may do, coarse verbs like read or write. OIDC claims
+            describe who someone is, attributes like email or role. Conflating
+            them produces bugs where possessing a scope named profile convinces
+            a server to reveal roles nobody approved sharing, and testers probe
+            exactly that seam.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://idp.lab/.well-known/openid-configuration | jq '{issuer, jwks_uri, id_token_signing_alg_values_supported}'
+            {
+              "issuer": "http://idp.lab",
+              "jwks_uri": "http://idp.lab/jwks.json",
+              "id_token_signing_alg_values_supported": ["RS256"]
+            }
+
+            $ curl -s http://idp.lab/jwks.json | jq '.keys[0] | {kty, alg, kid}'
+            {"kty":"RSA","alg":"RS256","kid":"2026-08"}
+
+            Discovery plus key set in two requests: signing algorithms listed,
+            key rotation visible through kid values. Keep these artifacts; the
+            confusion attacks next section are aimed precisely at mismatches
+            between what discovery advertises and what verification enforces.
+        - type: prose
+          markdown: |
+            ID token validation rules matter because libraries implement them
+            inconsistently. Issuer must match expectations, audience must name
+            this client, timestamps must hold, nonce must bind the response to
+            a request you initiated, and signatures must verify against keys
+            fetched fresh from the advertised location. When you review an
+            integration, watch which of those checks survived deadline
+            pressure; nonce skipping remains embarrassingly common, and its
+            impact lands squarely on replay.
+    - id: jwt-anatomy-and-validation
+      title: 'JWT anatomy and validation'
+      blocks:
+        - type: prose
+          markdown: |
+            A JWT is three base64url segments joined by dots: header, payload,
+            signature. The header names the algorithm; the payload carries
+            claims such as subject, expiry, and role; the signature binds both
+            under a key. Crucially, everything before the signature is plain
+            encoding, not encryption, so anyone holding a token reads it
+            entirely. Secrets live only in that final segment, and validation
+            means recomputing it correctly.
+
+            Failures cluster where implementations trust parts they should not.
+            The historic none algorithm accepted unsigned tokens wholesale;
+            key confusion happens when RS256-signed tokens get verified as
+            HS256 using the public key as the HMAC secret, letting anyone who
+            can read the JWKS mint valid tokens; weak HS256 secrets fall to
+            offline guessing; missing expiry or audience checks extend stolen
+            tokens indefinitely and across clients.
+        - type: code
+          language: bash
+          code: |
+            $ TOKEN=$(curl -s -X POST http://target:8000/token \
+                -d 'grant_type=password&username=demo&password=demo123' | jq -r .access_token)
+            $ echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null; echo
+            {"sub":"demo","role":"user","exp":1787500000}
+        - type: prose
+          markdown: |
+            Payload readable without any attack: encoding only. Editing role
+            to admin and re-signing requires either the secret or one of the
+            validation gaps above, which is exactly what the next block labs.
+
+            Build a decoding habit before an attack habit. Every token you
+            meet in a room deserves one pass through the decoder: header for
+            algorithm and key id, payload for subject, role-shaped claims,
+            expiry, audience. Sixty seconds of reading usually predicts which
+            failure applies long before any tooling runs, because the claims
+            tell you what the server believes about its visitor and the gaps
+            live in whatever it never checks. Keep decoded copies in your
+            notes alongside the raw strings; reports that show both read as
+            careful work rather than lucky guessing.
+        - type: quiz
+          question_id: oauth-jwt-readability
+          question: 'Why does reading a JWT payload require no attack?'
+          options:
+            - id: a
+              text: 'JWT payloads are encrypted with the server key.'
+            - id: b
+              text: 'Header and payload are base64url encodings; only the signature is cryptographic.'
+            - id: c
+              text: 'Tokens compress their claims.'
+            - id: d
+              text: 'Browsers decrypt tokens automatically.'
+          answer_ids: [b]
+          explanation: >
+            Encoding preserves readability by design. Confidentiality needs
+            encrypted token formats or transport secrets; JWT signatures
+            guarantee integrity, never secrecy.
+    - id: labbing-algorithm-confusion
+      title: 'Labbing algorithm confusion'
+      blocks:
+        - type: prose
+          markdown: |
+            Algorithm confusion earns its own section because it survives in
+            current codebases and teaches a deep lesson: validators must pin
+            algorithms, never read them from input. The attack targets servers
+            issuing RS256 tokens but verifying with whatever the token header
+            claims. Change the header to HS256, sign your forged payload using
+            the RSA public key as the HMAC secret, and a naive verifier happily
+            compares HMACs computed from a value every client already holds.
+
+            The token-forger room stages precisely this: TokenForge signs with
+            HS256 but lets the token itself steer too much of verification, and
+            the intended ladder walks claim tampering toward whichever gap its
+            verifier leaves open. Work the room after reading; the muscle built
+            here applies to every library default you will review later.
+        - type: code
+          language: python
+          code: |
+            import hmac, hashlib, base64, json
+
+            def b64u(b): return base64.urlsafe_b64encode(b).rstrip(b"=")
+
+            pub = open("idp_public.pem", "rb").read()   # public, hence known
+            header = b64u(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+            payload = b64u(json.dumps({"sub": "demo", "role": "admin"}).encode())
+            sig = b64u(hmac.new(pub, header + b"." + payload, hashlib.sha256).digest())
+            print(f"{header}.{payload}.{sig}".decode())
+
+            # lab verifier that reads alg from the token accepts this;
+            # a validator pinned to RS256 rejects it immediately
+        - type: callout
+          tone: warning
+          markdown: |
+            Forge tokens exclusively against room endpoints. Minting identity
+            artifacts against anything else crosses from learning into fraud,
+            and rooms log enough context that there is nowhere productive to
+            take it anyway.
+        - type: prose
+          markdown: |
+            Defenses deserve equal airtime because they are refreshingly blunt.
+            Pin expected algorithms in configuration, rejecting tokens whose
+            headers disagree. Fetch verification keys from trusted locations
+            keyed by issuer, honor kid only within that trust store, enforce
+            exp, nbf, aud, and iss on every validation path including internal
+            service hops, and rotate keys on schedule while accepting overlap
+            windows deliberately. Reports citing confused-deputy roots should
+            propose pinning first, since it deletes the entire bug class in
+            one config line.
+    - id: token-storage-and-handling
+      title: 'Token storage and handling'
+      blocks:
+        - type: prose
+          markdown: |
+            Where tokens sleep decides how theft plays out. Browser-side local
+            storage hands any script on the origin a permanent read; cookies
+            with HttpOnly resist script but inherit CSRF questions that SameSite
+            softens; memory-only access tokens with rotating refresh tokens in
+            hardened cookies currently represents the pragmatic best practice.
+            Server-side storage varies less: environment variables beat source
+            files, secret managers beat environment variables, and logs must
+            never see full tokens regardless of tier.
+
+            Transmission leaks complete the survey. Tokens ride Authorization
+            headers normally, but URLs persist into logs, proxies, and browser
+            history, so query-string tokens deserve findings on sight. Refresh
+            tokens widen blast radius whenever they lack rotation and reuse
+            detection, since one stolen refresh quietly mints forever.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si "http://target:8000/api/profile?access_token=eyJhbGciOi..." | head -n 1
+            HTTP/1.1 200 OK
+
+            Works, therefore reportable: the same endpoint accepting the
+            header form proves the parameter variant is convenience, not
+            necessity, and convenience wrote the token into every access log
+            between here and the database.
+        - type: prose
+          markdown: |
+            Tie storage back to the deserialization module's lessons when
+            writing recommendations: signed inert formats beat executable ones,
+            verification precedes parsing, and constant-time comparisons cost
+            nothing. The predictable-reset room extends handling discipline to
+            recovery flows whose reset links never touch real entropy, and the
+            cookie-shapeshifter room shows client-trusted state compounding
+            every mistake above. One notebook page mapping where each room hid
+            its token decision makes revision trivial before assessments.
+    - id: bola-and-bopla-testing
+      title: 'BOLA and BOPLA testing'
+      blocks:
+        - type: prose
+          markdown: |
+            Broken object-level authorization tops every industry list of API
+            flaws because identifiers are everywhere and ownership checks are
+            per-endpoint chores. BOLA covers reading or manipulating objects
+            that belong elsewhere; BOPLA, broken function-level authorization,
+            covers operations your role should never invoke at all, admin
+            functions reachable by ordinary users. Both test with paired
+            accounts and honest bookkeeping, and both reward systematic
+            coverage over lucky guesses.
+
+            Build the loop from your surface map: every route parameter naming
+            an identifier enters the queue, every collection filter joins it,
+            every nested relationship follows. Fire each as peer account B
+            while authenticated as A, record verdicts, then reverse roles to
+            catch direction-dependent guards. Write operations deserve extra
+            passes since mutation findings carry higher severity and sometimes
+            trigger different code paths than reads.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/api/invoices/inv_2007 \
+                -b 'sid=A' -X PATCH \
+                -H 'Content-Type: application/json' \
+                -d '{"status":"paid"}' | head -n 1
+            HTTP/1.1 200 OK
+
+            A PATCH marking another tenant's invoice paid succeeded. That
+            single line combines BOLA, the foreign object, with write-level
+            severity, and the report now writes itself around business impact:
+            financial records modifiable across company lines.
+        - type: callout
+          tone: danger
+          markdown: |
+            Mutations against foreign objects change fixtures other learners
+            rely on. Prefer proving with the least destructive edit available,
+            revert when the platform allows, and never chain destructive
+            writes across many records; one demonstrated crossing suffices.
+        - type: prose
+          markdown: |
+            Function-level checks fail quieter but land harder. Enumerate
+            privileged routes from descriptions and JS bundles, then visit each
+            as an ordinary account watching for 200s wearing admin shapes.
+            Missing function guards often hide behind UI absence rather than
+            server enforcement, which is also exactly how mass assignment
+            sneaks privilege changes through ordinary-looking profile edits,
+            the very trick awaiting you in the capstone room. Finish by filing
+            every BOLA verdict into the authorization matrix skeleton; the
+            methodology module turns that skeleton into the deliverable.
+        - type: quiz
+          question_id: oauth-bola-vs-bopla
+          question: 'An ordinary user successfully invokes /api/admin/users/delete. Which classification fits?'
+          options:
+            - id: a
+              text: 'BOLA, because an object was touched.'
+            - id: b
+              text: 'BOPLA, a function-level check failed regardless of which object.'
+            - id: c
+              text: 'Rate limiting misconfiguration.'
+            - id: d
+              text: 'Mass assignment.'
+          answer_ids: [b]
+          explanation: >
+            The flaw is invoking a privileged operation, not accessing a
+            foreign object. Function-level authorization gates capabilities;
+            object-level authorization gates instances, and this failure sits
+            firmly in the former bucket.
+  cheat_sheet: |
+    # OAuth, tokens, BOLA
+
+    Code flow checklist:
+        authorize? response_type=code + state + PKCE challenge
+        redirect_uri exact match; code single-use (test replay)
+        token exchange server-side only
+
+    OIDC artifacts:
+        /.well-known/openid-configuration -> endpoints + algs
+        /jwks.json -> keys, kids; ID token = identity claims
+
+    JWT facts:
+        header.payload.signature, all but sig readable
+        failures: none alg, RS->HS confusion (pubkey as secret),
+        weak HMAC secret, missing exp/aud/iss enforcement
+        defense: pin algorithm, trusted key store, full claim checks
+
+    Storage tiers:
+        localStorage < cookie(HttpOnly+SameSite) < memory+rotating refresh
+        tokens in URLs -> logs: finding on sight
+
+    BOLA/BOPLA loop:
+        queue every id param + filter + nested edge
+        fire as peer B authed as A; reverse; record verdicts
+        writes add severity; prove minimal, revert if possible

@@ -1,0 +1,399 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: discovery-and-enumeration
+  title: 'Discovery and enumeration: map the ground before you step on it'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - reconnaissance
+    - fuzzing
+    - ffuf
+    - vhosts
+    - fingerprinting
+spec:
+  track: web-foundations
+  summary: >-
+    Attacks fail most often because nobody looked first. This module teaches a
+    mapping discipline that finds what an application forgot to hide: hints in
+    robots.txt and sitemaps, directories and files recovered with controlled
+    wordlist fuzzing, virtual hosts living on shared addresses, technology
+    fingerprints volunteered by headers and footers, and API descriptions
+    sitting at predictable paths. You finish able to produce a target map that
+    turns the rest of any engagement from guessing into planning.
+  objectives:
+    - Explain why mapping precedes exploitation and plan enumeration within scope and rate limits.
+    - Harvest starting points from robots.txt, sitemap files, and well-known metadata paths.
+    - Discover hidden directories and files with wordlist-driven tools and interpret status codes.
+    - Enumerate virtual hosts on a single address by fuzzing the Host header.
+    - Fingerprint technologies and versions from headers, page bodies, and tooling.
+    - Locate machine-readable API descriptions and record findings in a reusable target map.
+  sections:
+    - id: mapping-before-touching
+      title: 'Mapping before touching'
+      blocks:
+        - type: prose
+          markdown: |
+            Beginners attack the first interesting form they see. Professionals
+            spend the first hour drawing the map, because the map is what makes
+            every later step cheaper. Enumeration answers simple questions with
+            outsized consequences. Which routes exist? Which of them skip
+            authentication? Which subdomains host admin panels or stale backups?
+            Which frameworks and versions run behind the homepage? Each answer
+            narrows the space you must eventually test, and untested space is
+            where findings hide.
+
+            Mapping also protects you. Fuzzing tools fire thousands of requests,
+            and firing them without thought can hammer a fragile target into a
+            denial of service. That is out of scope for this platform and for
+            almost every real engagement. So the discipline starts with limits.
+        - type: code
+          language: bash
+          code: |
+            $ ffuf -h | grep -E '^\s+(-t|-rate|-p)\s'
+              -t            Number of concurrent threads
+              -rate         Target requests per second
+              -p            Seconds of delay between requests
+
+            Three flags turn a blunt instrument into a polite one: -t caps
+            concurrency, -rate caps speed, and -p inserts delays. A scan of ten
+            thousand words at two hundred requests per second finishes in under
+            a minute without stressing anything built this decade.
+        - type: callout
+          tone: warning
+          markdown: |
+            Aggressive scanning against targets outside your lab is reckless
+            at best and criminal at worst. Keep brute force volume inside
+            authorized boundaries, throttle when the scope document asks, and
+            stop immediately if a target shows distress such as timeouts or
+            five hundred errors across the board.
+        - type: prose
+          markdown: |
+            Write the map down as you build it. A markdown file per target,
+            updated while tools run, beats a folder of raw output nobody rereads.
+            By the end of this module your notes will list confirmed endpoints,
+            candidate names worth probing manually, technologies with versions,
+            and questions still open. That file is the deliverable of discovery,
+            and future modules consume it directly.
+    - id: robots-sitemaps-and-obvious-files
+      title: 'robots.txt, sitemaps, and obvious files'
+      blocks:
+        - type: prose
+          markdown: |
+            The funniest truth in web security is that servers often publish
+            their own hidden paths. robots.txt exists to tell crawlers what not
+            to index, which means it lists exactly the paths someone considered
+            private. Sitemap files exist to help indexing, so they enumerate
+            real URLs including ones navigation never mentions. Neither file has
+            any access control purpose whatsoever. Reading them costs one request
+            each and pays for itself constantly.
+
+            Start every mapping session with the same short checklist. Fetch
+            robots.txt, fetch sitemap.xml, then probe a handful of conventional
+            locations such as .well-known/security.txt and the humans and
+            security pages organizations add by habit. None of these are
+            vulnerabilities. All of them are leads.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/robots.txt
+            User-agent: *
+            Disallow: /admin
+            Disallow: /backup-2025/
+            Disallow: /.git/
+
+            $ curl -s http://target:8000/sitemap.xml | head -n 6
+            <?xml version="1.0" encoding="UTF-8"?>
+            <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>http://target:8000/pricing</loc></url>
+              <url><loc>http://target:8000/blog/draft-launch-plan</loc></url>
+
+            One request produced three candidate paths, and one sitemap entry
+            leaks a draft page the navigation never linked. The .git entry is
+            especially promising: exposed repository directories sometimes allow
+            reconstructing source code wholesale.
+        - type: prose
+          markdown: |
+            Treat every lead like a scientist, not a tourist. Note the path,
+            predict what you expect there, then check once and record what
+            answered. A backup directory might hold database dumps, or might be
+            a decoy holding nothing, or might return forbidden for anonymous
+            users, which is itself useful because it proves the developers knew
+            the path existed. The cartographer room later rewards exactly this
+            rhythm: its public site says little, while its forgotten operational
+            corners say everything to visitors who read first and click second.
+        - type: quiz
+          question_id: discovery-robots-purpose
+          question: 'What does an entry in robots.txt prove about the listed path?'
+          options:
+            - id: a
+              text: 'The path requires authentication to reach.'
+            - id: b
+              text: 'Someone asked search engines not to index it, and the path likely exists.'
+            - id: c
+              text: 'The path is protected by a firewall rule.'
+            - id: d
+              text: 'Search engines have already removed the page from results.'
+          answer_ids: [b]
+          explanation: >
+            robots.txt is a request to crawlers, not an access control. It
+            usually confirms the path exists and that someone considered it
+            sensitive enough to hide from indexing, which makes it a prime
+            manual testing lead.
+    - id: directory-and-file-discovery
+      title: 'Directory and file discovery'
+      blocks:
+        - type: prose
+          markdown: |
+            Wordlist fuzzing automates the question "does this path exist" over
+            thousands of candidates. Tools such as ffuf and gobuster substitute
+            a marker in a URL with each word, fire the requests at your chosen
+            pace, and sort answers so interesting responses surface fast. The
+            skill is less about running the tool and more about reading its
+            output honestly. Status codes lie by design: applications return
+            200 with a custom error page for missing routes, redirect loops of
+            302 mask broken auth, and size filters matter more than codes.
+
+            The standard workflow filters noise first. Run once, note the size
+            of the universal miss response, then rerun filtering that size out.
+            What remains deserves human eyes.
+        - type: code
+          language: bash
+          code: |
+            $ ffuf -u http://target:8000/FUZZ -w /usr/share/wordlists/common.txt \
+                -t 20 -rate 150 -mc all -fs 0
+            ...
+            :: Progress:   [4700/4700] 
+            /admin                 [Status: 200, Size: 1543]
+            /api                   [Status: 200, Size: 12]
+            /console               [Status: 302, Size: 0 --> /login]
+
+            $ curl -s http://target:8000/api
+            {"error":"no endpoint specified"}
+
+            The trailing /api line is the quiet gold: a bare JSON error means
+            an API root lives there, and the next module's techniques apply
+            directly. A thirty-year default wordlist found it in seconds.
+        - type: prose
+          markdown: |
+            Choose wordlists deliberately instead of grabbing the biggest one.
+            Short common lists find conventionally named things quickly; larger
+            lists add coverage at linear time cost; specialized lists for
+            backups, configs, and API routes earn their place after basics are
+            exhausted. Extensions multiply value: appending .bak, .old, .txt,
+            .zip, and ~ to discovered names uncovers editor leftovers, which
+            have leaked more secrets than most exotic bugs ever will.
+        - type: callout
+          tone: tip
+          markdown: |
+            When a hit surprises you, slow down. Open it in the browser,
+            confirm what it actually serves, and write one notebook line about
+            why it matters. Discovery output without interpretation is just
+            noise you paid requests for.
+    - id: virtual-hosts-and-subdomains
+      title: 'Virtual hosts and subdomains'
+      blocks:
+        - type: prose
+          markdown: |
+            One IP address can serve many sites, sorted by the Host header you
+            met in the HTTP module. Virtual host enumeration abuses that fact:
+            keep the address fixed, vary the hostname, and watch for responses
+            whose size or status differs from the default. No DNS records are
+            required, no packets leave the target network segment, and internal
+            names that were never meant for outsiders fall out of the sweep.
+            Labs love this trick because it mirrors how real internal panels
+            hide behind plain addresses.
+
+            Subdomain enumeration at scale uses the same idea against DNS with
+            wordlists and resolvers, but inside rooms vhost fuzzing is the
+            practical move, and ffuf does it with one flag change.
+        - type: code
+          language: bash
+          code: |
+            $ ffuf -u http://target:8000/ -H 'Host: FUZZ.target.internal' \
+                -w /usr/share/wordlists/vhosts-small.txt -t 15 -rate 120 \
+                -fs 2318
+            ...
+            ops                     [Status: 200, Size: 5127]
+
+            $ curl -s -H 'Host: ops.target.internal' http://target:8000/ | grep -i '<title>'
+            <title>Ops Console</title>
+
+            Filtering the default page size left exactly one survivor, and a
+            title tag confirms an operations console answering a name that no
+            public link ever mentioned. That console becomes tomorrow's main
+            event, reached with nothing fancier than a header.
+        - type: prose
+          markdown: |
+            Record both the winning name and the exact curl invocation that
+            reaches it, because Host-based routing breaks silently when you
+            forget the header later. Add each discovered origin to your target
+            map with its own mini-profile: what serves there, whether it
+            authenticates, and what frameworks its errors reveal. In the
+            open-panels room, an entire leftover admin interface survives on a
+            name like this, waiting for testers who bothered to ask the same
+            address different questions.
+        - type: quiz
+          question_id: discovery-vhost-mechanic
+          question: 'Why does changing only the Host header expose a new site on the same IP?'
+          options:
+            - id: a
+              text: 'The header encrypts differently per site.'
+            - id: b
+              text: 'The server uses the Host header to route requests among sites sharing the address.'
+            - id: c
+              text: 'DNS resolves the header before routing.'
+            - id: d
+              text: 'Firewalls match rules on hostnames rather than IPs.'
+          answer_ids: [b]
+          explanation: >
+            Name-based virtual hosting routes purely on the Host header. The
+            socket and certificate layer may stay identical while entirely
+            different applications answer, so inventing hostnames is a
+            legitimate way to discover them.
+    - id: fingerprinting-the-stack
+      title: 'Fingerprinting the stack'
+      blocks:
+        - type: prose
+          markdown: |
+            Knowing the stack converts generic guesses into targeted ones. An
+            nginx server suggests specific misconfiguration classes; a Flask
+            debug panel lives at /console; PHP applications litter the place
+            with .php backups; Express apps answer JSON errors shaped in ways
+            you can script against. Fingerprints come free from places you
+            already visited: Server and X-Powered-By headers, cookie names such
+            as PHPSESSID or connect.sid, generator meta tags, asset paths under
+            /static/, and the shape of default error pages.
+
+            Automation helps once you know what it can and cannot see. Whatweb
+            reads passive signals from one fetch; wappalyzer-style browser
+            extensions correlate hundreds of them continuously. Both miss
+            customized setups, so treat their verdicts as hypotheses.
+        - type: code
+          language: bash
+          code: |
+            $ whatweb http://target:8000
+            http://target:8000 [200 OK] Country[Reserved], HTML5,
+            HTTPServer[Werkzeug/3.0.1 Python/3.12.3], IP[10.0.0.5],
+            Python[3.12.3], Title[NetCheck 3000], Werkzeug[3.0.1]
+
+            Werkzeug plus a version lands the highest-value hypothesis of the
+            day: development servers expose interactive consoles when debug
+            mode ships by accident, and /console is now the very first manual
+            probe worth making.
+        - type: prose
+          markdown: |
+            Versions deserve careful handling in reports. A version number
+            alone is information disclosure, low severity at most. Version
+            numbers become serious when paired with known issues affecting that
+            exact release chain, so your job is correlation: banner says 3.0.1,
+            advisory database lists a relevant flaw below 3.0.4, report connects
+            those dots with sources. Keep the claim narrow and cited, and
+            reviewers will trust the next claim too.
+        - type: quiz
+          question_id: discovery-fingerprint-value
+          question: 'A banner reveals Flask/Werkzeug 2.0.x with debug enabled. What is the strongest immediate follow-up?'
+          options:
+            - id: a
+              text: 'Assume full compromise and write a critical finding immediately.'
+            - id: b
+              text: 'Probe the framework debug console location and confirm interactively.'
+            - id: c
+              text: 'Ignore banners since they are always wrong.'
+            - id: d
+              text: 'Restart the service to reset its state.'
+          answer_ids: [b]
+          explanation: >
+            Debug consoles are high impact but must be verified, never
+            assumed. One GET to the conventional console path either confirms
+            the interactive debugger or clears the hypothesis, and your report
+            cites whichever happened.
+    - id: api-descriptions-and-the-target-map
+      title: 'API descriptions and the target map'
+      blocks:
+        - type: prose
+          markdown: |
+            Modern stacks describe themselves if you ask at conventional paths.
+            OpenAPI documents sit at /openapi.json, /swagger.json, /api-docs, or
+            versioned variants; GraphQL servers answer POST queries at /graphql
+            and often leave introspection on; actuator-style diagnostics appear
+            under /actuator or /status. Each description found is hours of
+            guessing saved, because schemas list routes, parameters, and models
+            in machine-readable form. Pulling one feels like stealing the exam
+            answer key, legally.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/openapi.json | jq '.info, (.paths | keys)'
+            {
+              "title": "Nimbus people API",
+              "version": "1.2.0"
+            }
+            [
+              "/profiles/{username}",
+              "/sessions",
+              "/users",
+              "/users/{id}"
+            ]
+
+            Two commands produced the complete authenticated-surface inventory:
+            four paths, parameter styles implied by braces, and a version to
+            track. Save the whole document; later modules parse it for object
+            identifiers worth attacking.
+        - type: prose
+          markdown: |
+            Close the module by assembling the artifact everything else consumes.
+            Your target map should contain, at minimum: confirmed origins
+            including vhost discoveries, endpoint inventory from descriptions
+            and fuzzing, technologies with versions and the evidence for each,
+            authentication observations, and open questions ranked by promise.
+            Date it, hash it, treat it as evidence, because in professional work
+            the map is often the first thing reviewers audit and the last thing
+            teammates thank you for.
+
+            The busted-login capstone at the end of this path expects this map.
+            Its login page is honest about being the front door, but the doors
+            beside it only appear to testers who enumerated first.
+        - type: quiz
+          question_id: discovery-map-artifact
+          question: 'What belongs in a finished target map before exploitation begins?'
+          options:
+            - id: a
+              text: 'Only the single vulnerability you plan to exploit.'
+            - id: b
+              text: 'Confirmed origins, endpoint inventory, fingerprints with evidence, and open questions.'
+            - id: c
+              text: 'Every raw tool dump pasted verbatim without notes.'
+            - id: d
+              text: 'Nothing; maps waste time that could go to payloads.'
+          answer_ids: [b]
+          explanation: >
+            The map is a curated working document: what exists, what it runs,
+            how you know, and what remains unknown. Raw dumps support it, but
+            the curated layer is what makes later phases fast.
+  cheat_sheet: |
+    # Discovery and enumeration
+
+    First-request checklist:
+        /robots.txt   /sitemap.xml   /.well-known/security.txt
+        /openapi.json /swagger.json /api-docs /graphql
+
+    ffuf directory sweep (polite):
+        ffuf -u http://target:8000/FUZZ -w WORDLIST \
+             -t 20 -rate 150 -ac
+
+    ffuf vhost sweep:
+        ffuf -u http://target:8000/ -H 'Host: FUZZ.target.internal' \
+             -w vhosts.txt -fs DEFAULT_SIZE
+
+    Fingerprint sources:
+        Server, X-Powered-By, cookie names, generator meta,
+        error page shapes, asset paths
+
+    Discipline:
+        - throttle (-t, -rate) before you start
+        - filter universal miss size before reading output
+        - record path + command + why-it-matters per hit
+        - date and hash the final target map

