@@ -1,0 +1,63 @@
+name: content
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'content/**'
+      - 'packages/content-sdk/**'
+      - '.github/workflows/content.yml'
+  pull_request:
+    paths:
+      - 'content/**'
+      - 'packages/content-sdk/**'
+      - '.github/workflows/content.yml'
+
+concurrency:
+  group: content-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  content-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Schema freshness
+        run: uv run cyberrange schemas --check-diff
+      - name: Lint every bundle
+        run: uv run cyberrange lint
+
+  solvers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Run solver shard
+        shell: python
+        run: |
+          import pathlib, subprocess, sys
+          rooms = sorted(p for p in pathlib.Path("content/rooms").glob("*") if (p / "room.yaml").exists())
+          shards = 4
+          mine = [r for i, r in enumerate(rooms) if i % shards == ${{ matrix.shard }}]
+          print("shard rooms:", [r.name for r in mine])
+          proc = subprocess.run(
+            ["uv", "run", "python", "-u", "-m", "openrange.content.solve_all",
+             *[str(r) for r in mine]]
+          )
+          sys.exit(proc.returncode)
