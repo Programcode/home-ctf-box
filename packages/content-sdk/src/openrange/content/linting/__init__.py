@@ -175,8 +175,17 @@ def lint_path(bundle_dir: Path) -> list[Finding]:
     if not isinstance(bundle, PathBundle):
         return [Finding("error", "schema", f"expected kind Path, got {type(bundle).__name__}")]
     findings: list[Finding] = []
-    rooms_root = bundle_dir.parents[1] / "rooms"
-    missing = [m.slug for m in bundle.spec.modules if not (rooms_root / m.slug).is_dir()]
-    for slug in missing:
-        findings.append(Finding("error", "module-ref", f"path references unknown module {slug}"))
+    content_root = bundle_dir.parents[1]
+    modules_root = content_root / "modules"
+    rooms_root = content_root / "rooms"
+    for m in bundle.spec.modules:
+        if not (modules_root / m.slug / "module.yaml").is_file():
+            findings.append(
+                Finding("error", "module-ref", f"path references unknown module {m.slug}")
+            )
+    for slug in bundle.spec.capstones:
+        if not (rooms_root / slug / "room.yaml").is_file():
+            findings.append(
+                Finding("error", "capstone-ref", f"path references unknown capstone room {slug}")
+            )
     return findings
