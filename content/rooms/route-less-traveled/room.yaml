@@ -1,0 +1,78 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: route-less-traveled
+  title: 'Route Less Traveled'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 30
+  tags: [routing, subnetting, discovery, flask]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    The gateway service on this host simulates a router with several
+    interfaces. Its metrics endpoint leaks the interface table, and its
+    route action steers traffic toward whichever subnet you name.
+    Most of the table is scenery; one interface is a tunnel to a remote
+    segment that answers with something interesting. Enumerate first,
+    then route deliberately instead of guessing.
+  objectives:
+    - 'Read an exposed metrics/interface listing and separate real signal from decoys.'
+    - 'Drive the gateway route action with the correct subnet payload.'
+    - 'Explain why routing to the wrong segment fails closed in this simulation.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single Flask process simulates interfaces and routing decisions in memory; no network namespaces, routes, or host networking are touched.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: steer-to-remote-segment
+      title: 'Enumerate the table and route to the remote segment'
+      prompt: >-
+        Pull the interface table from the gateway's metrics endpoint,
+        identify which subnet is attached to the tunnel-style
+        interface rather than the local or bridge ones, then POST that
+        subnet to /route as {"subnet": "..."}. The remote segment's
+        reply page carries the flag.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'The landing page names two endpoints: /metrics for the interface table and POST /route to steer traffic. Fetch /metrics before you post anything anywhere.'
+        - cost: 10
+          text: 'The metrics lines look like routesim_route{dev="eth0",dest="10.60.0.0/24"} 1. Three interfaces are listed; eth0 is where you already are and podnet0 is a dead-end bridge.'
+        - cost: 25
+          text: 'The tunnel interface tunsim0 carries dest 10.70.99.0/24. POST http://target:8000/route with JSON {"subnet": "10.70.99.0/24"}; the response page is served as if it came from the remote segment and contains FLAG{...}.'
+      solution: |
+        1. GET http://target:8000/ and read the notice. It points at
+           /metrics and explains the /route action.
+        2. GET http://target:8000/metrics. Parse the
+           `routesim_route{dev="...",dest="..."}` lines into pairs:
+           eth0 serves 10.60.0.0/24 (the local segment), podnet0
+           serves 172.20.0.0/24 (a bridge with nothing behind it),
+           and tunsim0 serves 10.70.99.0/24 (a tunnel interface).
+        3. Route to the tunnel subnet:
+           `curl -X POST -H 'Content-Type: application/json' \
+           -d '{"subnet":"10.70.99.0/24"}' \
+           http://target:8000/route`.
+        4. The gateway answers with the remote segment page, which
+           prints FLAG{...}. Submit it.
+        5. Routing to either other subnet returns a 404 with prose
+           explaining why that segment cannot hold the objective;
+           those replies are teaching material, not failures of the
+           room.
+      validator:
+        type: per_session_flag

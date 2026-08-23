@@ -1,0 +1,81 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: proxy-pivot
+  title: 'Proxy Pivot'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 40
+  tags: [ssh, pivoting, tunneling, networking]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    You have working SSH credentials for a lab box, and that is all you
+    get. Its admin console never left the loopback interface, so from
+    your workstation http://127.0.0.1:9001 is a dead end. You will turn
+    SSH into a tunnel with a local forward, reach the console through
+    the pivot, and read what it serves at /admin.
+  objectives:
+    - 'Explain why 127.0.0.1 on the target is not reachable directly from your workstation.'
+    - 'Create an SSH local forward that maps a workstation port to a loopback service on the target.'
+    - 'Speak HTTP through the tunnel (ssh -L or a paramiko direct-tcpip channel) and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation, matching the other SSH rooms; login sessions drop to unprivileged learner (uid 1000). The admin console is a python3 stdlib server bound to 127.0.0.1:9001 inside this container only; nothing listens on external interfaces beyond sshd, and the pivot stays within the internal lab network. Disposable Debian container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: reach-the-console
+      title: 'Tunnel to the loopback-only console'
+      prompt: >-
+        SSH into the target as learner. The box advertises an internal
+        admin console bound to its own loopback interface on port 9001.
+        Establish a local forward through SSH so requests made on your
+        workstation travel down the channel and hit the console's
+        127.0.0.1:9001, fetch /admin over it, and submit the FLAG
+        value the page shows.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'Log in first and look around /etc/motd and the running processes; the console is real, but `netstat` style checks will show it bound to 127.0.0.1 only.'
+        - cost: 10
+          text: 'A local forward binds a port on YOUR machine and relays it inside the SSH session: ssh -N -L 9001:127.0.0.1:9001 learner@target keeps the tunnel open while you request http://127.0.0.1:9001/admin locally.'
+        - cost: 25
+          text: "Without an ssh binary, open the same relay with paramiko: transport.open_channel('direct-tcpip', ('127.0.0.1', 9001), ('127.0.0.1', 0)), then write b'GET /admin HTTP/1.1\\r\\nHost: 127.0.0.1:9001\\r\\nConnection: close\\r\\n\\r\\n' into the channel and read until it closes."
+      solution: |
+        1. From the workstation, `ssh learner@target` (password
+           learner). The motd names the internal admin console at
+           127.0.0.1:9001 and notes it is loopback-only.
+        2. Confirm the situation from the shell: `ss -tln` or reading
+           /proc/net/tcp shows the console listening on 127.0.0.1:9001
+           and sshd on 0.0.0.0:22. Loopback of the target is not your
+           loopback.
+        3. Create the local forward:
+           `ssh -N -L 9001:127.0.0.1:9001 learner@target`. Leave it
+           running; -N means no shell, just the relay.
+        4. In a second terminal,
+           `curl http://127.0.0.1:9001/admin` now reaches the console
+           through the encrypted channel. The response body carries
+           FLAG{...}.
+        5. Programmatic path used by the automated solver: connect
+           with paramiko, open_channel('direct-tcpip',
+           ('127.0.0.1', 9001), ('127.0.0.1', 0)), write the raw GET
+           bytes, read the response. Submit the flag.
+      validator:
+        type: per_session_flag

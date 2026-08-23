@@ -1,0 +1,80 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: knock-knock
+  title: 'Knock Knock'
+  version: 1.0.0
+  difficulty: beginner
+  points: 150
+  estimated_minutes: 25
+  tags: [networking, udp, port-knocking, flask]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    A storage vault on the lab network refuses to talk to strangers.
+    Its gatekeeper daemon listens on three high UDP ports and only opens
+    the vault when the ports are knocked in the right order with the
+    right payloads inside a short window. You will probe the UDP
+    services with a raw socket, replay the correct knock sequence,
+    capture the one-time token from the daemon's reply, and present it
+    to the vault endpoint before it seals itself again.
+  objectives:
+    - 'Discover and speak to UDP services that never answer TCP scans.'
+    - 'Replay an ordered knock sequence inside its time window using raw sockets.'
+    - 'Trade the token from the UDP reply for the vault page before it expires.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+      - 'udp://target:7000'
+      - 'udp://target:8000'
+      - 'udp://target:9000'
+      - 'udp://target:9999'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Flask app plus four UDP sockets in one disposable container; a valid knock sequence only flips an in-memory flag in the same process. No firewall rules, host networking, or system state changes.'
+  target:
+    build_context: ./target
+    ports: [8000, 7000, 9000, 9999]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: crack-the-gate
+      title: 'Knock the sequence and open the vault'
+      prompt: >-
+        The gatekeeper daemon answers only on UDP. Find its knock ports,
+        send each port its expected payload in order within ten seconds,
+        read the TOKEN value from the final UDP reply, then fetch the
+        vault URL with that token while the sixty second window is open.
+        Submit the FLAG value the vault reveals.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'The landing page admits the vault is gated by a UDP daemon. Send any datagram to udp/9999; the status service replies in plain text and describes what it wants.'
+        - cost: 10
+          text: 'The knock ports are 7000, 8000, and 9000. Each expects the payload knock1, knock2, or knock3 respectively, sent in ascending port order within ten seconds of the first knock.'
+        - cost: 25
+          text: "Use Python's socket module: sock.sendto(b'knock1', (host, 7000)) then sock.recvfrom(2048) after each send. The third reply contains TOKEN=<hex>. GET http://target:8000/vault/<that token> within sixty seconds."
+      solution: |
+        1. Open http://target:8000/ and read the gatehouse notice. The
+           vault endpoint exists but needs a token issued by the
+           gatekeeper daemon over UDP.
+        2. Probe udp/9999 with any payload (a single byte is enough).
+           The status reply explains that knocking happens on three
+           high ports and mentions the ten second window.
+        3. Send the knocks in order with the stdlib socket module:
+           `sendto(b"knock1", (host, 7000))`, then `knock2` to 8000,
+           then `knock3` to 9000, reading one reply after each send so
+           you can see the accepted counters.
+        4. The reply to knock3 reads `sequence complete ... TOKEN=abc...`.
+           The token is valid for sixty seconds from that moment.
+        5. Request `GET /vault/<token>` on http://target:8000 while the
+           window is open. The page shows FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

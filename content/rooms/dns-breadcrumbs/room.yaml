@@ -1,0 +1,83 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: dns-breadcrumbs
+  title: 'DNS Breadcrumbs'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 30
+  tags: [networking, dns, axfr, reconnaissance]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    The lab network runs a small authoritative name server for the
+    lab.internal zone. Its address records read like an internal
+    network map, and someone was careless with the zone transfer
+    setting. You will query the server directly, follow the records to
+    a telling subdomain, then pull the whole zone with an AXFR request
+    and read the TXT record hiding in it.
+  objectives:
+    - 'Query an authoritative DNS server for A, TXT, and special record types by hand.'
+    - 'Recognize what A record patterns reveal about internal naming.'
+    - 'Perform a zone transfer (type 252) and extract the flag from the TXT answer.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+      - 'udp://target:53'
+      - 'tcp://target:53'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      The authoritative responder must bind UDP and TCP port 53, which needs
+      CAP_NET_BIND_SERVICE even for the unprivileged app user (uid 10001). The platform elevated profile grants that single bounded capability from its fixed set, and the image pins cap_net_bind_service onto the python3 interpreter binary only; no process runs as root and sshd is not installed. Disposable container on an internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [8000, 53]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: follow-the-records
+      title: 'Walk the zone and transfer it'
+      prompt: >-
+        Ask the name server on target about lab.internal. The address
+        records hint at named services; one subdomain under
+        flag.lab.internal carries a TXT record you want. Better still,
+        attempt a zone transfer (query type 252) and read the entire
+        zone at once. Submit the FLAG value from the TXT record.
+      points: 175
+      hints:
+        - cost: 0
+          text: "A DNS query is just bytes over UDP 53: a twelve byte header, the name encoded as length-prefixed labels, then qtype and qclass. Python's struct module packs and unpacks all of it."
+        - cost: 10
+          text: 'Try query type 255 (ANY) for a name to see every record it holds, or type 252 (AXFR) against the zone origin lab.internal to ask for the whole zone. The careless server answers both.'
+        - cost: 25
+          text: 'Send an AXFR for lab.internal to udp/53, parse the answer count from bytes 6-8 of the reply, walk each answer record (skip names, read type, class, ttl, rdlength), decode the TXT character-strings, and submit the FLAG{...} you find.'
+      solution: |
+        1. Build a minimal DNS client with stdlib struct: header
+           `>HHHHHH` (id, flags 0x0100, qdcount 1), question as
+           length-prefixed labels plus qtype/qclass. Send to
+           target:53 over UDP.
+        2. Reconnaissance pass: query portal.lab.internal with type 1
+           (A) and confirm answers come back. Query
+           flag.lab.internal with type 255 (ANY) to notice a TXT
+           record exists there.
+        3. Intended path: send query type 252 (AXFR) for lab.internal.
+           The server returns every record in the zone in one reply.
+        4. Parse the reply: skip the 12 byte header and question
+           section, then for each answer skip the owner name (watch
+           for compression pointers, two bytes starting 0xC0), read
+           type/class/ttl/rdlength as >HHIH, and slice rdata. For TXT
+           (type 16) rdata is length-prefixed strings.
+        5. The TXT record at flag.lab.internal contains FLAG{...}.
+           Submit it.
+      validator:
+        type: per_session_flag
