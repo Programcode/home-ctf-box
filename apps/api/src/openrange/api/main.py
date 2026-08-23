@@ -15,7 +15,10 @@ from openrange.api.errors import register_error_handlers
 from openrange.api.health import router as health_router
 from openrange.api.labs.routes import router as labs_router
 from openrange.api.learning.routes import router as learning_router
+from openrange.api.metrics import MetricsMiddleware
+from openrange.api.metrics import router as metrics_router
 from openrange.api.middleware import RateLimitMiddleware, RequestContextMiddleware
+from openrange.api.readiness import router as readiness_router
 from openrange.api.orgs.routes import api_router as orgs_router
 from openrange.api.scoring.routes import router as scoring_router
 from openrange.api.setup.routes import router as setup_router
@@ -40,6 +43,8 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(MetricsMiddleware)
+    app.include_router(readiness_router, prefix="/api")
     app.include_router(health_router, prefix="/api")
     app.include_router(auth_router)
     app.include_router(auth_me_router)
@@ -50,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(webauthn_router)
     app.include_router(oidc_router)
     app.include_router(setup_router)
+    app.include_router(metrics_router, prefix="/api")
     register_error_handlers(app)
     return app
 

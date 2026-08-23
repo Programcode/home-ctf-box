@@ -11,8 +11,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-TEST_DB_URL = "postgresql+asyncpg://openrange:openrange@localhost:15432/openrange_test"
-_TEST_DB_DSN = "postgresql://openrange:openrange@localhost:15432/openrange_test"
+TEST_DB_URL = os.environ.get(
+    "OPENRANGE_TEST_DATABASE_URL",
+    "postgresql+asyncpg://openrange:openrange@localhost:15432/openrange_test",
+)
+_TEST_DB_DSN = TEST_DB_URL.replace("+asyncpg", "")
 
 TABLES = [
     "certificates",
