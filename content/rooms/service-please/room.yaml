@@ -1,0 +1,85 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: service-please
+  title: 'Service Please'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 30
+  tags: [ssh, linux, service, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    This box runs a small supervision loop as root that re-reads its
+    application configuration every thirty seconds by sourcing it into a
+    shell. Sourcing means executing, and the configuration file is world
+    writable. You will trace the running service back to its script,
+    spot the config it trusts, append your own lines to that config, and
+    wait one cycle for root to act on them.
+  objectives:
+    - 'Identify a root-run service process and locate the script behind it.'
+    - 'Recognize that sourcing a config file executes every line in it.'
+    - 'Append commands to a world-writable config and collect the flag after the next service cycle.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The service loop is a plain sleep loop inside this container; the
+      intended abuse copies one file from /root to /tmp in the same
+      filesystem.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: config-source-hijack
+      title: 'Speak through the service config'
+      prompt: >-
+        Log in with the account from the banner and find the service that
+        runs as root on a thirty second rhythm. Read its script and the
+        configuration file it consumes. The config is editable by
+        everyone, so add commands that copy /root/flag.txt to /tmp/flag
+        and make the copy readable, then wait for the next cycle (about
+        half a minute) and read your copy. Submit the FLAG value.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'ps aux lists processes from all users on this box. One sh script under /usr/local/sbin runs as root alongside sshd.'
+        - cost: 10
+          text: 'cat /usr/local/sbin/app-runner.sh shows a loop that runs . /etc/app/env each cycle. Sourcing a file is the same as typing its contents at a root shell prompt.'
+        - cost: 25
+          text: 'ls -l /etc/app/env shows -rw-rw-rw-. Append your lines with echo >> : cp /root/flag.txt /tmp/flag then chmod 644 /tmp/flag. Poll cat /tmp/flag for up to about forty seconds.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. List processes: `ps aux`. A `/bin/sh /usr/local/sbin/app-runner.sh`
+           process owned by root stands out.
+        3. Read the script: `cat /usr/local/sbin/app-runner.sh`. Every
+           cycle it sources /etc/app/env inside a root shell and then
+           sleeps thirty seconds.
+        4. Check the config permissions: `ls -l /etc/app/env` reports
+           -rw-rw-rw- root root, so any local user can edit it.
+        5. Append the payload through the writable file:
+           `printf '%s\n' 'cp /root/flag.txt /tmp/flag' 'chmod 644 /tmp/flag' >> /etc/app/env`
+           Keep the leading dot-sourcing semantics in mind: the lines
+           execute exactly as written, so plain commands are enough.
+        6. Wait for the next cycle (thirty seconds worst case) and read
+           `cat /tmp/flag`. It contains FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

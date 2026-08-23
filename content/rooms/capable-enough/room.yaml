@@ -1,0 +1,80 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: capable-enough
+  title: 'Capable Enough'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 25
+  tags: [ssh, linux, capabilities, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    File capabilities are the fine-grained cousin of the setuid bit, and
+    someone on this box decided its Python interpreter should be allowed
+    to change user IDs all by itself. You will sweep the filesystem for
+    binaries carrying capabilities, work out what cap_setuid on an
+    interpreter actually grants, and use the interpreter to read a file
+    that only root can open.
+  objectives:
+    - 'Search the filesystem for file capabilities with getcap and read them back.'
+    - 'Explain what cap_setuid=ep on an interpreter lets arbitrary scripts do.'
+    - 'Escalate from the learner account to root through Python and capture /root/flag.txt.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The escalation surface is one capability bit on one
+      binary inside this container only; the intended abuse is reading a
+      single flag file.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: cap-setuid
+      title: 'Turn a capability into a root shell'
+      prompt: >-
+        Log in with the account from the banner and sweep the filesystem
+        for binaries that carry file capabilities. One stock interpreter
+        stands out, and it is not supposed to have any capabilities at
+        all. Use it to become root inside the box, read /root/flag.txt,
+        and submit the FLAG value it contains.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'getcap -r / 2>/dev/null walks the whole filesystem and prints every file that carries capabilities. Healthy boxes print nothing here, so any hit deserves a second look.'
+        - cost: 10
+          text: 'A binary with cap_setuid=ep may call setuid(0) successfully. When the binary is an interpreter, every script you feed it runs with that same power.'
+        - cost: 25
+          text: 'Run: python3 -c "import os; os.setuid(0); print(open(\"/root/flag.txt\").read())" and submit the FLAG value from the output.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Sweep for capabilities: `getcap -r / 2>/dev/null`. The only
+           hit is /usr/bin/python3.11 carrying cap_setuid=ep, which a
+           stock Debian image never has.
+        3. Confirm the file is root-owned: `ls -l /usr/bin/python3.11`.
+        4. Because the interpreter holds cap_setuid=ep, code it runs can
+           call setuid(0). Ask Python to do exactly that and read the
+           flag in the same process:
+           `python3 -c "import os; os.setuid(0); print(open(\"/root/flag.txt\").read())"`.
+        5. The command prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

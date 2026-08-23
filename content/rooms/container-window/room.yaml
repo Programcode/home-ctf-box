@@ -1,0 +1,88 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: container-window
+  title: 'Container Window'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 30
+  tags: [ssh, linux, containers, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    The box you log into is itself a container, and this room says so up
+    front: there is no docker socket here to grab, so the socket-theft
+    reflex you may have picked up will find nothing. What exists instead
+    is a trust relationship rendered honestly but in miniature. A
+    root-run inspection utility stands in for host-level access, and the
+    simulated host filesystem mounted at /hostsim holds a flag readable
+    only through that utility.
+  objectives:
+    - 'Check for a real container escape surface such as a docker socket and accept what the evidence says.'
+    - 'Read a sudoers drop-in to understand exactly which trust was delegated to your account.'
+    - 'Use the delegated inspection tool to enumerate and read /hostsim/root/flag.txt.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. There is no real host attachment and no docker socket anywhere in the image; /hostsim is an ordinary directory tree inside the same container, and the sudo grant wraps one read-only lab script whose cat and ls subcommands refuse paths outside /hostsim.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: inspect-hostsim
+      title: 'Use the delegated window into the host'
+      prompt: >-
+        Log in with the account from the banner. First do the honest
+        thing: look for a docker socket and confirm this box exposes
+        none. Then read what your account may run through sudo without a
+        password, study that tool, and use it to list and read files
+        under /hostsim, which plays the role of the attached host. The
+        file /hostsim/root/flag.txt is readable only through the tool;
+        submit the FLAG value inside it.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'ls -l /var/run/docker.sock fails here because no socket exists. When an expected escape surface is absent, read sudo -l next; delegation often replaces infrastructure in labs.'
+        - cost: 10
+          text: 'The NOPASSWD entry covers /usr/local/bin/container-inspect. Run it with no arguments for usage, then try info, and use ls and cat against paths under /hostsim.'
+        - cost: 25
+          text: 'sudo container-inspect ls /hostsim/root shows flag.txt, and sudo container-inspect cat /hostsim/root/flag.txt prints the FLAG value. Direct cat on the file fails because it is mode 600 root-owned.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Check the obvious escape surface: `ls -l /var/run/docker.sock`
+           reports No such file or directory. This room models its host
+           relationship differently, and the brief says so.
+        3. List delegations: `sudo -n -l` shows (root) NOPASSWD for
+           /usr/local/bin/container-inspect.
+        4. Study the tool before running it blind:
+           `cat /usr/local/bin/container-inspect`. It serves three
+           subcommands, info, ls, and cat, and refuses any path outside
+           /hostsim.
+        5. Enumerate the simulated host:
+           `sudo -n /usr/local/bin/container-inspect info` then
+           `sudo -n /usr/local/bin/container-inspect ls /hostsim/root`.
+           You see flag.txt among the entries.
+        6. Read the target file through the same window:
+           `sudo -n /usr/local/bin/container-inspect cat /hostsim/root/flag.txt`.
+           It prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag
