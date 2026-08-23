@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "LicenseInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": "AGPL-3.0-or-later",
+          "default": "AGPL-3.0-or-later",
+          "title": "Code",
+          "type": "string"
+        },
+        "content": {
+          "default": "CC-BY-SA-4.0",
+          "enum": [
+            "CC-BY-SA-4.0",
+            "CC-BY-4.0",
+            "MIT"
+          ],
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "title": "LicenseInfo",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "maxLength": 64,
+          "minLength": 3,
+          "title": "Slug",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 96,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "beginner",
+            "easy",
+            "medium",
+            "hard",
+            "insane"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "points": {
+          "maximum": 1000,
+          "minimum": 10,
+          "title": "Points",
+          "type": "integer"
+        },
+        "estimated_minutes": {
+          "maximum": 600,
+          "minimum": 5,
+          "title": "Estimated Minutes",
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Tags",
+          "type": "array"
+        },
+        "license": {
+          "$ref": "#/$defs/LicenseInfo"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "version",
+        "difficulty",
+        "points",
+        "estimated_minutes"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "PathModuleRef": {
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "optional_branch": {
+          "default": false,
+          "title": "Optional Branch",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "title": "PathModuleRef",
+      "type": "object"
+    },
+    "PathSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "track": {
+          "enum": [
+            "web-foundations",
+            "linux-networking",
+            "windows-ad",
+            "crypto-binary",
+            "defense-cloud"
+          ],
+          "title": "Track",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 40,
+          "title": "Summary",
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/PathModuleRef"
+          },
+          "minItems": 1,
+          "title": "Modules",
+          "type": "array"
+        },
+        "capstones": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Capstones",
+          "type": "array"
+        },
+        "certificate": {
+          "default": true,
+          "title": "Certificate",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "track",
+        "summary",
+        "modules"
+      ],
+      "title": "PathSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "openrange.io/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Path",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/PathSpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "PathBundle",
+  "type": "object",
+  "$id": "https://openrange.local/schemas/path.schema.json"
+}

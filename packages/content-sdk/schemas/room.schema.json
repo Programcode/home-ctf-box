@@ -1,0 +1,516 @@
+{
+  "$defs": {
+    "Healthcheck": {
+      "additionalProperties": false,
+      "properties": {
+        "http_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "/healthz",
+          "title": "Http Path"
+        },
+        "tcp_port": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tcp Port"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "title": "Healthcheck",
+      "type": "object"
+    },
+    "Hint": {
+      "additionalProperties": false,
+      "properties": {
+        "cost": {
+          "default": 0,
+          "title": "Cost",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 8,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Hint",
+      "type": "object"
+    },
+    "LicenseInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": "AGPL-3.0-or-later",
+          "default": "AGPL-3.0-or-later",
+          "title": "Code",
+          "type": "string"
+        },
+        "content": {
+          "default": "CC-BY-SA-4.0",
+          "enum": [
+            "CC-BY-SA-4.0",
+            "CC-BY-4.0",
+            "MIT"
+          ],
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "title": "LicenseInfo",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "maxLength": 64,
+          "minLength": 3,
+          "title": "Slug",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 96,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "beginner",
+            "easy",
+            "medium",
+            "hard",
+            "insane"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "points": {
+          "maximum": 1000,
+          "minimum": 10,
+          "title": "Points",
+          "type": "integer"
+        },
+        "estimated_minutes": {
+          "maximum": 600,
+          "minimum": 5,
+          "title": "Estimated Minutes",
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Tags",
+          "type": "array"
+        },
+        "license": {
+          "$ref": "#/$defs/LicenseInfo"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "version",
+        "difficulty",
+        "points",
+        "estimated_minutes"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "RoomSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "track": {
+          "enum": [
+            "web-foundations",
+            "linux-networking",
+            "windows-ad",
+            "crypto-binary",
+            "defense-cloud"
+          ],
+          "title": "Track",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "guided",
+            "challenge",
+            "box",
+            "investigation",
+            "range"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 40,
+          "title": "Summary",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "minLength": 16,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 2,
+          "title": "Objectives",
+          "type": "array"
+        },
+        "prerequisites": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Prerequisites",
+          "type": "array"
+        },
+        "scope": {
+          "$ref": "#/$defs/ScopeSpec"
+        },
+        "safety": {
+          "$ref": "#/$defs/SafetyDeclaration"
+        },
+        "target": {
+          "$ref": "#/$defs/TargetSpec"
+        },
+        "workstation": {
+          "default": "terminal",
+          "enum": [
+            "none",
+            "terminal",
+            "desktop"
+          ],
+          "title": "Workstation",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/Task"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "track",
+        "type",
+        "summary",
+        "objectives",
+        "scope",
+        "target",
+        "tasks"
+      ],
+      "title": "RoomSpec",
+      "type": "object"
+    },
+    "SafetyDeclaration": {
+      "additionalProperties": false,
+      "properties": {
+        "simulated_only": {
+          "default": true,
+          "title": "Simulated Only",
+          "type": "boolean"
+        },
+        "no_real_malware": {
+          "default": true,
+          "title": "No Real Malware",
+          "type": "boolean"
+        },
+        "reviewer_notes": {
+          "default": "",
+          "title": "Reviewer Notes",
+          "type": "string"
+        }
+      },
+      "title": "SafetyDeclaration",
+      "type": "object"
+    },
+    "ScopeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_targets": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowed Targets",
+          "type": "array"
+        },
+        "forbidden": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed_targets"
+      ],
+      "title": "ScopeSpec",
+      "type": "object"
+    },
+    "TargetSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "build_context": {
+          "description": "relative dir containing Dockerfile",
+          "title": "Build Context",
+          "type": "string"
+        },
+        "image_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Name"
+        },
+        "ports": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Ports",
+          "type": "array"
+        },
+        "healthcheck": {
+          "$ref": "#/$defs/Healthcheck"
+        },
+        "flag_delivery": {
+          "default": "env",
+          "enum": [
+            "env",
+            "file",
+            "static"
+          ],
+          "title": "Flag Delivery",
+          "type": "string"
+        },
+        "flag_env": {
+          "default": "ROOM_FLAG",
+          "title": "Flag Env",
+          "type": "string"
+        },
+        "flag_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flag Path"
+        },
+        "egress_allowlist": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Egress Allowlist",
+          "type": "array"
+        }
+      },
+      "required": [
+        "build_context",
+        "ports",
+        "healthcheck"
+      ],
+      "title": "TargetSpec",
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 140,
+          "minLength": 4,
+          "title": "Title",
+          "type": "string"
+        },
+        "prompt": {
+          "minLength": 16,
+          "title": "Prompt",
+          "type": "string"
+        },
+        "points": {
+          "maximum": 500,
+          "minimum": 10,
+          "title": "Points",
+          "type": "integer"
+        },
+        "hints": {
+          "items": {
+            "$ref": "#/$defs/Hint"
+          },
+          "title": "Hints",
+          "type": "array"
+        },
+        "solution": {
+          "minLength": 40,
+          "title": "Solution",
+          "type": "string"
+        },
+        "validator": {
+          "$ref": "#/$defs/Validator"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "prompt",
+        "points",
+        "solution",
+        "validator"
+      ],
+      "title": "Task",
+      "type": "object"
+    },
+    "Validator": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "exact",
+            "normalized",
+            "regex",
+            "numeric_range",
+            "set",
+            "per_session_flag",
+            "file_hash",
+            "manual"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Validator",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "openrange.io/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Room",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/RoomSpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "RoomBundle",
+  "type": "object",
+  "$id": "https://openrange.local/schemas/room.schema.json"
+}

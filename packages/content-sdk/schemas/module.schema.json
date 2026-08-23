@@ -1,0 +1,382 @@
+{
+  "$defs": {
+    "CalloutBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "callout",
+          "title": "Type",
+          "type": "string"
+        },
+        "tone": {
+          "enum": [
+            "info",
+            "warning",
+            "danger",
+            "tip"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "markdown": {
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tone",
+        "markdown"
+      ],
+      "title": "CalloutBlock",
+      "type": "object"
+    },
+    "CodeBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "code",
+          "title": "Type",
+          "type": "string"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "language",
+        "code"
+      ],
+      "title": "CodeBlock",
+      "type": "object"
+    },
+    "LicenseInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "const": "AGPL-3.0-or-later",
+          "default": "AGPL-3.0-or-later",
+          "title": "Code",
+          "type": "string"
+        },
+        "content": {
+          "default": "CC-BY-SA-4.0",
+          "enum": [
+            "CC-BY-SA-4.0",
+            "CC-BY-4.0",
+            "MIT"
+          ],
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "title": "LicenseInfo",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "maxLength": 64,
+          "minLength": 3,
+          "title": "Slug",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 96,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "beginner",
+            "easy",
+            "medium",
+            "hard",
+            "insane"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "points": {
+          "maximum": 1000,
+          "minimum": 10,
+          "title": "Points",
+          "type": "integer"
+        },
+        "estimated_minutes": {
+          "maximum": 600,
+          "minimum": 5,
+          "title": "Estimated Minutes",
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "maxLength": 32,
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Tags",
+          "type": "array"
+        },
+        "license": {
+          "$ref": "#/$defs/LicenseInfo"
+        }
+      },
+      "required": [
+        "slug",
+        "title",
+        "version",
+        "difficulty",
+        "points",
+        "estimated_minutes"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "ModuleSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "track": {
+          "enum": [
+            "web-foundations",
+            "linux-networking",
+            "windows-ad",
+            "crypto-binary",
+            "defense-cloud"
+          ],
+          "title": "Track",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 40,
+          "title": "Summary",
+          "type": "string"
+        },
+        "objectives": {
+          "items": {
+            "minLength": 16,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 2,
+          "title": "Objectives",
+          "type": "array"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/Section"
+          },
+          "maxItems": 24,
+          "minItems": 1,
+          "title": "Sections",
+          "type": "array"
+        },
+        "cheat_sheet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cheat Sheet"
+        },
+        "labs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "track",
+        "summary",
+        "objectives",
+        "sections"
+      ],
+      "title": "ModuleSpec",
+      "type": "object"
+    },
+    "ProseBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "prose",
+          "title": "Type",
+          "type": "string"
+        },
+        "markdown": {
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "markdown"
+      ],
+      "title": "ProseBlock",
+      "type": "object"
+    },
+    "QuizBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "quiz",
+          "title": "Type",
+          "type": "string"
+        },
+        "question_id": {
+          "title": "Question Id",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/QuizOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "answer_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Answer Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "title": "Explanation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "question_id",
+        "question",
+        "options",
+        "answer_ids",
+        "explanation"
+      ],
+      "title": "QuizBlock",
+      "type": "object"
+    },
+    "QuizOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "QuizOption",
+      "type": "object"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 4,
+          "title": "Title",
+          "type": "string"
+        },
+        "blocks": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "callout": "#/$defs/CalloutBlock",
+                "code": "#/$defs/CodeBlock",
+                "prose": "#/$defs/ProseBlock",
+                "quiz": "#/$defs/QuizBlock"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ProseBlock"
+              },
+              {
+                "$ref": "#/$defs/CalloutBlock"
+              },
+              {
+                "$ref": "#/$defs/CodeBlock"
+              },
+              {
+                "$ref": "#/$defs/QuizBlock"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "blocks"
+      ],
+      "title": "Section",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "openrange.io/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Module",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/ModuleSpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "ModuleBundle",
+  "type": "object",
+  "$id": "https://openrange.local/schemas/module.schema.json"
+}
