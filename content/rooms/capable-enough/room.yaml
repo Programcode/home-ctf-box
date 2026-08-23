@@ -31,14 +31,15 @@ spec:
     simulated_only: true
     no_real_malware: true
     reviewer_notes: >-
-      sshd requires setuid and DAC overrides for privilege separation and
-      the learner shell; capabilities are bounded to the ssh server profile.
-      Disposable Debian container on an internal lab network. sshd must run as
-      root inside the container because binding port 22 and privilege
-      separation require it; login sessions drop to unprivileged learner
-      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The escalation surface is one capability bit on one
-      binary inside this container only; the intended abuse is reading a
-      single flag file.
+      Disposable Debian container on an internal lab network. sshd runs as
+      root for privilege separation; capabilities are not bounded to any
+      sshd profile. The intended escalation grants cap_setuid=ep to
+      /usr/bin/python3.11; learner sessions run as the unprivileged learner
+      account (uid 1000) until that capability is abused. The image ships a
+      minimal python3 solely because the harness TCP healthcheck execs
+      python3 inside targets. The escalation surface is one capability bit
+      on one binary inside this container only; the intended abuse is
+      reading a single flag file.
   target:
     privilege_profile: elevated
     build_context: ./target

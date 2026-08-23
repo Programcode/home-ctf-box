@@ -40,7 +40,8 @@ case "$cmd" in
             '  "simulated_host": true,' \
             '  "introspection": "read-only",' \
             '  "mounts": ["/hostsim"],' \
-            '  "note": "lab simulation; no real host is attached"'
+            '  "note": "lab simulation; no real host is attached"' \
+            '}'
         ;;
     ls)
         [ "$#" -eq 2 ] || usage

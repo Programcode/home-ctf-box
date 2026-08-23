@@ -7,6 +7,6 @@ find it with getcap and use it to read /root/flag.txt as root. Points: 200.
 - `room.yaml` declares objectives, scope, safety, target, tasks.
 - `lesson/` holds the learner-facing brief.
 - `target/` builds the Debian SSH box (port 22, learner/learner).
-- `solver/solver.py` proves the intended path end to end with paramiko.
+- `solver/solver.py` proves the intended end-to-end path with paramiko.
 
 Verify locally with `cyberrange solve content/rooms/capable-enough`.
