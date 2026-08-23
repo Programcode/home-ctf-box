@@ -1,0 +1,82 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: shared-secrets
+  title: 'Shared Secrets'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 35
+  tags: [ssh, linux, password-reuse, lateral-movement]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    An old handoff note in the learner home directory records the
+    password of a backup service account that was rotated away long
+    ago, or so everyone assumed. You will enumerate local accounts,
+    spot the archivist who guards the records room, and test whether
+    the stale service credential still opens her session. If reuse is
+    as rampant here as the note implies, /var/archives/flag.txt stops
+    being private.
+  objectives:
+    - 'Enumerate local accounts from /etc/passwd and read shell fields to separate interactive users from service accounts.'
+    - 'Test a recovered credential against a second account with su instead of assuming it is stale.'
+    - 'Explain why one reused password collapses the boundary between a service identity and a data custodian.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation,
+      matching the other SSH rooms; sessions run as unprivileged
+      learner (uid 1000) or archivist (uid 1100), never root. The
+      credential-reuse chain is simulated inside this single container:
+      real deployments spread it across SMB and NFS hosts, and the
+      lesson says so plainly. Disposable Debian container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: reuse-chain
+      title: 'Walk the reused credential to the archives'
+      prompt: >-
+        SSH in as learner. A stale ops note in the home directory names
+        the svc_backup account's password. Enumerate the box's local
+        accounts and find which human-shaped account is worth trying it
+        on. Use su to switch into that account and read
+        /var/archives/flag.txt, which only the archivist may open.
+        Submit the FLAG value inside.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'Start with cat ~/shared-creds.txt for the recovered credential, then grep the passwd database for accounts whose shell is not nologin.'
+        - cost: 10
+          text: '/etc/passwd lists archivist (uid 1100, records custodian) with a bash shell, while svc_backup itself has nologin. The note never claims archivist uses a different password.'
+        - cost: 25
+          text: "Run su - archivist -c 'cat /var/archives/flag.txt' and answer the Password prompt with vEry0ld-backup-PW from the note. The file prints FLAG{...}."
+      solution: |
+        1. SSH in as learner (password learner).
+        2. `cat /home/learner/shared-creds.txt`. The 2025 rotation note
+           records `svc_backup : vEry0ld-backup-PW`.
+        3. `grep -v nologin /etc/passwd` shows learner, root, and
+           archivist (uid 1100, comment "records custodian"). The
+           svc_backup entry itself has /usr/sbin/nologin, so the
+           interesting target for the recovered password is archivist.
+        4. Switch accounts:
+           `su - archivist -c 'cat /var/archives/flag.txt'`, entering
+           vEry0ld-backup-PW at the prompt. Reuse works and the file,
+           mode 0640 owned by archivist, prints FLAG{...}.
+        5. Submit the FLAG value.
+      validator:
+        type: per_session_flag

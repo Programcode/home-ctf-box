@@ -1,0 +1,84 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: mailroom
+  title: 'Mailroom'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 35
+  tags: [smtp, enumeration, password-reuse, http]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    Meridian Freight runs a staff webmail portal, and its admin page
+    still exposes a legacy SMTP VRFY compatibility endpoint. You will
+    read the admin status page for operational context, use the VRFY
+    endpoint to tell real mailboxes from rejected guesses, and then
+    test a password the same page leaked against every mailbox you
+    confirmed. One confirmed inbox holds a message nobody should have
+    left sitting in a mailbox.
+  objectives:
+    - 'Enumerate valid mailbox names through a VRFY-style endpoint and interpret its response codes.'
+    - 'Recognize password reuse when one leaked credential unlocks accounts that were never named together.'
+    - 'Read an authenticated inbox over HTTP and capture the flag from the message it contains.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      No SMTP daemon exists in this room. The target is a Flask app that
+      imitates a mail server's user-facing behavior over plain HTTP and
+      labels itself as a simulation on every page; enumeration is a
+      lookup against an in-memory list. Disposable python:3.12-alpine
+      container running as uid 10001 under the locked privilege profile.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: vrfy-inbox
+      title: 'Enumerate mailboxes, then reuse the leak'
+      prompt: >-
+        Open the portal at / and read what operations left lying around.
+        Use the VRFY compatibility endpoint to work out which of your
+        candidate usernames are real mailboxes. The page leaks one
+        temporary password; try it against each confirmed mailbox over
+        HTTP basic auth at /inbox/<name>. Exactly one inbox holds a
+        message with the FLAG value. Submit it.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'The admin status page on / explains the VRFY compatibility endpoint and shows its response shape before you send a single request.'
+        - cost: 10
+          text: 'GET /api/vrfy?user=jharper returns code 250 plus a full name for real mailboxes and code 550 for anything else. Work through a short candidate list such as root, postmaster, admin, jharper, reception.'
+        - cost: 25
+          text: 'The status note names the temporary password spring-meadow-42. Request /inbox/jharper with basic auth using that password; the second message in her inbox carries FLAG{...}.'
+      solution: |
+        1. GET http://target:8000/. Read the status panel. It documents
+           the legacy endpoint /api/vrfy and mentions that every staff
+           mailbox currently shares the temporary password
+           spring-meadow-42 until rotation finishes.
+        2. Enumerate candidates:
+           GET /api/vrfy?user=root (550), ?user=postmaster (250),
+           ?user=admin (550), ?user=jharper (250), ?user=reception (250).
+           Only 250 responses are provisioned mailboxes.
+        3. Try the reused password against each confirmed mailbox:
+           GET /inbox/postmaster with basic auth postmaster /
+           spring-meadow-42 returns an autoresponder notice only.
+           GET /inbox/reception returns two harmless notices.
+        4. GET /inbox/jharper with the same credentials returns three
+           messages. Message 2, titled "Final architecture sign-off",
+           embeds the room flag inline.
+        5. Submit the FLAG value from that message body.
+      validator:
+        type: per_session_flag
