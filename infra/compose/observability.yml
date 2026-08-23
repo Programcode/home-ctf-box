@@ -1,0 +1,87 @@
+# Local observability stack: Prometheus, Grafana, node-exporter,
+# Loki + Promtail. Start with:
+#   docker compose --profile core up -d --wait   # backing services
+#   docker compose -f infra/compose/observability.yml up -d
+#
+# Same compose project name as the rest of OpenRange (`openrange`), so all
+# services share one default network and Prometheus reaches `api:8000`
+# once an api service exists in the project. Every host port binds to
+# 127.0.0.1 only; Loki and Promtail publish no ports at all.
+name: openrange
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    profiles: ['observability']
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    volumes:
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:19090:9090'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.0
+    profiles: ['observability']
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '127.0.0.1:13000:3000'
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    profiles: ['observability']
+    command:
+      - '--path.rootfs=/host'
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.6.15
+    profiles: ['observability']
+    command:
+      - '--config.file=/etc/loki/local-config.yaml'
+    volumes:
+      - ../observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3100/ready | grep -q ready']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.6.11
+    profiles: ['observability']
+    command:
+      - '--config.file=/etc/promtail/config.yml'
+    volumes:
+      - ../observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail-positions:/tmp
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+  promtail-positions:
