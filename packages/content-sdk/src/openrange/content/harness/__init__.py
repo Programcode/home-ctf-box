@@ -107,15 +107,32 @@ class RoomEnv:
                 "import socket,sys;"
                 f"s=socket.create_connection(('127.0.0.1',{hc.tcp_port}),2);sys.exit(0)"
             )
-        else:
-            path = hc.http_path or "/healthz"
-            code = (
-                "import urllib.request,sys;"
-                f"urllib.request.urlopen('http://127.0.0.1:{port}{path}',timeout=2);"
-                "sys.exit(0)"
-            )
+            result = self._container.exec_run(["python3", "-c", code])
+            if result.exit_code == 0:
+                return True
+            if result.exit_code in (126, 127):
+                # Target has no python3 (e.g. Debian-slim SSH boxes).
+                bash = f"exec 3<>/dev/tcp/127.0.0.1/{hc.tcp_port}"
+                return bool(self._container.exec_run(["bash", "-c", bash]).exit_code == 0)
+            return False
+        path = hc.http_path or "/healthz"
+        code = (
+            "import urllib.request,sys;"
+            f"urllib.request.urlopen('http://127.0.0.1:{port}{path}',timeout=2);"
+            "sys.exit(0)"
+        )
         result = self._container.exec_run(["python3", "-c", code])
-        return bool(result.exit_code == 0)
+        if result.exit_code == 0:
+            return True
+        if result.exit_code in (126, 127):
+            for probe_cmd in (
+                ["curl", "-fsS", f"http://127.0.0.1:{port}{path}"],
+                ["wget", "-qO-", f"http://127.0.0.1:{port}{path}"],
+            ):
+                if self._container.exec_run(probe_cmd).exit_code == 0:
+                    return True
+            return False
+        return False
 
     def restart(self) -> None:
         """Reset proof: fresh process must serve fresh state."""
@@ -198,8 +215,8 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
                     suffix = task_id.upper().replace("-", "_")
                     env[f"{bundle.spec.target.flag_env}_{suffix}"] = flag
 
-        container = client.containers.run(
-            image.id,
+        elevated = bundle.spec.target.privilege_profile == "elevated"
+        container_kwargs: dict[str, object] = dict(
             detach=True,
             name=f"target-{run_id}",
             hostname="target",
@@ -208,9 +225,23 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
             nano_cpus=int(1.5 * 1e9),
             mem_limit="512m",
             pids_limit=256,
-            security_opt=["no-new-privileges:true"],
-            cap_drop=["ALL"],
         )
+        if elevated:
+            # Bounded set for setuid-dependent services (sshd privsep, sudo,
+            # SUID). no-new-privileges must stay off or elevation is a no-op.
+            container_kwargs["cap_add"] = [
+                "CHOWN",
+                "DAC_OVERRIDE",
+                "FOWNER",
+                "SETGID",
+                "SETUID",
+                "NET_BIND_SERVICE",
+                "SYS_CHROOT",
+            ]
+        else:
+            container_kwargs["cap_drop"] = ["ALL"]
+            container_kwargs["security_opt"] = ["no-new-privileges:true"]
+        container = client.containers.run(image.id, **container_kwargs)  # type: ignore[arg-type]
 
         attacker_image = _ensure_attacker_image(client)
         repo_root = Path(__file__).resolve().parents[6]

@@ -304,6 +304,13 @@
           },
           "title": "Egress Allowlist",
           "type": "array"
+        },
+        "privilege_profile": {
+          "default": "locked",
+          "description": "locked: cap_drop ALL + no-new-privileges (default, web targets). elevated: bounded capability set without no-new-privileges for targets that need setuid (sshd privsep, sudo, SUID binaries).",
+          "enum": ["locked", "elevated"],
+          "title": "Privilege Profile",
+          "type": "string"
         }
       },
       "required": ["build_context", "ports", "healthcheck"],
