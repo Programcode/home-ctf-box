@@ -31,6 +31,12 @@ TABLES = [
     "login_attempts",
     "api_tokens",
     "users",
+    "score_adjustments",
+    "score_events",
+    "user_achievements",
+    "achievements_catalog",
+    "leaderboard_snapshots",
+    "anti_cheat_signals",
 ]
 
 
