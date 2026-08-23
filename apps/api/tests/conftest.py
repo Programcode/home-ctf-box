@@ -15,6 +15,10 @@ TEST_DB_URL = "postgresql+asyncpg://openrange:openrange@localhost:15432/openrang
 _TEST_DB_DSN = "postgresql://openrange:openrange@localhost:15432/openrange_test"
 
 TABLES = [
+    "announcements",
+    "notification_prefs",
+    "notifications",
+    "email_outbox",
     "certificates",
     "hint_events",
     "notes",

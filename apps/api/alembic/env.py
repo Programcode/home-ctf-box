@@ -9,6 +9,9 @@ from alembic import context
 from openrange.api.db.base import Base
 from openrange.api.labs import models as labs_models  # noqa: F401 - register tables
 from openrange.api.learning import models as learning_models  # noqa: F401 - register tables
+from openrange.api.notifications import (
+    models as notifications_models,  # noqa: F401 - register tables
+)
 from openrange.api.orgs import models as orgs_models  # noqa: F401 - register tables
 from openrange.api.scoring import models as scoring_models  # noqa: F401 - register tables
 from openrange.api.users import models  # noqa: F401 - register tables

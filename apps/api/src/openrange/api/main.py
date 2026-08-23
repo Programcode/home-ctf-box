@@ -16,6 +16,7 @@ from openrange.api.health import router as health_router
 from openrange.api.labs.routes import router as labs_router
 from openrange.api.learning.routes import router as learning_router
 from openrange.api.middleware import RateLimitMiddleware, RequestContextMiddleware
+from openrange.api.notifications.routes import router as notifications_router
 from openrange.api.orgs.routes import api_router as orgs_router
 from openrange.api.scoring.routes import router as scoring_router
 from openrange.api.setup.routes import router as setup_router
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_me_router)
     app.include_router(labs_router)
     app.include_router(learning_router)
+    app.include_router(notifications_router)
     app.include_router(orgs_router)
     app.include_router(scoring_router)
     app.include_router(webauthn_router)
