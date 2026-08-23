@@ -50,13 +50,13 @@ spec:
     - id: first-login
       title: 'Log in over SSH and read the objective file'
       prompt: >-
-        Connect to the box at ssh://target:22 with the account printed in
-        the login banner, list what is in the account's home directory,
+        Connect to the box at ssh://target:22 and log in as learner with
+        password learner, list what is in the account's home directory,
         and read the flag.txt file sitting there. Submit the FLAG value.
       points: 75
       hints:
         - cost: 0
-          text: 'The connect banner names the lab account. The password is the same word as the username.'
+          text: 'The lab account is learner and the password is learner.'
         - cost: 10
           text: 'After logging in, pwd shows where you are and ls -la lists the files around you, including hidden ones.'
         - cost: 25

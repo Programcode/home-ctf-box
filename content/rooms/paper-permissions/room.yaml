@@ -52,7 +52,7 @@ spec:
     - id: leaky-backup
       title: 'Find the readable backup of the root-only config'
       prompt: >-
-        Log in with the account from the banner. The service config in
+        Log in as learner with password learner. The service config in
         /etc/app.conf is root-only, but something on this box makes
         copies elsewhere on a schedule. Find a copy you are allowed to
         read, open it, and submit the FLAG value from its deploy token.

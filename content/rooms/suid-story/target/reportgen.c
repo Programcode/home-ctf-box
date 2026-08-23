@@ -1,7 +1,6 @@
 /* reportgen: fake status reporter for the SUID Story lab scenario.
  * Room target only: the --dump path is deliberately misconfigured. */
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -16,10 +15,14 @@ int main(int argc, char **argv)
         return 0;
     }
     if (strcmp(argv[1], "--dump") == 0) {
-        /* Best effort: keep the effective uid if setuid(0) is blocked. */
-        setuid(0);
+        if (setuid(0) != 0) {
+            perror("reportgen: setuid");
+            return 1;
+        }
         fflush(stdout);
-        return system("cat /root/flag.txt");
+        execl("/bin/cat", "cat", "/root/flag.txt", (char *)NULL);
+        perror("reportgen: execl");
+        return 1;
     }
     fprintf(stderr, "reportgen: unknown option: %s\n", argv[1]);
     return 1;

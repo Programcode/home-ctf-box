@@ -2,7 +2,7 @@
 # Room entrypoint: prepares the learner box and runs the SSH server.
 set -eu
 
-FLAG="${ROOM_FLAG:-FLAG{FLAGNOTSET0000000000000000}}"
+FLAG="${ROOM_FLAG:-FLAGNOTSET0000000000000000}"
 
 # The objective lives in the learner account's own home directory.
 umask 022
