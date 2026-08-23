@@ -11,11 +11,7 @@
         },
         "content": {
           "default": "CC-BY-SA-4.0",
-          "enum": [
-            "CC-BY-SA-4.0",
-            "CC-BY-4.0",
-            "MIT"
-          ],
+          "enum": ["CC-BY-SA-4.0", "CC-BY-4.0", "MIT"],
           "title": "Content",
           "type": "string"
         }
@@ -43,13 +39,7 @@
           "type": "string"
         },
         "difficulty": {
-          "enum": [
-            "beginner",
-            "easy",
-            "medium",
-            "hard",
-            "insane"
-          ],
+          "enum": ["beginner", "easy", "medium", "hard", "insane"],
           "title": "Difficulty",
           "type": "string"
         },
@@ -78,14 +68,7 @@
           "$ref": "#/$defs/LicenseInfo"
         }
       },
-      "required": [
-        "slug",
-        "title",
-        "version",
-        "difficulty",
-        "points",
-        "estimated_minutes"
-      ],
+      "required": ["slug", "title", "version", "difficulty", "points", "estimated_minutes"],
       "title": "Metadata",
       "type": "object"
     },
@@ -102,9 +85,7 @@
           "type": "boolean"
         }
       },
-      "required": [
-        "slug"
-      ],
+      "required": ["slug"],
       "title": "PathModuleRef",
       "type": "object"
     },
@@ -148,11 +129,7 @@
           "type": "boolean"
         }
       },
-      "required": [
-        "track",
-        "summary",
-        "modules"
-      ],
+      "required": ["track", "summary", "modules"],
       "title": "PathSpec",
       "type": "object"
     }
@@ -176,12 +153,7 @@
       "$ref": "#/$defs/PathSpec"
     }
   },
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
+  "required": ["apiVersion", "kind", "metadata", "spec"],
   "title": "PathBundle",
   "type": "object",
   "$id": "https://openrange.local/schemas/path.schema.json"

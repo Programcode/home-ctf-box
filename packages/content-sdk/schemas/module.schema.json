@@ -9,12 +9,7 @@
           "type": "string"
         },
         "tone": {
-          "enum": [
-            "info",
-            "warning",
-            "danger",
-            "tip"
-          ],
+          "enum": ["info", "warning", "danger", "tip"],
           "title": "Tone",
           "type": "string"
         },
@@ -23,11 +18,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "type",
-        "tone",
-        "markdown"
-      ],
+      "required": ["type", "tone", "markdown"],
       "title": "CalloutBlock",
       "type": "object"
     },
@@ -48,11 +39,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "type",
-        "language",
-        "code"
-      ],
+      "required": ["type", "language", "code"],
       "title": "CodeBlock",
       "type": "object"
     },
@@ -67,11 +54,7 @@
         },
         "content": {
           "default": "CC-BY-SA-4.0",
-          "enum": [
-            "CC-BY-SA-4.0",
-            "CC-BY-4.0",
-            "MIT"
-          ],
+          "enum": ["CC-BY-SA-4.0", "CC-BY-4.0", "MIT"],
           "title": "Content",
           "type": "string"
         }
@@ -99,13 +82,7 @@
           "type": "string"
         },
         "difficulty": {
-          "enum": [
-            "beginner",
-            "easy",
-            "medium",
-            "hard",
-            "insane"
-          ],
+          "enum": ["beginner", "easy", "medium", "hard", "insane"],
           "title": "Difficulty",
           "type": "string"
         },
@@ -134,14 +111,7 @@
           "$ref": "#/$defs/LicenseInfo"
         }
       },
-      "required": [
-        "slug",
-        "title",
-        "version",
-        "difficulty",
-        "points",
-        "estimated_minutes"
-      ],
+      "required": ["slug", "title", "version", "difficulty", "points", "estimated_minutes"],
       "title": "Metadata",
       "type": "object"
     },
@@ -203,12 +173,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "track",
-        "summary",
-        "objectives",
-        "sections"
-      ],
+      "required": ["track", "summary", "objectives", "sections"],
       "title": "ModuleSpec",
       "type": "object"
     },
@@ -225,10 +190,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "type",
-        "markdown"
-      ],
+      "required": ["type", "markdown"],
       "title": "ProseBlock",
       "type": "object"
     },
@@ -267,14 +229,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "type",
-        "question_id",
-        "question",
-        "options",
-        "answer_ids",
-        "explanation"
-      ],
+      "required": ["type", "question_id", "question", "options", "answer_ids", "explanation"],
       "title": "QuizBlock",
       "type": "object"
     },
@@ -290,10 +245,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "id",
-        "text"
-      ],
+      "required": ["id", "text"],
       "title": "QuizOption",
       "type": "object"
     },
@@ -342,11 +294,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "id",
-        "title",
-        "blocks"
-      ],
+      "required": ["id", "title", "blocks"],
       "title": "Section",
       "type": "object"
     }
@@ -370,12 +318,7 @@
       "$ref": "#/$defs/ModuleSpec"
     }
   },
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
+  "required": ["apiVersion", "kind", "metadata", "spec"],
   "title": "ModuleBundle",
   "type": "object",
   "$id": "https://openrange.local/schemas/module.schema.json"

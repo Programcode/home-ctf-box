@@ -50,9 +50,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "text"
-      ],
+      "required": ["text"],
       "title": "Hint",
       "type": "object"
     },
@@ -67,11 +65,7 @@
         },
         "content": {
           "default": "CC-BY-SA-4.0",
-          "enum": [
-            "CC-BY-SA-4.0",
-            "CC-BY-4.0",
-            "MIT"
-          ],
+          "enum": ["CC-BY-SA-4.0", "CC-BY-4.0", "MIT"],
           "title": "Content",
           "type": "string"
         }
@@ -99,13 +93,7 @@
           "type": "string"
         },
         "difficulty": {
-          "enum": [
-            "beginner",
-            "easy",
-            "medium",
-            "hard",
-            "insane"
-          ],
+          "enum": ["beginner", "easy", "medium", "hard", "insane"],
           "title": "Difficulty",
           "type": "string"
         },
@@ -134,14 +122,7 @@
           "$ref": "#/$defs/LicenseInfo"
         }
       },
-      "required": [
-        "slug",
-        "title",
-        "version",
-        "difficulty",
-        "points",
-        "estimated_minutes"
-      ],
+      "required": ["slug", "title", "version", "difficulty", "points", "estimated_minutes"],
       "title": "Metadata",
       "type": "object"
     },
@@ -160,13 +141,7 @@
           "type": "string"
         },
         "type": {
-          "enum": [
-            "guided",
-            "challenge",
-            "box",
-            "investigation",
-            "range"
-          ],
+          "enum": ["guided", "challenge", "box", "investigation", "range"],
           "title": "Type",
           "type": "string"
         },
@@ -203,11 +178,7 @@
         },
         "workstation": {
           "default": "terminal",
-          "enum": [
-            "none",
-            "terminal",
-            "desktop"
-          ],
+          "enum": ["none", "terminal", "desktop"],
           "title": "Workstation",
           "type": "string"
         },
@@ -221,15 +192,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "track",
-        "type",
-        "summary",
-        "objectives",
-        "scope",
-        "target",
-        "tasks"
-      ],
+      "required": ["track", "type", "summary", "objectives", "scope", "target", "tasks"],
       "title": "RoomSpec",
       "type": "object"
     },
@@ -274,9 +237,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "allowed_targets"
-      ],
+      "required": ["allowed_targets"],
       "title": "ScopeSpec",
       "type": "object"
     },
@@ -316,11 +277,7 @@
         },
         "flag_delivery": {
           "default": "env",
-          "enum": [
-            "env",
-            "file",
-            "static"
-          ],
+          "enum": ["env", "file", "static"],
           "title": "Flag Delivery",
           "type": "string"
         },
@@ -349,11 +306,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "build_context",
-        "ports",
-        "healthcheck"
-      ],
+      "required": ["build_context", "ports", "healthcheck"],
       "title": "TargetSpec",
       "type": "object"
     },
@@ -398,14 +351,7 @@
           "$ref": "#/$defs/Validator"
         }
       },
-      "required": [
-        "id",
-        "title",
-        "prompt",
-        "points",
-        "solution",
-        "validator"
-      ],
+      "required": ["id", "title", "prompt", "points", "solution", "validator"],
       "title": "Task",
       "type": "object"
     },
@@ -478,9 +424,7 @@
           "title": "Values"
         }
       },
-      "required": [
-        "type"
-      ],
+      "required": ["type"],
       "title": "Validator",
       "type": "object"
     }
@@ -504,12 +448,7 @@
       "$ref": "#/$defs/RoomSpec"
     }
   },
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
+  "required": ["apiVersion", "kind", "metadata", "spec"],
   "title": "RoomBundle",
   "type": "object",
   "$id": "https://openrange.local/schemas/room.schema.json"
