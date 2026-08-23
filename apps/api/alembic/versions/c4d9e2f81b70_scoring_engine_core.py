@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "c4d9e2f81b70"
-down_revision: str | None = "82bfa5281c50"
+down_revision: str | None = "b7d4e2a91c63"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
