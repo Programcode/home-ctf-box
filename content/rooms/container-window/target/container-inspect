@@ -1,0 +1,62 @@
+#!/bin/sh
+# container-inspect: read-only window onto the simulated host filesystem.
+# Lab stand-in for host-level introspection. Refuses paths outside /hostsim.
+BASE=/hostsim
+
+deny() {
+    printf '%s\n' "container-inspect: $1" >&2
+    exit 2
+}
+
+usage() {
+    printf '%s\n' \
+        "Usage: container-inspect info" \
+        "       container-inspect ls PATH" \
+        "       container-inspect cat FILE"
+    exit 2
+}
+
+in_base() {
+    case "$1" in
+        "$BASE"|"$BASE"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+traversal() {
+    case "$1" in
+        *..*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+[ "$#" -ge 1 ] || usage
+cmd=$1
+
+case "$cmd" in
+    info)
+        printf '%s\n' \
+            '{' \
+            '  "simulated_host": true,' \
+            '  "introspection": "read-only",' \
+            '  "mounts": ["/hostsim"],' \
+            '  "note": "lab simulation; no real host is attached"' \
+            '}'
+        ;;
+    ls)
+        [ "$#" -eq 2 ] || usage
+        in_base "$2" || deny "path outside $BASE denied"
+        traversal "$2" && deny "path traversal denied"
+        ls -la "$2"
+        ;;
+    cat)
+        [ "$#" -eq 2 ] || usage
+        in_base "$2" || deny "path outside $BASE denied"
+        traversal "$2" && deny "path traversal denied"
+        [ -f "$2" ] || deny "no such file: $2"
+        cat "$2"
+        ;;
+    *)
+        usage
+        ;;
+esac

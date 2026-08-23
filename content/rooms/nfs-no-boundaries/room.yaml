@@ -1,0 +1,90 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: nfs-no-boundaries
+  title: 'NFS No Boundaries'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 35
+  tags: [ssh, linux, nfs, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    The no_root_squash mistake is one of the oldest privileges-for-free
+    stories in Unix storage: an NFS export that trusts remote root turns
+    any attacker client into the fileserver's root. This lab keeps the
+    lesson and shrinks the machinery onto a single box. A share lives at
+    /srv/share with its export line preserved for study, and the sync
+    pipeline stages a recovery helper there that carries the SUID bit.
+  objectives:
+    - 'Locate the exported share configuration on the box and read what it grants.'
+    - 'Find SUID-root files in world-writable locations with find -perm.'
+    - 'Explain the real no_root_squash attack flow and execute the lab equivalent to capture /root/flag.txt.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. Simulated versus real, exactly: no NFS server, mount daemon,
+      or network filesystem runs or is installed; /etc/exports exists as a
+      teaching artifact only, and /srv/share is an ordinary directory with
+      mode 777 standing in for the misconfigured export. What is real is the
+      SUID bit on /usr/local/libexec/snapshot-recover, staged into the share by
+      root's cron job, and confined entirely to this container.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: share-suid-exec
+      title: 'Execute what the share gave you'
+      prompt: >-
+        Log in with the account from the banner and read the export
+        definition this box documents under /etc/exports, then inventory
+        /srv/share for files carrying the SUID bit. One recovery helper
+        gets staged there by a scheduled job. Run it so it acts as root,
+        have it print /root/flag.txt, and submit the FLAG value from its
+        output.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'cat /etc/exports shows the export line this lab models, including no_root_squash. ls -ld /srv/share shows why anyone could write into it if the mount were real.'
+        - cost: 10
+          text: 'find /srv/share -perm -4000 -type f lists SUID files under the share. ls -l marks them with an s in the owner execute position.'
+        - cost: 25
+          text: 'Run /srv/share/snapshot-recover -c "cat /root/flag.txt". The helper drops you into a privileged shell command; its output contains the FLAG value.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Study the modeled misconfiguration:
+           `cat /etc/exports` shows `/srv/share *(rw,no_root_squash,...)`.
+           In the real flow this option makes remote root count as local
+           root, so an attacker mounts the export, plants a root-owned
+           SUID binary, and any client executes it as root. The lesson
+           prose spells out which parts this single box simulates.
+        3. Inventory the share:
+           `ls -la /srv/share` then
+           `find /srv/share -perm -4000 -type f`. The staged helper is
+           /srv/share/snapshot-recover, owned by root with mode 4755.
+        4. Confirm the bit works before trusting it:
+           `/srv/share/snapshot-recover -c id` reports uid=0 root.
+        5. Read the flag through the same helper:
+           `/srv/share/snapshot-recover -c "cat /root/flag.txt"`.
+           It prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

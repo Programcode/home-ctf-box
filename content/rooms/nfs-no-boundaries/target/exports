@@ -1,0 +1,4 @@
+# Teaching artifact: mirrors the export misconfiguration this lab models.
+# No NFS daemon runs in this container; see the lesson brief for the
+# exact split between what is simulated and what is real.
+/srv/share *(rw,no_root_squash,insecure,sync)
