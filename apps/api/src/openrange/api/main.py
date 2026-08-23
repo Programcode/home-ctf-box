@@ -18,8 +18,8 @@ from openrange.api.learning.routes import router as learning_router
 from openrange.api.metrics import MetricsMiddleware
 from openrange.api.metrics import router as metrics_router
 from openrange.api.middleware import RateLimitMiddleware, RequestContextMiddleware
-from openrange.api.readiness import router as readiness_router
 from openrange.api.orgs.routes import api_router as orgs_router
+from openrange.api.readiness import router as readiness_router
 from openrange.api.scoring.routes import router as scoring_router
 from openrange.api.setup.routes import router as setup_router
 
