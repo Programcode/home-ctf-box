@@ -30,7 +30,8 @@ spec:
   safety:
     simulated_only: true
     no_real_malware: true
-    reviewer_notes: sshd requires setuid and DAC overrides for privilege separation and the learner shell; capabilities are bounded to the ssh server profile.
+    reviewer_notes:
+      sshd requires setuid and DAC overrides for privilege separation and the learner shell; capabilities are bounded to the ssh server profile.
       Disposable Debian container on an internal lab network. sshd must run as
       root inside the container because binding port 22 and privilege
       separation require it; login sessions drop to unprivileged learner
