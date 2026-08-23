@@ -1,0 +1,72 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: union-vault
+  title: 'Union Vault'
+  version: 1.0.0
+  difficulty: easy
+  points: 225
+  estimated_minutes: 30
+  tags: [sqli, web, union]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    GadgetHub's catalog search glues the q parameter straight into a
+    SELECT that returns two columns, name and price. The same SQLite
+    database also holds a vault table whose secret column never appears
+    on any page. You will close the quote in the search term, count the
+    columns with a UNION SELECT, and render the vault secret as if it
+    were a product.
+  objectives:
+    - 'Confirm string-concatenated SQL from the search endpoint behavior.'
+    - 'Match the original column count with a UNION SELECT payload.'
+    - 'Capture the per-session flag stored in the vault table.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'SQLite-backed Flask app; injection stays inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: union-extract
+      title: 'Read the vault through the product listing'
+      prompt: >-
+        The /products endpoint searches by name and renders two fields
+        per row. A vault table in the same database holds one secret
+        column. Craft a UNION SELECT payload for the q parameter that
+        appends the vault secret as an extra product row, then submit
+        the FLAG value it prints.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'Type a single quote into the search and read the SQLite error. The query is built by concatenating your input.'
+        - cost: 10
+          text: 'The SELECT returns two columns per row. Your UNION must supply exactly two values; a placeholder such as 1 fills the second slot.'
+        - cost: 25
+          text: "GET /products with q=' UNION SELECT secret, 1 FROM vault-- . The vault secret is rendered in place of a product name."
+      solution: |
+        1. Open http://target:8000/products?q=cable to see the normal
+           two-field rows. Then submit q=' and read the SQLite error;
+           it proves the input reaches the query unescaped.
+        2. The query is SELECT name, price FROM products WHERE name
+           LIKE '%<q>%'. A UNION arm must therefore return exactly two
+           columns.
+        3. Send q=' UNION SELECT secret, 1 FROM vault-- . The trailing
+           -- comments out the closing %' of the LIKE clause, and the
+           vault secret arrives as an extra row rendered like a product
+           name.
+        4. The listing now contains the room flag. Submit it.
+      validator:
+        type: per_session_flag

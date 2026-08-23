@@ -1,0 +1,63 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: trusted-proxy
+  title: 'Trusted Proxy'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 10
+  tags: [headers, spoofing, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Gatehouse guards an internal panel by asking where a request came from,
+    but it believes the X-Forwarded-For header before its own socket data.
+    Claim the office address in a header and the panel opens without you
+    going anywhere near it.
+  objectives:
+    - 'See how /internal decides between office and outside callers.'
+    - 'Override the source decision with a caller-supplied forwarding header.'
+    - 'Capture the per-session flag from the internal panel.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask gate; header spoofing stays inside the lab network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: xff-spoof
+      title: 'Convince the panel you sit in the office'
+      prompt: >-
+        Reach GET /internal as if your request arrived from the office address
+        and submit the FLAG value printed on the panel page.
+      points: 75
+      hints:
+        - cost: 0
+          text: 'Request /internal once with no tricks and read the refusal. The body tells you which address the app thinks you have.'
+        - cost: 10
+          text: 'The check prefers the first hop of the X-Forwarded-For header over the real socket address, and nothing verifies who set it.'
+        - cost: 25
+          text: "curl -H 'X-Forwarded-For: 127.0.0.1' http://target:8000/internal renders the panel page with FLAG{...}."
+      solution: |
+        1. GET /internal without changes. The 403 body reports the address
+           the server saw, which shows the decision rides on caller-supplied
+           data rather than the socket.
+        2. Claim the office address in a forwarding header:
+           curl -H 'X-Forwarded-For: 127.0.0.1' http://target:8000/internal
+        3. The first header entry replaces the socket address in the check,
+           so the panel renders and prints the room flag. Submit it.
+      validator:
+        type: per_session_flag

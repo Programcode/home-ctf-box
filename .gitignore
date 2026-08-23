@@ -42,3 +42,6 @@ coverage/
 # Local agent artifacts
 .audit/
 backups/
+
+# Solver pycache from harness runs
+content/rooms/*/solver/__pycache__/

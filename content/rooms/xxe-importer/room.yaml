@@ -1,0 +1,68 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: xxe-importer
+  title: 'XXE Importer'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 30
+  tags: [xxe, xml, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    ImportBridge accepts XML uploads from legacy partner systems and
+    still resolves external entities while parsing them. You will send
+    a document whose DOCTYPE defines an entity backed by a local file,
+    watch the importer echo the entity's contents back, and read the
+    flag file off the service's filesystem without executing anything.
+  objectives:
+    - 'Recognize parsers that resolve external entities from their behavior.'
+    - 'Craft a DOCTYPE entity that reads a local file through the parser.'
+    - 'Capture the per-session flag leaked into the import result.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'File reads stay inside the lab container; no outbound network calls are possible.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: leak-flag-via-xxe
+      title: 'Read a local file through the importer'
+      prompt: >-
+        POST an XML document to /import that declares an internal entity
+        pointing at the service's own /flag.txt and references it in the
+        document body. The import result page echoes parsed content, so
+        the file lands in the response. Submit the FLAG value.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'The importer advertises full entity support. An XML entity can have the parser fetch content from somewhere else before the document is processed.'
+        - cost: 10
+          text: 'Declare it in the DOCTYPE: <!ENTITY x SYSTEM "file:///flag.txt">. Then reference &x; anywhere in the document body.'
+        - cost: 25
+          text: 'POST to /import with <?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///flag.txt">]><r>&x;</r> as the body. The echoed pre block contains FLAG{...}.'
+      solution: |
+        1. Confirm the importer parses arbitrary XML by posting any well
+           formed document to /import.
+        2. Build a document with an internal DTD entity whose system
+           identifier is file:///flag.txt and reference the entity in an
+           element: <?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM
+           "file:///flag.txt">]><r>&x;</r>.
+        3. The expat parser resolves the entity, the handler collects its
+           characters as normal text, and the import result page echoes
+           the flag. Submit it.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: predictable-reset
+  title: 'Predictable Reset'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 25
+  tags: [authn, crypto, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    ResetFlow issues password reset links whose tokens never touch real
+    randomness. The token is just the username combined with a
+    10-minute wall-clock window and run through MD5, so anyone who
+    knows the account name can mint a valid link themselves. You will
+    request a reset for an account, rebuild the token offline, and read
+    the credentials the service prints.
+  objectives:
+    - 'Infer reset-token construction from expiry hints in the product copy.'
+    - 'Reproduce the token computation offline for the current time window.'
+    - 'Capture the per-session flag printed on the forged reset page.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask app; tokens stay inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: forged-reset-token
+      title: 'Mint a valid reset link without the email'
+      prompt: >-
+        ResetFlow resets passwords through POST /forgot followed by GET
+        /reset with a username and token. The token carries no secret.
+        Forge a token for any username and submit the FLAG value shown
+        on the resulting reset page.
+      points: 175
+      hints:
+        - cost: 0
+          text: 'The home page documents the two-step flow. Ask where the token could come from if the service can regenerate it every 10 minutes without storing secrets.'
+        - cost: 10
+          text: 'The 10-minute expiry is the tell. Combine the username with the current Unix time divided by 600 and hash the pair with MD5.'
+        - cost: 25
+          text: 'POST /forgot with form field username=ada. Then compute md5(f"ada:{int(time.time()) // 600}").hexdigest() locally and GET /reset?username=ada&token=<digest>. The page prints the flag.'
+      solution: |
+        1. Open http://target:8000 and read the documented flow.
+        2. POST /forgot with form field username=ada. The service mints
+           a link for the current 10-minute window.
+        3. Rebuild the token offline. The server computes
+           md5("{username}:{int(time.time()) // 600}"), so run
+           hashlib.md5(f"ada:{int(time.time()) // 600}".encode())
+           .hexdigest() on your machine. No server-side secret enters
+           the digest.
+        4. GET /reset?username=ada&token=<computed digest>. A matching
+           token returns the reset page, which prints the room flag as
+           the new credentials. Submit it.
+      validator:
+        type: per_session_flag

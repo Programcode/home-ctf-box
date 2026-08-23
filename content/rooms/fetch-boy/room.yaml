@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: fetch-boy
+  title: 'Fetch Boy'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 25
+  tags: [ssrf, web, recon]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Peeker turns any URL into a plain-text preview, and it does the
+    fetching from the server side. An admin service answers only on the
+    container's loopback interface at port 9001, where no lab user can
+    reach it directly. You will point the preview at the loopback
+    address, let the proxy fetch the admin page on your behalf, and
+    read the flag from the response it returns.
+  objectives:
+    - 'Recognize a server-side request forged from a URL preview feature.'
+    - 'Reach a loopback-only admin service through the proxy.'
+    - 'Capture the per-session flag returned in the preview response.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask app; the SSRF target is its own loopback interface.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: ssrf-admin
+      title: 'Make the preview fetch the admin page for you'
+      prompt: >-
+        The /fetch endpoint retrieves whatever URL it is given and shows
+        the body. The same container runs an internal-only admin
+        service on localhost port 9001 whose /admin page holds the
+        room's secret. Route one request through the preview and submit
+        the FLAG value it returns.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'The preview fetches from the server, not your browser. Ask which addresses are reachable from inside the container but not from your machine.'
+        - cost: 10
+          text: 'The loopback interface of the target itself counts. A URL pointing at 127.0.0.1 makes urllib connect to the container, not to you.'
+        - cost: 25
+          text: 'GET /fetch with url=http://127.0.0.1:9001/admin. The proxy prints the admin service response, which contains FLAG{...}.'
+      solution: |
+        1. Open http://target:8000 and try a normal preview, for
+           example url=http://example.com, to confirm the endpoint
+           returns fetched bodies.
+        2. The app runs an HTTPServer bound to 127.0.0.1:9001 in the
+           same container. It serves the flag at GET /admin and has no
+           address on the room network.
+        3. Because urlopen executes inside the container, send
+           GET /fetch?url=http://127.0.0.1:9001/admin. The preview
+           proxies the admin page back to you.
+        4. The previewed body contains the room flag. Submit it.
+      validator:
+        type: per_session_flag

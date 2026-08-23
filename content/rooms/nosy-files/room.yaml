@@ -1,0 +1,70 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: nosy-files
+  title: 'Nosy Files'
+  version: 1.0.0
+  difficulty: beginner
+  points: 150
+  estimated_minutes: 20
+  tags: [path-traversal, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    DocVault is a small internal document portal that fetches whatever
+    file name the browser asks for. You will learn how a download
+    parameter joined onto a base directory without checks turns into
+    arbitrary file read, walk out of the documents folder, and read a
+    release token the deployment left outside the public tree.
+  objectives:
+    - 'Spot an unvalidated download path from the way the portal serves files.'
+    - 'Build traversal sequences that escape the document root.'
+    - 'Capture the per-session flag stored in a private deployment file.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single-container Flask app; reads stay inside the container filesystem.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: traversal-download
+      title: 'Read a file the portal never meant to serve'
+      prompt: >-
+        The portal only links three office notes, but its download
+        endpoint accepts any relative path. Traverse out of the document
+        root and retrieve the deployment release token kept in
+        /app/private/release-token.txt. Submit the FLAG value it holds.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Watch what GET /download?name=notes.txt returns and compare it with where those files live inside the service.'
+        - cost: 10
+          text: 'The endpoint joins your input onto /app/docs with no normalization, so ../ sequences climb directories.'
+        - cost: 25
+          text: 'Request GET /download?name=../private/release-token.txt and submit the FLAG{...} string in the response.'
+      solution: |
+        1. Open http://target:8000 and note the listed files plus the
+           download API shape.
+        2. Fetch a known file first, for example
+           GET /download?name=todo.txt, to confirm the endpoint echoes
+           file contents verbatim.
+        3. The handler builds os.path.join('/app/docs', name) without
+           rejecting dot segments, so ../ climbs out of the document
+           root.
+        4. Retrieve the private deployment artifact with
+           GET /download?name=../private/release-token.txt. The body
+           contains the room flag. Submit it.
+      validator:
+        type: per_session_flag

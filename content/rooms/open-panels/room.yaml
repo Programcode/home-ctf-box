@@ -1,0 +1,65 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: open-panels
+  title: 'Open Panels'
+  version: 1.0.0
+  difficulty: beginner
+  points: 50
+  estimated_minutes: 10
+  tags: [info-disclosure, web]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    PanelOps is an internal status board that shipped with a leftover
+    diagnostics page printing runtime details and environment internals
+    to anyone who asks. You will pick up public hints about the hidden
+    path, open the panel yourself, confirm what it leaks, and submit
+    the flag it displays.
+  objectives:
+    - 'Find an undocumented route from public hints such as robots.txt.'
+    - 'Open the exposed debug panel and identify what it leaks.'
+    - 'Capture the per-session flag printed in the leaked environment output.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Read-only status board; exposure stays inside one disposable container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: debug-panel
+      title: 'Open the panel that ships with the product'
+      prompt: >-
+        The PanelOps board hints at a diagnostics route it never links.
+        Find it, open it, read the environment section of its report,
+        and submit the FLAG value printed there.
+      points: 50
+      hints:
+        - cost: 0
+          text: 'Sites often announce paths they want crawlers to skip. Ask for /robots.txt before hunting blind.'
+        - cost: 10
+          text: 'The dashboard HTML also carries a developer comment naming the same path.'
+        - cost: 25
+          text: 'GET http://target:8000/debug. The environment block lists ROOM_FLAG=FLAG{...}.'
+      solution: |
+        1. Open http://target:8000/robots.txt. It disallows /debug,
+           which confirms the path exists without linking to it.
+        2. The dashboard source also contains a comment mentioning the
+           /debug panel left in from staging.
+        3. GET /debug. The page prints build details and the process
+           environment, including ROOM_FLAG.
+        4. Copy the FLAG value from the environment block and submit it.
+      validator:
+        type: per_session_flag

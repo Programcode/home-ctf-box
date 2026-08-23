@@ -1,0 +1,65 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: mass-assign
+  title: 'Mass Assign'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 20
+  tags: [mass-assignment, authz, api]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    The Nimbus people API accepts a JSON patch for any profile and copies every
+    supplied key straight into storage, including fields the official client
+    never sends. Promote the guest account yourself, then read what the API
+    shows only to admins.
+  objectives:
+    - 'Map how GET and POST /profile behave for an ordinary account.'
+    - 'Push a privileged field such as role through the JSON merge endpoint.'
+    - 'Read the admin-only note and capture the per-session flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'In-memory dict store in one Flask container; merged keys vanish on restart.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: mass-assign-role
+      title: 'Promote yourself through the profile patch'
+      prompt: >-
+        Merge a privileged claim into the guest profile through POST /profile,
+        then read the profile back and submit the FLAG value in the note field.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Update your own profile with POST and compare what you sent to what comes back. Nothing looks filtered.'
+        - cost: 10
+          text: 'The handler merges the body into the stored profile with dict.update, so every key you include sticks. Which key does the GET reader test?'
+        - cost: 25
+          text: 'POST /profile?u=guest with body {"role":"admin"}, then GET /profile?u=guest. The note field carries FLAG{...}.'
+      solution: |
+        1. GET /profile?u=guest. The API returns only the name and email of
+           the ordinary account.
+        2. Merge in the privileged claim:
+           curl -X POST 'http://target:8000/profile?u=guest' \
+                -H 'Content-Type: application/json' \
+                -d '{"role":"admin"}'
+           The handler updates the stored dict with every key in the body.
+        3. GET /profile?u=guest again. The reader attaches a note to profiles
+           whose role is admin, and the note holds the room flag. Submit it.
+      validator:
+        type: per_session_flag
