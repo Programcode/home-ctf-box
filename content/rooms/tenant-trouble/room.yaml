@@ -1,0 +1,70 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: tenant-trouble
+  title: 'Tenant Trouble'
+  version: 1.0.0
+  difficulty: medium
+  points: 200
+  estimated_minutes: 35
+  tags: [idor, authz, multi-tenant, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Ledgerline runs invoicing for several companies on one platform-wide
+    ledger. The workspace you land in is decided by a request header the
+    client fully controls, and invoice numbers run continuously across
+    tenants. Browse your own sandbox, learn how the platform names its
+    workspaces and invoices, then step into a neighbor's books and open
+    the one invoice that was never meant for you.
+  objectives:
+    - 'Identify which request element selects the workspace and confirm it is client-controlled.'
+    - 'Enumerate workspace slugs and platform-wide invoice identifiers from public pages.'
+    - 'Read a foreign tenant invoice detail page and capture the flag from its memo field.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'In-memory Flask ledger; tenants and invoices are fictional and the flag never leaves the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: cross-tenant-invoice
+      title: 'Read the invoice from the other side of the wall'
+      prompt: >-
+        The demo workspace is Acme Corp. Find out how the platform
+        identifies other workspaces, work out how invoice numbers are
+        assigned across the shared ledger, then open a Globex invoice
+        that Acme can never see. Submit the FLAG value from its memo.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'The dashboard banner explains how demo mode picks a workspace. Headers are just as editable as URLs.'
+        - cost: 10
+          text: 'The customers page lists every workspace slug, and your ledger page admits that numbering is continuous platform-wide. Globex owns an invoice somewhere above INV-1030.'
+        - cost: 25
+          text: 'Send header Tenant-ID: globex and request /invoices, then open /invoices/INV-1042. The memo field holds FLAG{...}.'
+      solution: |
+        1. Open the dashboard. It states that demo mode resolves
+           workspaces from the Tenant-ID header and defaults to acme.
+        2. GET /customers to collect the workspace slugs: acme, globex,
+           initech. GET /invoices and read the note that invoice numbers
+           come from one platform-wide ledger, so neighbor workspaces own
+           the gaps between your numbers.
+        3. GET /invoices with header Tenant-ID: globex. The listing
+           shows INV-1042, which never appears for acme or initech.
+        4. GET /invoices/INV-1042 with the same header. The memo field
+           reads "Q3 reconciliation note: FLAG{...}". Submit the flag.
+      validator:
+        type: per_session_flag

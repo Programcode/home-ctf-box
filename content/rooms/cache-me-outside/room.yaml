@@ -1,0 +1,74 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: cache-me-outside
+  title: 'Cache Me Outside'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 50
+  tags: [cache-poisoning, headers, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Signal Harbor serves its fleet status board through an edge page
+    cache. The cache key is the request path and nothing else, while the
+    renderer picks its behavior from host routing headers the client
+    controls. Internal virtual hosts get verbose diagnostics, deploy
+    banner included. Teach the cache to serve an internal render to
+    everyone, then collect the banner from the public URL.
+  objectives:
+    - 'Confirm that /status reflects host routing headers in its rendered output.'
+    - 'Poison the path-keyed cache entry for /status using X-Forwarded-Host.'
+    - 'Retrieve the poisoned public page and capture the flag from the deploy banner comment.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The edge cache is a TTL dict inside the Flask app; poisoning affects only this room container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: poison-status-page
+      title: 'Serve internal diagnostics to the whole internet'
+      prompt: >-
+        The status board renders differently depending on which host it
+        thinks it was routed through, but the page cache only records
+        the path. Request /status as an internal virtual host so the
+        cached copy gains the deploy banner, then fetch /status like an
+        ordinary visitor and submit the FLAG value from the banner
+        comment.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'Fetch /status twice and read the served-from-cache comment plus the Rendered for host line. Something decides that rendering before the cache does.'
+        - cost: 10
+          text: 'Reverse proxies pass the original Host along as X-Forwarded-Host. Try header values ending in .internal; internal hosts unlock diagnostics on this app.'
+        - cost: 25
+          text: 'GET /status with header X-Forwarded-Host: metrics.internal (this poisons the cache entry), then plain GET /status. An HTML comment holds FLAG{...}.'
+      solution: |
+        1. GET /status as a normal visitor. The footer shows the host
+           the page rendered for and a served-from-cache marker, which
+           proves a header reaches the renderer while the cache key
+           stays fixed to the path.
+        2. GET /status with header X-Forwarded-Host: metrics.internal.
+           The response now carries an internal diagnostics badge and a
+           deploy-banner comment containing the flag. Because the cache
+           key never saw that header, this poisoned body replaces the
+           entry for /status.
+        3. GET /status again with no special headers. The cached,
+           poisoned copy comes back with the deploy-banner comment.
+           Submit the FLAG value from it.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,74 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: race-to-zero
+  title: 'Race to Zero'
+  version: 1.0.0
+  difficulty: hard
+  points: 250
+  estimated_minutes: 45
+  tags: [race-condition, logic, concurrency, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    Meridian Pay's sandbox lets you open test accounts and move money
+    through a withdrawals API. The fraud scorer reads the account
+    balance, pauses to think, and only then writes the debit, so two
+    transfers in flight at once both clear a check neither should.
+    Overdraw an account on purpose, then read the recovery desk notice
+    that appears for accounts below zero.
+  objectives:
+    - 'Open a sandbox account and map the withdrawal request cycle from its responses.'
+    - 'Force simultaneous withdrawals through the read-then-write window so the balance goes negative.'
+    - 'Retrieve the overdraft notice endpoint revealed by the overdrawn account and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'In-memory Flask bank with fictional accounts; concurrency stays within one container on the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: overdraft-the-account
+      title: 'Drive an account below zero and collect the notice'
+      prompt: >-
+        Open a sandbox account, then submit several withdrawals of
+        6000 cents (60.00 EUR) at the same moment so more than one passes
+        the balance check against the same snapshot. Once the balance
+        drops below zero, fetch the overdraft notice URL the API reports
+        and submit the FLAG value it contains.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'A single 6000-cent withdrawal is declined once the balance sits under 6000 cents. Read the decline reason; it names the snapshot that failed you.'
+        - cost: 10
+          text: 'The home page admits workers hold a balance snapshot during fraud scoring. Requests racing through that pause all see the same balance.'
+        - cost: 25
+          text: 'Fire 5 concurrent POST /withdraw calls (threads or curl background jobs) with amount_cents=6000, then GET /notice/<token>. The notice page holds FLAG{...}.'
+      solution: |
+        1. POST /open with a name to create an account. Keep the token
+           shown as <code class="acct">...</code>.
+        2. Confirm sequential requests cannot help: one approved
+           withdrawal of 6000 leaves 4000 cents, so the next is
+           declined against the fresh snapshot.
+        3. Send five withdrawals concurrently, for example:
+           for i in 1..5; do curl -X POST http://target:8000/withdraw
+           -d token=$TOKEN -d amount_cents=6000 & done; wait. Several
+           responses approve because each read the pre-debit snapshot of
+           10000 cents before any debit posted.
+        4. One response carries "notice_url": "/notice/<token>" once the
+           summed debits pass 10000. GET /notice/<token> and submit the
+           FLAG{...} from the reconciliation memo.
+      validator:
+        type: per_session_flag

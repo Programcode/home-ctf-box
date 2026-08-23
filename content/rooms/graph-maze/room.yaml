@@ -1,0 +1,77 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: graph-maze
+  title: 'Graph Maze'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 40
+  tags: [graphql, introspection, bola, web]
+spec:
+  track: web-foundations
+  type: challenge
+  summary: >-
+    OrbitOps runs a ground portal whose REST console checks every note
+    against your project before serving it. The GraphQL gateway bolted on
+    for archive sync never got that policy, and it ships with
+    introspection enabled and batched requests allowed. Walk the object
+    graph from your own account until you reach the restricted escrow
+    note nobody on your team is supposed to see.
+  objectives:
+    - 'Run an introspection query against /graphql to map types and fields the UI never shows.'
+    - 'Traverse user to team to project to notes through the gateway.'
+    - 'Exploit the missing object-level check to read the restricted note body and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'In-memory Flask app with a minimal GraphQL executor; all data is fictional and stays inside the room network.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: traverse-to-restricted-note
+      title: 'Read the restricted escrow note'
+      prompt: >-
+        The REST console hides restricted material behind an object-level
+        policy, but the GraphQL gateway at POST /graphql enforces nothing
+        per node. Introspect the schema, find a traversal from users down
+        to note bodies, and submit the FLAG value from the body of the
+        restricted note.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'Send POST /graphql with JSON body {"query": "{__schema{types{name}}}"} to see that introspection is open.'
+        - cost: 10
+          text: 'Your own project holds only internal notes. The gateway exposes user(id: N) for every account, not just yours; each user links to team, then project, then notes.'
+        - cost: 25
+          text: 'Query {users{id team{project{id notes{id classification body}}}}}. One note is marked restricted; its body contains FLAG{...}.'
+      solution: |
+        1. POST /graphql with {"query": "{__schema{queryType{name}
+           types{name kind fields{name type{name kind ofType{name kind}}}}}}"}
+           to dump the schema. The Note type carries id, classification,
+           title, and body.
+        2. Your console session (me) reaches only Orbital Ops notes N-1
+           and N-2. Query {user(id:1){name role team{id name}}} and walk
+           further, or enumerate every account with
+           {users{id name role team{id name}}}; Mirela Enache sits in
+           Ground Segment.
+        3. Traverse all of it in one request:
+           {users{id team{project{id notes{id classification body}}}}}.
+           The response includes note N-4, classification restricted,
+           from project LUMEN even though your account has no grant on it.
+        4. Read the body of N-4, which contains FLAG{...}, and submit it.
+           Contrast with GET /api/notes/N-4 on the REST side, which
+           returns 403.
+      validator:
+        type: per_session_flag
