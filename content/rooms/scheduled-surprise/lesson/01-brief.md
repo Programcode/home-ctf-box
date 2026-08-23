@@ -2,7 +2,7 @@
 
 Scheduled maintenance runs with someone else's privileges. Root's cron
 fires /usr/local/sbin/cleanup.sh every minute. The script itself is
-root-owned, but its directory is group-writable for the learners ops
+root-owned, but its directory is group-writable for the learners
 group, and your lab account is in that group. Replacing a file you
 cannot edit is still possible when the directory around it is yours to
 write.

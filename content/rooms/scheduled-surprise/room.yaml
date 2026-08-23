@@ -13,12 +13,12 @@ spec:
   type: challenge
   summary: >-
     The admins of this box run a root-owned housekeeping script from a
-    job in system cron under /etc/cron.d every minute, and they made the
-    ops group owners of /usr/local/sbin so the team could manage such
-    scripts without calling root. The learner account sits in that
-    group. You will spot the writable directory and the scheduled job,
-    replace the script with one that copies the root flag somewhere you
-    can read it, and wait for cron to do the rest.
+    job in system cron under /etc/cron.d every minute, and they made
+    the learners group owners of /usr/local/sbin so the team could
+    manage such scripts without calling root. The learner account sits
+    in that group. You will spot the writable directory and the
+    scheduled job, replace the script with one that copies the root
+    flag somewhere you can read it, and wait for cron to do the rest.
   objectives:
     - 'Find world- or group-writable locations with find and check group membership with id.'
     - 'Recognize why a file inside a writable directory can be replaced even when the file itself is root-owned.'
