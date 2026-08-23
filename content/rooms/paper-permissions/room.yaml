@@ -1,0 +1,77 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: paper-permissions
+  title: 'Paper Permissions'
+  version: 1.0.0
+  difficulty: beginner
+  points: 100
+  estimated_minutes: 20
+  tags: [ssh, linux, permissions, enumeration]
+spec:
+  track: linux-networking
+  type: guided
+  summary: >-
+    A monitoring service on this box keeps its real configuration under
+    /etc/app.conf, locked down to root with mode 600. The people who
+    wrote it also added a backup habit: a root-owned loop copies that
+    config into /var/backups every thirty seconds and leaves the copy
+    world-readable. You will log in as the lab account, notice where
+    backups pile up, and read a secret the permissions were supposed to
+    protect.
+  objectives:
+    - 'Inspect file permissions with ls -l and reason about who can read what.'
+    - 'Enumerate common backup locations such as /var/backups.'
+    - 'Read a world-readable copy of a root-only file and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes:
+      sshd requires setuid and DAC overrides for privilege separation and the learner shell; capabilities are bounded to the ssh server profile.
+      Disposable Debian container on an internal lab network. sshd must run as
+      root inside the container because binding port 22 and privilege
+      separation require it; every login session drops to the unprivileged
+      learner account (uid 1000). The root loop only copies a local file
+      inside the same container; no escalation path beyond reading the
+      deliberately world-readable backup is possible. The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: leaky-backup
+      title: 'Find the readable backup of the root-only config'
+      prompt: >-
+        Log in with the account from the banner. The service config in
+        /etc/app.conf is root-only, but something on this box makes
+        copies elsewhere on a schedule. Find a copy you are allowed to
+        read, open it, and submit the FLAG value from its deploy token.
+      points: 100
+      hints:
+        - cost: 0
+          text: 'Try to cat /etc/app.conf first and read the permission error carefully. The fix is not about breaking in, it is about finding another copy.'
+        - cost: 10
+          text: 'Debian systems keep copies of things in /var/backups. List that directory with ls -la and pay attention to timestamps.'
+        - cost: 25
+          text: 'cat /var/backups/app.conf. The root loop refreshes this world-readable copy every 30 seconds, deploy_token line holds the flag.'
+      solution: |
+        1. SSH in as learner (password learner, printed in the banner).
+        2. Run `ls -l /etc/app.conf`: mode 600, owned by root, so your
+           `cat` fails with permission denied.
+        3. Enumerate instead of forcing: `ls -la /var/backups` shows an
+           app.conf copy refreshed every 30 seconds by a root process.
+        4. `cat /var/backups/app.conf`. The copy is world-readable and
+           contains the line `deploy_token = FLAG{...}`.
+        5. Submit the flag value exactly as shown.
+      validator:
+        type: per_session_flag
