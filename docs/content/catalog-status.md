@@ -12,30 +12,33 @@ actually passed; `in-review` items are listed but not counted.
 
 ## Rooms
 
-Migrated from legacy (bundle format pending Phase 5): 0 of 20 counted.
+Migrated from legacy: all 20 bundles exist and pass the automated gate
+(schema lint + clean-build solver + reset proof + per-session flag
+match). Instructional review happens through the review workflow before
+they count as published.
 
 | Slug                | Track | Difficulty | Type          | Status      |
 | ------------------- | ----- | ---------- | ------------- | ----------- |
-| busted-login        | A     | beginner   | guided web    | not-started |
-| nosy-files          | A     | beginner   | guided web    | not-started |
-| ping-of-doom        | A     | easy       | challenge web | not-started |
-| ssti-greeting       | A     | easy       | challenge web | not-started |
-| token-forger        | A     | medium     | challenge web | not-started |
-| idor-invoices       | A     | beginner   | guided web    | not-started |
-| open-panels         | A     | beginner   | guided web    | not-started |
-| cookie-shapeshifter | A     | beginner   | guided web    | not-started |
-| regex-doom          | A     | easy       | challenge web | not-started |
-| mass-assign         | A     | easy       | challenge web | not-started |
-| xxe-importer        | A     | medium     | challenge web | not-started |
-| pickle-jar          | A     | medium     | challenge web | not-started |
-| trusted-proxy       | A     | beginner   | guided web    | not-started |
-| wrong-method        | A     | beginner   | guided web    | not-started |
-| open-closet         | A     | beginner   | guided web    | not-started |
-| predictable-reset   | A     | easy       | challenge web | not-started |
-| double-trouble      | A     | easy       | challenge web | not-started |
-| fetch-boy           | A     | easy       | challenge web | not-started |
-| union-vault         | A     | easy       | challenge web | not-started |
-| brace-yourself      | A     | easy       | challenge web | not-started |
+| busted-login        | A     | beginner   | guided web    | bundle-verified |
+| nosy-files          | A     | beginner   | guided web    | bundle-verified |
+| ping-of-doom        | A     | easy       | challenge web | bundle-verified |
+| ssti-greeting       | A     | easy       | challenge web | bundle-verified |
+| token-forger        | A     | medium     | challenge web | bundle-verified |
+| idor-invoices       | A     | beginner   | guided web    | bundle-verified |
+| open-panels         | A     | beginner   | guided web    | bundle-verified |
+| cookie-shapeshifter | A     | beginner   | guided web    | bundle-verified |
+| regex-doom          | A     | easy       | challenge web | bundle-verified |
+| mass-assign         | A     | easy       | challenge web | bundle-verified |
+| xxe-importer        | A     | medium     | challenge web | bundle-verified |
+| pickle-jar          | A     | medium     | challenge web | bundle-verified |
+| trusted-proxy       | A     | beginner   | guided web    | bundle-verified |
+| wrong-method        | A     | beginner   | guided web    | bundle-verified |
+| open-closet         | A     | beginner   | guided web    | bundle-verified |
+| predictable-reset   | A     | easy       | challenge web | bundle-verified |
+| double-trouble      | A     | easy       | challenge web | bundle-verified |
+| fetch-boy           | A     | easy       | challenge web | bundle-verified |
+| union-vault         | A     | easy       | challenge web | bundle-verified |
+| brace-yourself      | A     | easy       | challenge web | bundle-verified |
 
 New rooms 021–100: `not-started` (authored in batches per track B–E).
 
