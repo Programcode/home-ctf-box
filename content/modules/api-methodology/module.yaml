@@ -1,0 +1,416 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: api-methodology
+  title: 'API testing methodology and reporting: from recon to report'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - apis
+    - methodology
+    - mass-assignment
+    - rate-limiting
+    - reporting
+spec:
+  track: web-foundations
+  summary: >-
+    Skill without method collapses under deadline pressure, so this module assembles
+    everything the track taught into a repeatable pipeline. You sequence API testing
+    from surface mapping through authorization matrices, probe rate limiting politely
+    enough to keep it intact, execute mass assignment attacks that ride ordinary
+    requests past ordinary reviews, catalog business logic abuse patterns, and finish
+    with reporting craft that turns technical crossings into decisions. The
+    mass-assign capstone closes the track by grading the entire pipeline at once.
+  objectives:
+    - Run an ordered API testing pipeline from inventory through verification.
+    - Probe rate limiting behavior within budgets and document limit mechanics accurately.
+    - Execute mass assignment tests using documented fields as launch points.
+    - Recognize business logic abuse shapes including negative values and state skips.
+    - Construct an authorization matrix covering actors, operations, and observed verdicts.
+    - Write developer-ready API findings with reproduction, impact, and layered fixes.
+  sections:
+    - id: api-testing-pipeline
+      title: 'The API testing pipeline'
+      blocks:
+        - type: prose
+          markdown: |
+            Method converts scattered techniques into dependable output, and a
+            good one fits on a page while scaling to any target. Phase one,
+            inventory: descriptions parsed, routes listed, identities created,
+            artifacts saved. Phase two, perimeter: authentication verdicts per
+            route, token handling observations, error behavior sampled. Phase
+            three, object level: identifier queue walked with paired accounts,
+            consistency doors compared. Phase four, abuse: mass assignment,
+            logic patterns, rate mechanics. Phase five, verification: every
+            candidate finding rerun cold, then written.
+
+            The ordering is not decoration. Inventory makes perimeter checks
+            cheap; perimeter results aim object-level work; findings from any
+            earlier phase seed later ones. Skipping ahead feels faster for an
+            hour and then costs a day when coverage gaps force rework.
+        - type: code
+          language: text
+          code: |
+            Pipeline card (pin above your desk):
+
+              1 INVENTORY   parse schemas, save artifacts, create A+B accounts
+              2 PERIMETER   no-token / any-token / peer-token verdicts per route
+              3 OBJECTS     walk id params + filters + nested edges (A vs B)
+              4 ABUSE       extra fields on writes, logic patterns, limits
+              5 VERIFY      rerun cold, capture transcripts, file findings
+
+            Time budget on a mid-size API, first pass: phases one and two in
+            half a day, phase three in a day, phases four and five filling the
+            second day. Your mileage varies; the order should not.
+        - type: prose
+          markdown: |
+            Notebooks carry the pipeline. Each phase appends its artifact:
+            route lists, verdict tables, transcripts, matrix drafts. When a
+            session ends mid-phase, the next one resumes from notes rather
+            than memory, which matters because API engagements routinely span
+            weeks and reviewers eventually ask exactly how you knew what you
+            knew. Evidence habits from your foundations path apply unchanged;
+            only the vocabulary grows.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep a running not-yet list of leads you deliberately defer, such
+            as odd parameters or suspicious endpoints you lack time to chase.
+            Deferring consciously beats discovering accidentally later that
+            you never looked.
+    - id: rate-limiting-and-throttling
+      title: 'Rate limiting and throttling'
+      blocks:
+        - type: prose
+          markdown: |
+            Rate limits protect shared infrastructure, which means probing them
+            is a balancing act between measuring behavior and becoming the
+            problem you study. Limits arrive in several mechanical flavors:
+            fixed windows resetting each minute, sliding windows averaging
+            recent traffic, token buckets allowing bursts within sustained
+            pace. Responses advertise their presence through 429 statuses,
+            Retry-After headers, and decrementing quota headers such as
+            X-RateLimit-Remaining whose arithmetic reveals window shape.
+
+            Measure politely. Send small controlled bursts, read headers after
+            each step, back off immediately once throttled, and never attempt
+            exhaustion against production targets since availability damage
+            outweighs any finding value. Rooms provide sandbox endpoints built
+            for exactly this measurement, often gating a flag behind correct
+            pacing so learners practice respecting limits while studying them.
+        - type: code
+          language: bash
+          code: |
+            $ for i in 1 2 3 4 5; do curl -si http://target:8000/api/quote \
+                | grep -E 'HTTP/|X-RateLimit-Remaining'; done
+            HTTP/1.1 200 OK
+            X-RateLimit-Remaining: 4
+
+            HTTP/1.1 200 OK
+            X-RateLimit-Remaining: 3
+
+            ...
+
+            HTTP/1.1 429 Too Many Requests
+            Retry-After: 42
+
+            Five requests told the whole story: a five-per-window bucket,
+            countdown arithmetic, and recovery timing advertised honestly.
+            That transcript doubles as evidence whenever bypasses surface,
+            since impact claims need the baseline to compare against.
+        - type: prose
+          markdown: |
+            Bypasses deserve careful framing. Alternate source addresses,
+            endpoint aliases, parameter case tricks, or header spoofing may
+            evade naive implementations, but demonstrating them multiplies
+            request volume precisely where limits exist. In labs, prove the
+            weakest bypass once; in reports, describe the class and let
+            defenders reproduce internally. Note also what limits fail to
+            cover, since operation-aware counting versus raw request counting
+            was the exact gap the batching section exploited, and API gateways
+            frequently inherit it.
+    - id: mass-assignment-attacks
+      title: 'Mass assignment attacks'
+      blocks:
+        - type: prose
+          markdown: |
+            Mass assignment happens when binders copy incoming fields onto
+            models wholesale and developers forget which fields belong in
+            client hands. The request looks ordinary, profile updates with
+            display names and timezones, yet one additional key rides along,
+            say role, and the server writes it happily. No parser confusion,
+            no injection; just trust extended one field too far. Frameworks
+            made bulk binding convenient years ago and applications have been
+            catching up ever since.
+
+            Launch points come from your inventory. Documented write schemas
+            list expected fields; model documentation, old versions, and error
+            messages hint at siblings that exist. Candidate extras worth trying
+            include role, isAdmin, tenantId, verified, balance, and internal
+            flags visible anywhere else in responses. Test one field per probe
+            so attribution stays clean.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/api/users/u_102 -X PATCH \
+                -H 'Content-Type: application/json' -b 'sid=mine' \
+                -d '{"display_name":"Demo","timezone":"CET","role":"admin"}' \
+                | head -n 1
+            HTTP/1.1 200 OK
+
+            $ curl -s http://target:8000/api/users/u_102 -b 'sid=mine' | jq .role
+            "admin"
+
+            The patch accepted an undocumented privilege field and persisted
+            it. Two requests total: write then confirm. Severity follows what
+            admin unlocks in the specific product, which your exploration of
+            role effects documents next, carefully and minimally.
+        - type: callout
+          tone: warning
+          markdown: |
+            Escalating self-assigned privileges crosses lines quickly even in
+            labs. Prove persistence, demonstrate one permission difference if
+            tasks require it, then revert. Real engagements pair this finding
+            with explicit client approval before touching anything beyond
+            proof-of-write.
+        - type: prose
+          markdown: |
+            Variants extend the pattern beyond JSON bodies. Form fields, query
+            parameters on creates, nested objects inside otherwise innocent
+            updates, and array indices reaching protected slots all deliver
+            extra keys. Defenses live at binding boundaries: allowlists of
+            assignable fields per endpoint, DTO layers separating wire format
+            from domain models, and framework-level protections enabled rather
+            than bypassed. Reports should name the binder involved, since fix
+            locations differ across stacks while the principle holds constant.
+        - type: quiz
+          question_id: method-massassign-mechanic
+          question: 'Why does adding "role":"admin" to a profile PATCH sometimes grant admin?'
+          options:
+            - id: a
+              text: 'Admin roles are stored in cookies.'
+            - id: b
+              text: 'Bulk binding copies all recognized fields, including ones clients were never meant to set.'
+            - id: c
+              text: 'JSON parsers normalize unknown keys upward.'
+            - id: d
+              text: 'PATCH always ignores validation.'
+          answer_ids: [b]
+          explanation: >
+            The vulnerability lives in unguarded field copying. Whatever the
+            binder recognizes gets written, so unrecognized-by-design fields
+            that models recognize become attacker-writable through any write
+            endpoint sharing the model.
+    - id: business-logic-abuse-patterns
+      title: 'Business logic abuse patterns'
+      blocks:
+        - type: prose
+          markdown: |
+            Logic bugs resist scanners because nothing looks malformed; every
+            request parses cleanly and simply means something impossible.
+            Patterns recur enough to checklist. Negative and zero quantities
+            turning carts into refunds. Currency mismatches letting integer
+            cents become decimal dollars somewhere between services. Workflow
+            skips calling cancel before pay or claiming rewards before
+            qualifying. Boundary squeezes exploiting off-by-one limits such as
+            discounts applying at quantity zero. Cross-reference swaps paying
+            invoice A while receipting invoice B.
+
+            Hunt them by modeling intent before touching requests. For each
+            workflow, write the invariant table: what must stay true before,
+            during, and after legitimate use. Then design minimal requests
+            violating single rows while satisfying parsers everywhere. Your
+            race-condition training already built the parallelism reflex;
+            logic hunting adds state-machine thinking to the same toolkit.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/api/cart/items -X POST \
+                -b 'sid=mine' -H 'Content-Type: application/json' \
+                -d '{"sku":"WIDGET","qty":-3}' | head -n 1
+            HTTP/1.1 201 Created
+
+            $ curl -s http://target:8000/api/cart -b 'sid=mine' | jq '.total'
+            -87.00
+
+            A negative quantity produced a negative cart total, and checkout
+            will happily refund three widgets never purchased. Validation
+            checked types, not semantics; the report cites both requests plus
+            the checkout screenshot proving money moved backward in sandbox.
+        - type: prose
+          markdown: |
+            Connect patterns back across the track deliberately. Double-trouble
+            staged a coupon racing itself, race-to-zero moved balances
+            concurrently, mass-assign writes privilege fields, and today's
+            negative quantities complete the set: all are invariant violations,
+            differing only in mechanism. Framing findings this way helps
+            developers generalize fixes, since a validator library catching
+            negative quantities today can enforce workflow ordering tomorrow
+            using the same review hook.
+        - type: quiz
+          question_id: method-logic-invariants
+          question: 'What distinguishes business logic testing from other API attacks?'
+          options:
+            - id: a
+              text: 'It requires malformed payloads that break parsers.'
+            - id: b
+              text: 'Requests stay technically valid while violating intended rules, found by modeling invariants.'
+            - id: c
+              text: 'Only payment systems contain logic bugs.'
+            - id: d
+              text: 'Scanners detect logic flaws reliably.'
+          answer_ids: [b]
+          explanation: >
+            Nothing crashes and nothing trips filters; the abuse is semantic.
+            Modeling intended invariants and violating rows individually is
+            the repeatable human method automation has not replaced.
+    - id: authorization-matrix-construction
+      title: 'Building the authorization matrix'
+      blocks:
+        - type: prose
+          markdown: |
+            The authorization matrix is the engagement's spine and its most
+            convincing exhibit. Rows list operations from your inventory;
+            columns list principals, anonymous, user A, user B, elevated test
+            role where provisioned. Cells record observed verdicts with status
+            codes. Filling it mechanically walks every pairing your earlier
+            modules taught, and the finished table exposes holes as visible
+            gaps nobody can argue with, since each cell carries a transcript
+            reference.
+
+            Build incrementally during phases two and three rather than
+            reconstructing afterward. Scripts help enormously here: a loop
+            over routes times four cookie jars writes the skeleton in minutes,
+            leaving judgment for anomalies instead of typing.
+        - type: code
+          language: python
+          code: |
+            import httpx
+
+            ROUTES = ["GET /api/invoices", "GET /api/invoices/inv_2007",
+                      "PATCH /api/users/u_103", "POST /api/admin/export"]
+            JARS = {"anon": None, "A": "sid=A", "B": "sid=B"}
+
+            for route in ROUTES:
+                method, _, path = route.partition(" ")
+                row = []
+                for who, sid in JARS.items():
+                    r = httpx.request(method, f"http://target:8000{path}",
+                                      cookies={"sid": sid} if sid else {})
+                    row.append(f"{who}={r.status_code}")
+                print(f"{route:38} {' '.join(row)}")
+
+            # GET /api/invoices/inv_2007   anon=401 A=200 B=200   <- hole
+
+            One printed line indicts one control gap, reproducible by anyone
+            holding the script. Matrices also make regression obvious on
+            retests: rerun after the vendor's fix claims and diff cells.
+        - type: prose
+          markdown: |
+            Interpretation adds the analyst layer the script cannot. Expected
+            verdicts come from reading docs and asking owners; differences
+            between expected and observed become findings ranked by reachable
+            sensitivity. Watch direction asymmetries too, where A reaches B's
+            objects but B cannot reciprocate, usually signaling special-case
+            guards worth naming. The matrix also disciplines scope: cells you
+            declined to fill for safety reasons get marked deferred with
+            reasons, showing reviewers exactly where diligence stopped and
+            why.
+    - id: writing-api-findings
+      title: 'Writing API findings'
+      blocks:
+        - type: prose
+          markdown: |
+            API findings persuade through precision plus empathy for the fixing
+            engineer. Every report carries the template bones from your first
+            path, component, steps, evidence, impact, suggestion, enriched with
+            API specifics: full request including headers, full response,
+            identity context stating which account sent it, and environment
+            pins where versions matter. Redact secrets and third-party data
+            without weakening reproduction; placeholders with formats noted
+            beat either raw credentials or unreproducible fragments.
+
+            Impact paragraphs earn severity, so argue from capability reached
+            rather than technique used. A BOLA crossing reads as financial
+            records viewable across tenants, scaling argument included, not as
+            changed identifier returned data. Fix suggestions layer like the
+            defenses module taught: immediate containment, structural repair,
+            regression test preventing return. Developers remember reports
+            that respected their constraints; reviewers remember reports they
+            could replay verbatim.
+        - type: code
+          language: markdown
+          code: |
+            Finding: Cross-tenant invoice modification via PATCH
+            Component: PATCH /api/invoices/{id}
+            Identity: account A (tenant a) against inv_2007 (tenant b)
+            Steps:
+              1. login as seeded tenant-a user
+              2. PATCH .../inv_2007 {"status":"paid"} with tenant-a cookie
+              3. observe 200 and persisted status change
+            Evidence: request/response pair attached; matrix cell ref M14
+            Impact: any tenant mutates any ledger entry; audit trails
+              become unreliable; contract and GDPR exposure.
+            Fix: enforce tenant predicate in update path centrally;
+              add cross-tenant denial regression test; alert on
+              foreign-tenant writes during rollout.
+        - type: prose
+          markdown: |
+            Close the track by running the whole pipeline against the
+            mass-assign room without prompting. Map the people API, split
+            verdicts into the matrix, find the patchy field, prove it, revert
+            it, write it up using today's template. Passing that capstone
+            means the pipeline lives in your hands rather than your notes,
+            which was the point of every module before this one. Where gaps
+            appear, the cheat sheet below compresses the remedies; revisit
+            the named sections rather than rereading everything.
+        - type: quiz
+          question_id: method-report-severity
+          question: 'What most strengthens an impact statement for a cross-tenant read finding?'
+          options:
+            - id: a
+              text: 'Calling it critical repeatedly in bold.'
+            - id: b
+              text: 'Stating capability reached, scaling potential, and compliance exposure tied to demonstrated access.'
+            - id: c
+              text: 'Attaching the largest possible data sample.'
+            - id: d
+              text: 'Comparing the vendor unfavorably to competitors.'
+          answer_ids: [b]
+          explanation: >
+            Severity arguments succeed on demonstrated capability plus honest
+            scaling analysis. Volume sampling adds legal risk, adjectives add
+            nothing, and professional tone keeps the focus on the decision
+            the reader must make.
+  cheat_sheet: |
+    # API methodology and reporting
+
+    Pipeline:
+        1 inventory -> 2 perimeter -> 3 objects ->
+        4 abuse -> 5 verify (rerun cold)
+
+    Rate limit probing:
+        read X-RateLimit-* / Retry-After first
+        small bursts, back off on 429, never exhaust prod
+        note operation-counting vs request-counting gaps
+
+    Mass assignment:
+        launch from documented fields; try role/isAdmin/tenantId/
+        verified/balance; one extra field per probe
+        prove write + persist; revert; defense = allowlist binding
+
+    Logic patterns:
+        negative qty, currency mismatch, workflow skip,
+        boundary squeeze, cross-reference swap
+        method: invariant table -> violate one row per request
+
+    Matrix:
+        routes x principals grid of observed codes
+        scripts fill cells; humans interpret gaps; refs in reports
+
+    Report additions:
+        full req/resp + identity context + redaction done right
+        impact = capability + scale + compliance
+        fixes: containment / structure / regression test

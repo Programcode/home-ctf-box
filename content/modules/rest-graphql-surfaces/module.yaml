@@ -1,0 +1,421 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: rest-graphql-surfaces
+  title: 'REST and GraphQL surfaces: mapping what an API really offers'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - apis
+    - rest
+    - graphql
+    - openapi
+spec:
+  track: web-foundations
+  summary: >-
+    APIs are where applications tell the truth, and this module trains you to
+    read it. You refresh REST principles through a tester's lens, contrast the
+    single-endpoint GraphQL world with resource-oriented REST, extract machine
+    readable descriptions from OpenAPI documents and introspection, identify
+    where identity checks live versus where authorization pretends to, and
+    practice surface mapping that produces inventories every later API attack
+    consumes. The paired-account habit begins here because object-level
+    questions start the moment two endpoints mention the same identifier.
+  objectives:
+    - Evaluate REST endpoints against resource, verb, and status conventions from evidence.
+    - Contrast GraphQL's single-endpoint model with REST when planning coverage.
+    - Extract and parse OpenAPI descriptions into complete route inventories.
+    - Distinguish authentication layers from authorization layers in observed behavior.
+    - Detect inconsistent object access rules between related endpoints.
+    - Produce a surface map with endpoints, parameters, identities, and open questions.
+  sections:
+    - id: rest-principles-for-testers
+      title: 'REST principles for testers'
+      blocks:
+        - type: prose
+          markdown: |
+            REST organizes an API around resources named by URLs and manipulated
+            through HTTP verbs. Well-behaved deployments read predictably:
+            collections at plural nouns, members under identifiers, verbs doing
+            what the HTTP module promised, status codes telling honest stories.
+            Predictability is the tester's gift. When conventions hold you can
+            guess sibling routes from one example, and when they break you have
+            found something worth noting, since inconsistency often marks code
+            written later by different hands under different review.
+
+            Read any new API the way you would proofread an essay. Fetch one
+            collection, one member, one create, then compare shapes. Note which
+            fields appear in lists but not details, which errors return codes
+            versus bodies, and whether pagination exists everywhere or only
+            where someone remembered.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/api/users/u_102 | head -n 1
+            HTTP/1.1 200 OK
+
+            $ curl -s http://target:8000/api/users/u_102 | jq 'keys'
+            [
+              "created_at",
+              "email",
+              "id",
+              "role",
+              "username"
+            ]
+
+            $ curl -s http://target:8000/api/users | jq '.[0] | keys'
+            [
+              "id",
+              "username"
+            ]
+
+            Detail responses carry email and role while lists omit them.
+            That asymmetry matters twice: list views leak less by design, and
+            detail views become the interesting target for object-level tests
+            arriving next module.
+        - type: callout
+          tone: tip
+          markdown: |
+            Record field inventories per endpoint in your notes. Later mass
+            assignment work depends on knowing exactly which fields each write
+            endpoint accepts, and inventories built now save an hour then.
+        - type: prose
+          markdown: |
+            Verbs deserve their own pass. Try OPTIONS on members to see declared
+            allowances, then test reality against declarations, since servers
+            frequently advertise more than they enforce or enforce more than
+            they admit. A DELETE answered 200 but leaving the record intact is
+            a finding about honesty; a GET triggering side effects is a finding
+            about safety. Both matter to developers even when neither yields
+            data yet.
+    - id: graphql-versus-rest-planning
+      title: 'GraphQL versus REST planning'
+      blocks:
+        - type: prose
+          markdown: |
+            Coverage planning differs sharply between the two styles. REST
+            scatters logic across many small surfaces, so your inventory is a
+            list and your testing walks it item by item. GraphQL concentrates
+            everything behind one URL speaking typed queries, so inventory
+            becomes schema analysis and testing follows graph edges. Neither
+            style is safer inherently. What changes is where diligence lives:
+            REST hides gaps between endpoints, GraphQL hides them along
+            relationships.
+
+            Practical planning starts identical either way. Enumerate what
+            exists, note authentication requirements per operation, then rank
+            targets by sensitivity of fields reachable. Write operations outrank
+            reads, personal data outranks public content, and anything naming
+            money, roles, or tenants jumps the queue.
+        - type: code
+          language: text
+          code: |
+            Surface comparison cheat row:
+
+                aspect          REST               GraphQL
+                entry points    many URLs          usually /graphql
+                description     OpenAPI JSON       introspection schema
+                over-fetching   per endpoint       client-chosen fields
+                authz pattern   middleware/route   resolver-by-resolver
+                rate limiting   requests           operations (tricky!)
+
+            The authz row drives strategy: REST lets you reason per-route,
+            while GraphQL demands edge-by-edge traversal thinking, which is
+            why the multi-tenant module drills relationship probing before
+            asking you near real tenant walls.
+        - type: prose
+          markdown: |
+            Mixed stacks dominate reality anyway. Modern products grow GraphQL
+            faces onto REST bones, mobile apps speak one dialect while partner
+            integrations speak another, and legacy versions linger behind
+            /v1/ paths nobody remembers to retire. Map all of it. Version skew
+            deserves special attention because old versions frequently predate
+            current security controls; the moment you find /v2 enforcing
+            ownership, ask quietly whether /v1 ever learned the lesson. The
+            wrong-method room dramatizes how one console judged methods
+            inconsistently, and version drift multiplies that theme across
+            whole feature sets.
+        - type: quiz
+          question_id: surfaces-version-skew
+          question: 'Version 2 enforces object ownership. What does that suggest about version 1?'
+          options:
+            - id: a
+              text: 'Older versions may predate those checks and deserve explicit testing.'
+            - id: b
+              text: 'Version 1 inherits fixes automatically.'
+            - id: c
+              text: 'Versions never share databases.'
+            - id: d
+              text: 'Ownership checks only apply to GraphQL.'
+          answer_ids: [a]
+          explanation: >
+            Controls accumulate over time, so earlier versions often lack
+            later protections while sharing the same data layer. Retired
+            but reachable versions are a classic source of object-level
+            findings.
+    - id: extracting-api-descriptions
+      title: 'Extracting API descriptions'
+      blocks:
+        - type: prose
+          markdown: |
+            Machine-readable descriptions turn hours of guessing into minutes
+            of parsing. OpenAPI documents enumerate paths, methods, parameters,
+            request schemas, and response shapes; GraphQL introspection returns
+            the entire typed graph on demand. Discovery locations repeat across
+            products: root plus openapi.json, swagger.json, api-docs, api/v1
+            variants, docs pages whose JavaScript fetches the document for you,
+            and build pipelines that forget to remove maps entirely.
+
+            Once fetched, parse deliberately. jq extracts path lists quickly;
+            small Python scripts join paths with methods and required
+            parameters into checklists. The goal is not admiration of schema
+            craft but a working queue of probes ordered by interest.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/openapi.json > api.json
+            $ jq -r '.paths | to_entries[] | .key as $p | .value | keys[] | "\(.upcase) \($p)"' api.json
+            GET /profiles/{username}
+            POST /sessions
+            PATCH /users/{id}
+            GET /users
+
+            $ jq -r '.paths."/users/{id}".patch.requestBody.content.
+                "application/json".schema.properties | keys[]' api.json
+            display_name
+            role
+            timezone
+
+            Six lines produced four routes and, better, the exact writable
+            fields on user edits including role. That property name alone will
+            anchor a mass assignment probe in the methodology module, and it
+            cost zero guesses to learn.
+        - type: prose
+          markdown: |
+            Descriptions also lie usefully. Schemas omit undocumented fields
+            that handlers still accept, which is precisely the gap mass
+            assignment exploits, so treat documented fields as a floor and
+            probe beyond it during write testing. Response examples embedded
+            in documents preview data shapes before you authenticate, and
+            error schemas reveal internal exception habits. Save every
+            description artifact beside your notes; diffs between versions
+            occasionally expose endpoints removed from docs but alive on
+            servers.
+        - type: quiz
+          question_id: surfaces-doc-trust
+          question: 'Why should documented request fields be treated as a minimum rather than the full set?'
+          options:
+            - id: a
+              text: 'Documentation is generated from runtime traffic.'
+            - id: b
+              text: 'Handlers often accept fields the schema omits, which is the mass assignment setup.'
+            - id: c
+              text: 'Schemas compress poorly.'
+            - id: d
+              text: 'Undocumented fields are always rejected server-side.'
+          answer_ids: [b]
+          explanation: >
+            Binders copy whatever arrives matching model definitions, and
+            models drift ahead of published schemas. Extra accepted fields
+            are exactly how privilege attributes ride into writes.
+    - id: authentication-versus-authorization-layers
+      title: 'Authentication versus authorization layers'
+      blocks:
+        - type: prose
+          markdown: |
+            APIs stack two distinct questions and answer them in different
+            places. Authentication asks who you are, typically settled once by
+            a session cookie or bearer token checked at the perimeter.
+            Authorization asks what you may do, ideally enforced close to data
+            per operation. Findings multiply wherever teams conflate them: a
+            valid login satisfies the first question and everything downstream
+            assumes the second was handled somewhere else, usually nowhere.
+
+            Probe the split directly. Send requests unauthenticated, then as a
+            plain user, then as your second account, watching which layer each
+            difference trips. Endpoints returning 401 without a token but 200
+            with any token have authentication and nothing else; endpoints
+            differing answers between two ordinary accounts have object-level
+            decisions worth auditing line by line.
+        - type: code
+          language: bash
+          code: |
+            $ curl -so /dev/null -w '%{http_code}\n' http://target:8000/api/users/u_103
+            401
+
+            $ curl -so /dev/null -w '%{http_code}\n' \
+                http://target:8000/api/users/u_103 -b 'sid=mineA'
+            200
+
+            $ curl -so /dev/null -w '%{http_code}\n' \
+                http://target:8000/api/users/u_103 -b 'sid=mineB'
+            200
+
+            Anonymous refused, both ordinary accounts admitted regardless of
+            whose record u_103 names: authentication present, object-level
+            authorization absent. Three commands, clean severity argument.
+        - type: callout
+          tone: warning
+          markdown: |
+            Keep every account in these comparisons yours. The moment a probe
+            succeeds against another principal's data, capture the minimal
+            evidence and stop; sampling breadth adds exposure without adding
+            proof value.
+        - type: prose
+          markdown: |
+            Layer confusion also shows up as scope theater: endpoints checking
+            token presence but ignoring scopes attached to it, admin panels
+            trusting client-side role flags, or gateways enforcing method rules
+            that origin servers ignore. Trace one sensitive operation end to
+            end, listing every decision point it passes, then test each point
+            independently. That trace, written into your notes, becomes the
+            backbone of the authorization matrix you will formalize in the
+            methodology module.
+    - id: object-access-consistency-checks
+      title: 'Object access consistency checks'
+      blocks:
+        - type: prose
+          markdown: |
+            Consistency hunting finds bugs single endpoints hide. The same
+            object reached through different doors should answer identically
+            per identity: direct lookup, nested inclusion, search results,
+            export jobs, webhooks replaying state. Developers guard the famous
+            door and forget the service entrance, so your job is walking every
+            door with the same keys. Pick a sensitive object type, enumerate
+            every operation touching it from your inventory, then run the pair
+            of accounts through each one.
+
+            Results land in three buckets worth recording verbatim: consistent
+            denial everywhere, meaning guards travel together; inconsistent
+            denial, the bug bucket; and inconsistent visibility, where one door
+            leaks metadata such as existence or size while another blocks
+            content, subtler but still reportable.
+        - type: code
+          language: bash
+          code: |
+            # same invoice, four doors, account A cookie throughout
+            $ for p in "/api/invoices/inv_2007" \
+                       "/api/search?q=inv_2007" \
+                       "/api/invoices?ids=inv_2007" \
+                       "/api/export?invoice=inv_2007"; do
+                printf '%s -> ' "$p"
+                curl -so /dev/null -w '%{http_code}\n' "http://target:8000$p" -b 'sid=A'
+              done
+            /api/invoices/inv_2007 -> 403
+            /api/search?q=inv_2007 -> 200
+            /api/invoices?ids=inv_2007 -> 403
+            /api/export?invoice=inv_2007 -> 200
+
+            Direct and batch reads guard correctly while search and export
+            forgot the tenant clause. Two service entrances found by walking
+            doors systematically, and the fix recommendation now covers four
+            sites with one cause.
+        - type: prose
+          markdown: |
+            Close the module assembling the surface map that carries forward:
+            every endpoint with methods and parameters, authentication verdicts
+            per route, consistency matrix results, description artifacts saved,
+            and ranked open questions. This file feeds everything remaining in
+            the track. Token mechanics arrive next module, where OAuth flows
+            and JWT structure explain how the identities you just compared get
+            minted in the first place, and the mass-assign capstone waits at
+            the end to grade the whole pipeline against a real patch endpoint.
+        - type: quiz
+          question_id: surfaces-consistency-buckets
+          question: 'Direct reads deny account B but search results include the same object. How should this be classified?'
+          options:
+            - id: a
+              text: 'Consistent denial; no finding.'
+            - id: b
+              text: 'Inconsistent denial across doors; object-level bug worth reporting.'
+            - id: c
+              text: 'Search indexes are exempt from authorization.'
+            - id: d
+              text: 'Only exports need guarding.'
+          answer_ids: [b]
+          explanation: >
+            Authorization must follow the object through every retrieval
+            path. Search leaking existence and content while detail views
+            deny is a classic service-entrance gap with a shared root cause.
+    - id: assembling-the-surface-map
+      title: 'Assembling the surface map'
+      blocks:
+        - type: prose
+          markdown: |
+            The surface map is this module's deliverable and every later
+            module's starting point, so it deserves structure rather than
+            vibes. Four layers make it complete. The route layer lists each
+            endpoint with methods, parameters, and where you learned of it,
+            schema or fuzzing or JavaScript. The identity layer records
+            authentication verdicts per route from your perimeter passes,
+            including which token shapes each accepts. The consistency layer
+            holds the door-walking results for sensitive objects. The open
+            questions layer ranks leads you have not chased yet with one line
+            on why each looks promising.
+
+            Date the file, keep it in your notebook repository, and update it
+            while working rather than reconstructing afterward. A map that
+            lags reality by three days quietly stops being trusted, by others
+            and eventually by you.
+        - type: code
+          language: markdown
+          code: |
+            # target: nimbus-api (v1.2.0)
+
+            ## routes (source: openapi.json + ffuf)
+            - GET  /users              auth: any-token | notes: paginates at 50
+            - GET  /users/{id}         auth: any-token | role+email in body
+            - PATCH /users/{id}        auth: any-token | fields per schema: 3
+            - GET  /profiles/{username} auth: none      | public
+
+            ## consistency walk: user objects (A=u_102 mine)
+            direct=200/200/peer200   search=omits emails   export=403 both
+
+            ## open questions
+            1. PATCH accepts which undocumented fields? (mass-assign lead)
+            2. /v1/users still answers; does v1 check ownership?
+            3. export requires admin? verify with seeded role only.
+        - type: callout
+          tone: tip
+          markdown: |
+            Write map entries as claims with sources. "auth: any-token" means
+            you tested it with two accounts, not that the docs implied it.
+            When retest day arrives, sourced entries survive and vibes do not.
+        - type: prose
+          markdown: |
+            With the map complete, the track's remaining work plugs straight
+            into it. Token mechanics next module explain how those identities
+            were minted and how their validation breaks, and the methodology
+            module converts your consistency results into the authorization
+            matrix that anchors professional reports. The mass-assign capstone
+            grades all of it together, so treat this small file as the first
+            graded artifact of the path rather than homework between quizzes.
+  cheat_sheet: |
+    # REST and GraphQL surfaces
+
+    Description discovery:
+        /openapi.json /swagger.json /api-docs /v1|v2 variants
+        graphql: POST __schema introspection; fingerprint engine
+
+    jq quickies:
+        paths+methods: .paths | to_entries[] ...
+        write fields:  .paths."X".patch...properties | keys[]
+        treat docs as floor: probe undocumented fields on writes
+
+    Layer split probes:
+        no-token -> 401?   any-token -> 200?   peer-token -> ?
+        401 vs 403 vs 404 semantics per route
+
+    Consistency walk (per sensitive object):
+        direct / batch / search / export / webhook replay
+        buckets: consistent deny | inconsistent deny | meta-leak
+
+    Planning rows:
+        REST: per-route reasoning     GraphQL: per-edge reasoning
+        old versions predate new checks: test /v1 after /v2
+        rank targets: writes > reads; money/roles/tenants first
+
+    Deliverable: surface map = routes + params + auth verdicts +
+    consistency matrix + saved schemas + ranked questions

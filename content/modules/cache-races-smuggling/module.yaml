@@ -1,0 +1,404 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: cache-races-smuggling
+  title: 'Caches, races, and request smuggling: attacking the plumbing'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 70
+  tags:
+    - caching
+    - cache-poisoning
+    - request-smuggling
+    - race-conditions
+spec:
+  track: web-foundations
+  summary: >-
+    Between your browser and the application stand caches, proxies, and
+    concurrency, and each layer carries its own failure modes. This module
+    explains shared caching and how unkeyed inputs poison pages for other
+    users, walks the desync logic that lets two parsers disagree about where
+    one request ends, and turns timing into money with race conditions on
+    check-then-act flows. Detection stays deliberate and low volume throughout,
+    because plumbing attacks misfire loudly when rushed.
+  objectives:
+    - Explain cache keys and predict which requests a shared cache will serve to other users.
+    - Demonstrate web cache poisoning by controlling an unkeyed input that reaches stored responses.
+    - Describe request smuggling causes and interpret front-end versus back-end parsing differences.
+    - Detect race windows in check-then-act flows using controlled parallel requests.
+    - Execute a safe double-spend proof against a lab transfer endpoint.
+    - Recommend layered defenses covering normalization, locking, and atomic state changes.
+  sections:
+    - id: caching-web-apps
+      title: 'How web apps get cached'
+      blocks:
+        - type: prose
+          markdown: |
+            Caching exists because generating pages is expensive and serving
+            copies is cheap. A shared cache sits between users and origin,
+            stores responses it considers reusable, and answers later requests
+            from memory. The decision hinges on the cache key, usually method
+            plus host plus path, sometimes a few query parameters. Everything
+            not in the key becomes invisible to the cache: headers, cookies,
+            body bits. A response cached under a key ignores those parts no
+            matter who asks next.
+
+            That invisibility cuts both ways. Cache-Control and related headers
+            decide storability; Age and X-Cache style hints reveal hits; debug
+            headers occasionally name the exact key. Reading them first tells
+            you whether you are testing against a live cache layer or an
+            optimistic header with nothing behind it.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/status | grep -iE 'cache|age'
+            X-Cache: miss
+            Age: 0
+
+            $ curl -si http://target:8000/status | grep -iE 'cache|age'
+            X-Cache: hit
+            Age: 12
+
+            Two identical requests, one miss then one hit: a real cache
+            confirmed in twelve seconds of work. The status board path now has
+            a stored copy keyed by path alone, which makes any header-derived
+            content inside it very interesting.
+        - type: callout
+          tone: info
+          markdown: |
+            Distinguish storing caches from private browser caches early. Your
+            own cache hurts only you; poisoning matters exclusively where
+            storage is shared across users, so confirm sharing before planning
+            anything cleverer.
+        - type: prose
+          markdown: |
+            The cache-me-outside room stages this exact setup: Signal Harbor's
+            fleet status board rides an edge page cache, and its pages embed
+            content derived from request headers. Once a page both varies by an
+            unkeyed input and gets stored publicly, the question stops being
+            whether injection lands and starts being who receives it.
+    - id: cache-poisoning-and-deception
+      title: 'Cache poisoning and deception'
+      blocks:
+        - type: prose
+          markdown: |
+            Web cache poisoning plants malicious content into a stored response
+            that other users receive. The recipe needs three ingredients:
+            response content influenced by something outside the key, a cache
+            willing to store the result, and enough traffic patterns to deliver
+            it. Classic carriers are unkeyed headers such as X-Forwarded-Host
+            feeding generated links, or query parameters reflected into cached
+            pages despite never joining the key. The attacker primes once; every
+            subsequent visitor consumes the poisoned copy until expiry.
+
+            Detection is a loop: add a unique marker to candidate inputs,
+            observe whether it reflects, then re-request normally and see if
+            the marker persists without being sent. Persistence after absence
+            is the smoking gun distinguishing storage from plain reflection.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/status \
+                -H 'X-Forwarded-Host: lab-listener.local' | head -n 1
+            HTTP/1.1 200 OK
+
+            $ curl -s http://target:8000/status | grep -o 'src="[^"]*"'
+            src="//lab-listener.local/assets/app.js"
+
+            $ curl -s http://target:8000/status | grep -c 'lab-listener'
+            1
+
+            Third request sent no special header yet still returned the
+            attacker host: the poisoned page is stored and serving. Every user
+            of that URL now loads script from a name you chose, which is how
+            poisoning converts one request into everyone's problem.
+        - type: prose
+          markdown: |
+            Web cache deception flips the direction: trick a victim's browser
+            into requesting a page containing their private data at a URL the
+            cache treats as public static content, often via path extensions
+            like /account/settings/nonexistent.css. The victim's authenticated
+            response gets stored under the decorated key, and the attacker
+            simply fetches the same URL afterward. Defense overlaps neatly:
+            mark personalized responses uncacheable, key on authorization
+            context, and treat unknown extensions as dynamic.
+        - type: quiz
+          question_id: cache-poison-smoking-gun
+          question: 'What confirms cache poisoning rather than ordinary reflection?'
+          options:
+            - id: a
+              text: 'The payload appears in the response body.'
+            - id: b
+              text: 'The payload appears in responses even after you stop sending it.'
+            - id: c
+              text: 'The response arrives faster than before.'
+            - id: d
+              text: 'The server returns a five hundred error.'
+          answer_ids: [b]
+          explanation: >
+            Reflection proves influence; persistence proves storage. Stored
+            influence delivered to other users is precisely what makes
+            poisoning severe, so the re-request-without-payload test is the
+            decisive evidence step.
+    - id: request-smuggling-concepts
+      title: 'Request smuggling concepts'
+      blocks:
+        - type: prose
+          markdown: |
+            HTTP message length can be declared two ways: Content-Length counts
+            bytes, Transfer-Encoding chunked frames pieces with size lines.
+            Proxies and backends must agree on which wins when both appear,
+            and RFC guidance says chunked takes precedence, but implementations
+            disagree historically. When front end believes one rule and back
+            end believes another, the tail of your request fuses onto the next
+            person's request as smuggled instructions. One request goes in;
+            effects appear on somebody else's session.
+
+            The classic pairs have names. CL.TE means front end trusts
+            Content-Length while backend trusts chunked, so a crafted body
+            contains an embedded second request the backend reads separately.
+            TE.CL reverses the roles. Desync symptoms look like random
+            breakage: intermittent errors, responses attached to wrong users,
+            unexplained redirects, which is why detection favors controlled
+            timing probes over blind payloads.
+        - type: code
+          language: text
+          code: |
+            POST / HTTP/1.1
+            Host: target:8000
+            Content-Type: application/x-www-form-urlencoded
+            Content-Length: 34
+            Transfer-Encoding: chunked
+
+            e
+            q=smuggled&x=
+            0
+
+            Front end forwards everything as one body per Content-Length.
+            A chunked-speaking backend reads e bytes as the first chunk,
+            treats 0 as terminator, and whatever followed would begin life
+            as a fresh request prefixed by leftover bytes. Labs demonstrate
+            the mechanics; production probing stays limited to timing checks.
+        - type: callout
+          tone: danger
+          markdown: |
+            Never send smuggling payloads at third-party infrastructure.
+            Desync corrupts other users' sessions by design. Practice only in
+            rooms built for it, keep volume minimal even there, and prefer
+            timeout-based confirmation over visible hijack attempts.
+        - type: prose
+          markdown: |
+            Modern hardening mostly eliminates the classic pairs by forbidding
+            ambiguity: normalize at the edge, reject duplicate length headers,
+            downgrade connections to a single framing convention. The
+            trusted-proxy room teaches the sibling lesson from the header side,
+            where Gatehouse trusts forwarded addresses too easily; smuggling
+            is the same theme expressed in framing instead of identity, and
+            both reward testers who understand exactly which component
+            believes what.
+    - id: race-conditions-and-toctou
+      title: 'Race conditions and TOCTOU'
+      blocks:
+        - type: prose
+          markdown: |
+            Time-of-check to time-of-use bugs happen whenever validation and
+            action are separated by a gap another request can slip through.
+            The web shape is predictable: apply coupon once, withdraw balance,
+            redeem gift card, cast one vote, all implemented as read value,
+            decide, write result without locks. Send several requests inside
+            the decision window and each sees the pre-update state, so each
+            proceeds. Twenty withdrawals against one balance is the cartoon
+            version; double-spent credits are the business version.
+
+            Detection needs parallelism with tight timing. Fire N identical
+            requests so they land together, single connection bursts or
+            aligned threads depending on tooling, then compare outcomes. A
+            flow that permits exactly one action should return exactly one
+            success among N; more successes means a window existed.
+        - type: code
+          language: python
+          code: |
+            import asyncio, httpx
+
+            async def fire():
+                async with httpx.AsyncClient() as c:
+                    r = await asyncio.gather(*[
+                        c.post("http://target:8000/transfer",
+                               json={"to": "acct-b", "amount": 10},
+                               headers={"Cookie": "sid=mine"})
+                        for _ in range(20)
+                    ])
+                print([r.status_code for r in r])
+
+            asyncio.run(fire())
+            # [200, 200, 409, 200, 409, ...]  count the 200s
+        - type: prose
+          markdown: |
+            The race-to-zero room turns this into money: Meridian Pay's sandbox
+            moves funds between test accounts, and its balance check and debit
+            do not travel atomically. The intended proof drains a sandbox
+            account below zero, hence the room's name, and the clean report
+            shows the burst, the success count exceeding entitlement, and the
+            resulting negative ledger line. The double-trouble room adds the
+            discount variant, Cartly reading its coupon parameter twice during
+            checkout so two reads disagree under load, teaching that single
+            parameters can race themselves.
+        - type: quiz
+          question_id: race-success-count
+          question: 'A redeem-once endpoint returns 200 six times out of twenty simultaneous attempts. What does that prove?'
+          options:
+            - id: a
+              text: 'The endpoint is fast and healthy.'
+            - id: b
+              text: 'Six requests passed the check before any write landed, proving a race window.'
+            - id: c
+              text: 'Rate limiting failed.'
+            - id: d
+              text: 'The client library retried automatically.'
+          answer_ids: [b]
+          explanation: >
+            Exactly one success is the contract for redeem-once. Multiple
+            successes mean multiple requests observed stale state, which is
+            the definition of the window, independent of speed claims.
+    - id: detecting-plumbing-issues-safely
+      title: 'Detecting plumbing issues safely'
+      blocks:
+        - type: prose
+          markdown: |
+            Plumbing tests punish impatience, so methodology matters more here
+            than anywhere else in the track. Sequence your work from quietest
+            to loudest. Passive reading first: cache headers, framework banners,
+            behavior differences between repeated requests. Single-marker probes
+            next, unique strings you can grep for, one variable at a time.
+            Timing-based confirmation after that, small batches with pauses.
+            State-changing bursts come last and only against lab endpoints
+            designed to absorb them.
+
+            Evidence discipline keeps results believable. Record request pairs,
+            timestamps, response codes, and sizes; save raw exchanges; note
+            cache Ages alongside every claim about stored state. Ambiguity is
+            the enemy, since these bugs present intermittently and reviewers
+            distrust stories they cannot replay.
+
+            Volume budgets belong in the plan too, not in good intentions.
+            Decide before the first probe how many requests each hypothesis
+            may consume, write the number beside it, and stop at the line even
+            when curiosity argues otherwise. A session that spends forty
+            careful requests proving one cache behavior teaches you more than
+            four thousand scattered ones, and it leaves a transcript clean
+            enough to paste straight into a finding without embarrassment.
+        - type: code
+          language: bash
+          code: |
+            $ for i in 1 2 3 4 5; do
+                curl -so /dev/null -w '%{http_code} %{time_total}\n' \
+                  http://target:8000/desync-probe
+                sleep 2
+              done
+            200 0.041
+            500 3.204
+            200 0.038
+            302 0.052
+            500 3.187
+
+            Intermittent slow failures on an otherwise stable route suggest
+            desync residue landing on unrelated requests, exactly the kind of
+            pattern worth capturing repeatedly before drawing conclusions.
+            Five spaced samples beat five hundred rapid ones in every review.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep a plumbing section in your notebook per target: cache verdicts,
+            framing observations, concurrency notes. Patterns emerge across
+            endpoints, and cross-endpoint patterns are how subtle plumbing
+            flaws finally announce themselves.
+    - id: defenses-for-caches-races-and-framing
+      title: 'Defenses for caches, races, and framing'
+      blocks:
+        - type: prose
+          markdown: |
+            Each failure class owns a defense shelf, and good reports reach for
+            all three. Caching: separate keys must include every input that
+            influences output, frameworks expose vary-style controls for this;
+            personalized responses carry Cache-Control: private, no-store;
+            edge platforms support key customization when paths alone cannot
+            express the difference. Poisoning reports cite the unkeyed input
+            and recommend either keying it or stripping it before render.
+
+            Races: make check-and-act atomic in the database with row locks or
+            conditional updates comparing expected state, serialize critical
+            sections per object, and add idempotency keys so replays collapse
+            harmlessly. The fix is structural, not cosmetic, which is why race
+            findings deserve severity matched to money moved, not difficulty
+            of exploitation.
+        - type: code
+          language: sql
+          code: |
+            UPDATE accounts
+               SET balance = balance - :amount
+             WHERE id = :from_id AND balance >= :amount;
+
+            -- one statement, database-level guard:
+            -- zero rows updated means insufficient funds won the race
+
+            Conditional updates push the check into the same transaction as
+            the write, collapsing the window entirely. Reports that propose
+            this shape give developers something concrete to ship the same
+            afternoon.
+        - type: prose
+          markdown: |
+            Framing: enforce one length convention at the edge, reject requests
+            carrying both headers, normalize before forwarding, and keep
+            front-end and backend stacks pinned to versions whose parsing
+            agrees. Monitoring closes the loop for all three classes; alerting
+            on impossible states such as negative balances catches races even
+            when prevention misses, and cache purge tooling limits poisoning
+            dwell time. Capstones ahead assume these instincts: race-to-zero
+            rewards the burst you now know how to aim, and pickle-jar pairs it
+            with the executable cookies from last module.
+        - type: quiz
+          question_id: plumbing-defense-match
+          question: 'Which pairing of bug class and primary defense is correct?'
+          options:
+            - id: a
+              text: 'Cache poisoning: longer cache lifetimes reduce exposure.'
+            - id: b
+              text: 'Race conditions: conditional database updates that fold check into write.'
+            - id: c
+              text: 'Smuggling: disabling HTTPS between proxies.'
+            - id: d
+              text: 'Deception: encouraging users to log out frequently.'
+          answer_ids: [b]
+          explanation: >
+            Atomic conditional updates eliminate the interleave that races
+            require. Longer cache lifetimes worsen poisoning, TLS choice does
+            not fix framing disagreement, and logout advice dodges rather
+            than fixes deception.
+  cheat_sheet: |
+    # Caches, races, smuggling
+
+    Cache recon:
+        repeat request, diff X-Cache/Age -> shared cache?
+        key = method+host+path (usually); everything else invisible
+
+    Poisoning loop:
+        marker in candidate input -> reflect? ->
+        resend WITHOUT marker -> persists? = stored = poisoned
+        carriers: X-Forwarded-Host, ignored params
+
+    Smuggling shapes:
+        CL.TE / TE.CL: length headers disagree
+        detect: timing probes only, low volume, lab targets
+        defense: one framing rule, reject duplicates
+
+    Race detection:
+        N parallel requests, count successes vs entitlement
+        redeem-once + many 200s = window proven
+        tools: asyncio gather, single-burst runners
+
+    Defenses to recommend:
+        cache: key every influential input; private, no-store
+        race: conditional UPDATE ... WHERE balance >= amount
+              idempotency keys
+        framing: normalize at edge, pin parser versions

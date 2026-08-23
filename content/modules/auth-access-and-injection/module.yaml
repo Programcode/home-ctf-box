@@ -1,0 +1,392 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: auth-access-and-injection
+  title: 'Auth attacks, access control, and injection foundations'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 75
+  tags:
+    - authentication
+    - idor
+    - sql-injection
+    - command-injection
+    - template-injection
+spec:
+  track: web-foundations
+  summary: >-
+    The execution module for your first path. You attack logins the way they
+    actually fail, through user enumeration, weak credentials, and careless
+    sessions, then cross identity lines with broken access control and IDOR,
+    and finish by breaking queries and commands that trust input too much:
+    SQL injection, command injection, and template expression basics. Each
+    class connects to a real room in your catalog, and the busted-login
+    capstone waits at the end expecting all three skills at once.
+  objectives:
+    - Detect username enumeration and run credential attacks within rate limits you control.
+    - Identify session handling weaknesses such as predictable tokens and missing cookie flags.
+    - Test horizontal and vertical access control boundaries and document IDOR evidence.
+    - Explain SQL injection mechanics and demonstrate tautology and UNION payloads safely.
+    - Demonstrate command injection through metacharacter separators and output channels.
+    - Recognize template and format injection patterns and predict their first-order impact.
+  sections:
+    - id: attacking-the-login-form
+      title: 'Attacking the login form'
+      blocks:
+        - type: prose
+          markdown: |
+            Login forms leak before they reject. Submit a known-good username
+            and a wrong password, then an impossible username with any password.
+            If the messages differ, response bodies or timings, you just built a
+            free username oracle. Registration pages, password reset forms, and
+            even the error text on lockout screens leak the same way. Attackers
+            harvest this difference to validate lists of stolen addresses, and
+            testers document it as user enumeration, a genuine finding even when
+            it feels minor.
+
+            Credential stuffing follows naturally but belongs mostly outside
+            lab scope. Inside rooms, small controlled guesses against seeded
+            accounts teach the mechanics without pretending to be realistic
+            bulk attacks. What transfers is the craft: wordlist choice, pacing
+            that respects limits, and noticing when success looks different.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s -o /dev/null -w '%{http_code}\n' \
+                --data 'user=demo&pass=wrong' http://target:8000/login
+            401
+
+            $ curl -s -o /dev/null -w '%{http_code}\n' \
+                --data 'user=nosuchuser&pass=wrong' http://target:8000/login
+            200
+
+            Same password, different codes: the application admits which
+            usernames exist. A loop over candidate names turns those two
+            requests into a complete account inventory without ever guessing
+            a correct password.
+        - type: callout
+          tone: warning
+          markdown: |
+            Keep brute force attempts inside room guidance and stop when locks
+            trigger. Locking out seeded accounts can block later tasks, and in
+            professional settings lockouts burn goodwill and sometimes violate
+            engagement terms. Pace beats speed.
+        - type: prose
+          markdown: |
+            Default and seeded credentials deserve their own minute. Labs seed
+            demo accounts; real products ship default passwords that manuals
+            publish. Before fancy techniques, try the boring list: admin/admin,
+            demo/demo, product name plus year. The open-closet room exists
+            almost entirely on boring credentials plus lazy storage, which is
+            precisely how often it happens outside labs too.
+    - id: session-handling-failures
+      title: 'Session handling failures'
+      blocks:
+        - type: prose
+          markdown: |
+            After login, the session token becomes your identity for the night.
+            Weak tokens undo strong passwords. Predictable sequences let you
+            mint other users' sessions; missing HttpOnly flags expose cookies to
+            any script that runs; missing Secure flags risk plaintext capture;
+            absent rotation after login enables fixation, where an attacker
+            plants a token beforehand and inherits the victim's authenticated
+            session. None of these require exotic tooling. All require reading.
+
+            The HTTP module taught you where these live in headers. Now practice
+            the analysis: collect several tokens, look for structure, test what
+            survives logout, and note whether old tokens still authenticate.
+        - type: code
+          language: bash
+          code: |
+            $ for i in 1 2 3; do curl -si --data 'user=demo&pass=demo123' \
+                http://target:8000/login | grep -o 'sid=[a-f0-9]*'; done
+            sid=1001
+            sid=1002
+            sid=1003
+
+            Sequential identifiers are the loudest possible alarm. Session
+            1004 is not a guess, it is arithmetic, and every account on the
+            system is one increment away. Contrast with random 128-bit values,
+            where a million samples reveal nothing useful.
+        - type: prose
+          markdown: |
+            Logout deserves testing too, because users believe it erases them.
+            Capture a token, log out, replay the token against an authenticated
+            page. Server-side invalidation answers with a redirect to login;
+            client-only logout keeps serving data forever, a finding users care
+            about deeply on shared machines. The predictable-reset room extends
+            this theme to password recovery, where reset links built from
+            timestamps and usernames fall to the same structural reading you
+            just practiced on sequential IDs.
+        - type: quiz
+          question_id: auth-session-fixation
+          question: 'What makes session fixation possible?'
+          options:
+            - id: a
+              text: 'Sessions are stored encrypted at rest.'
+            - id: b
+              text: 'The server accepts a pre-set token value and does not rotate it at login.'
+            - id: c
+              text: 'Cookies expire too quickly.'
+            - id: d
+              text: 'HTTPS strips cookies between hops.'
+          answer_ids: [b]
+          explanation: >
+            Fixation needs a token the attacker chose that stays valid across
+            the victim's login. Rotation at authentication destroys the
+            attack, which is why its absence is the finding.
+    - id: broken-access-control-and-idor
+      title: 'Broken access control and IDOR'
+      blocks:
+        - type: prose
+          markdown: |
+            Authentication answers who you are. Access control answers what you
+            may touch. Applications break the second answer constantly because
+            developers check identity once at the edge and forget it on every
+            object afterward. IDOR, insecure direct object reference, is the
+            famous shape of this failure: URLs and APIs expose internal keys,
+            and the server serves whatever object the key names without asking
+            whether it belongs to you. Change /invoices/1043 to /invoices/1044
+            and someone else's billing history appears.
+
+            Horizontal testing compares peers: your account versus another
+            ordinary account. Vertical testing climbs roles: your ordinary
+            account versus admin functions. Both follow one method, request as
+            yourself, swap only the identifier, observe honestly. Two browser
+            profiles or two curl loops with different cookies make the process
+            mechanical and the evidence clean.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s http://target:8000/invoices/1043 -b 'sid=mine' | jq .owner
+            "demo"
+
+            $ curl -s http://target:8000/invoices/1044 -b 'sid=mine' | jq .owner
+            "alice"
+
+            $ curl -si http://target:8000/invoices/1044 -b 'sid=mine' | head -n 1
+            HTTP/1.1 200 OK
+
+            One increment crossed a tenant line and the server answered 200.
+            That trio of outputs, mine, theirs, authorized, is the entire IDOR
+            proof pattern, and reports should contain exactly those three lines
+            redacted appropriately.
+        - type: callout
+          tone: danger
+          markdown: |
+            In rooms, other accounts are fixtures created for you to touch. In
+            real engagements, never access more records than needed to prove
+            the flaw; one example documented carefully beats a thousand
+            sampled carelessly, and privacy law may treat the rest as breach.
+        - type: prose
+          markdown: |
+            The idor-invoices room is the canonical drill: Ledgerly serves any
+            invoice its URL names, so mapping identifiers to owners teaches the
+            boundary concept viscerally. Later, the multi-tenant module scales
+            the same idea from rows to whole organizations. Notice the family
+            resemblance now and the harder version will feel familiar on sight.
+    - id: sql-injection-foundations
+      title: 'SQL injection foundations'
+      blocks:
+        - type: prose
+          markdown: |
+            SQL injection happens when user input becomes part of the query's
+            structure instead of its data. Databases accept two kinds of text:
+            values inside quotes, and code that shapes logic. Concatenation
+            blurs the border, so a quote typed by a user can close a string and
+            start writing logic. The defense is parameterization, sending query
+            shape and values separately, and the vulnerability exists wherever
+            applications skip it.
+
+            Detection costs one character. Append a single quote to any
+            parameter feeding search or login and watch for behavior changes:
+            stack traces, blank pages, five hundreds, or errors naming sqlite
+            or postgres. Those reactions confirm your quote reached a query
+            alive. From there, the tautology payload closes the string and adds
+            always-true logic, turning authentication checks into rubber stamps.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s --data-urlencode "q=gadget' OR 1=1--" \
+                http://target:8000/search | grep -c '<li>'
+            47
+
+            $ curl -s --data-urlencode "q=nothingmatchesthis" \
+                http://target:8000/search | grep -c '<li>'
+            0
+
+            The union-vault room is built exactly here: its catalog search
+            glues q into SQL, so a harmless-looking search returns forty-seven
+            rows while honest searches return none. The OR 1=1-- variant
+            comments out the rest of the original clause, which is why the
+            trailing dashes matter as much as the tautology itself.
+        - type: prose
+          markdown: |
+            UNION SELECT extends retrieval beyond the intended table once you
+            know column counts, discovered by ordering probes such as UNION
+            SELECT NULL,NULL,NULL until the engine stops complaining. From
+            there, listing table names through the schema opens the database
+            like a filing cabinet. Rooms cap this at safe fixtures, but the
+            method transfers, which is exactly why parameterized queries are
+            non-negotiable in every codebase you will ever review. Report the
+            injection with the smallest payload that proves it, never the
+            biggest dump you could take.
+        - type: quiz
+          question_id: auth-sqli-quote-purpose
+          question: 'Why does adding a single quote to a parameter detect SQL injection?'
+          options:
+            - id: a
+              text: 'Quotes are filtered by web application firewalls.'
+            - id: b
+              text: 'It breaks query syntax when input is concatenated, producing observable errors or anomalies.'
+            - id: c
+              text: 'Databases log quotes differently.'
+            - id: d
+              text: 'It encodes the parameter automatically.'
+          answer_ids: [b]
+          explanation: >
+            An unescaped quote changes query structure, and malformed
+            structure surfaces as errors, blanks, or status changes. That
+            observable difference is the detection signal; parameterized
+            inputs treat the quote as inert data instead.
+    - id: command-injection-foundations
+      title: 'Command injection foundations'
+      blocks:
+        - type: prose
+          markdown: |
+            When server-side code passes your input to a shell, metacharacters
+            become instructions. Semicolons separate commands, pipes forward
+            output, backticks and dollar parentheses execute substitutions, and
+            newlines start fresh lines the shell happily obeys. A diagnostics
+            page that pings a host you choose is the textbook setup: the
+            developer wanted ping target, and the shell will equally accept
+            ping target; cat /etc/passwd. Unlike SQL injection, there is no
+            second language involved, just one language used carelessly.
+
+            The ping-of-doom room is the canonical lab: NetCheck 3000 pings
+            whatever string arrives, so separators turn a network tool into a
+            general command console. Detection mirrors SQL injection: append a
+            harmless separator pair, watch timing or output shift.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s --get --data-urlencode 'host=127.0.0.1' \
+                http://target:8000/ping | tail -n 2
+            round-trip min/avg/max = 0.04/0.05/0.06 ms
+
+            $ curl -s --get --data-urlencode 'host=127.0.0.1; id' \
+                http://target:8000/ping | tail -n 2
+            uid=1000(www-data) gid=1000(www-data)
+
+            The id payload did no damage and proved everything: separator
+            accepted, second command executed, output echoed into the page.
+            Blind variants exist when output is suppressed; a sleep 8 payload
+            that delays the response by eight seconds confirms execution using
+            nothing but a stopwatch.
+        - type: prose
+          markdown: |
+            Choose separators deliberately. Semicolons work when the first
+            command succeeds regardless; ampersands chain unconditionally in
+            many shells; piping helps when only certain output reaches you.
+            Quoting matters too, since frameworks may strip some characters
+            while ignoring others. When one separator dies, rotate rather than
+            repeat louder. The fix side writes itself for reports: avoid shells
+            entirely, pass argument arrays, allowlist input formats, and run
+            under least privilege so mistakes stay cheap.
+    - id: template-and-format-injection-basics
+      title: 'Template and format injection basics'
+      blocks:
+        - type: prose
+          markdown: |
+            Template engines blend data into documents by evaluating
+            expressions embedded in text. The safety rule is direction: engines
+            expect templates in code and data from users. Injection flips that,
+            planting expression syntax where the engine evaluates it. Syntax
+            varies by engine, so detection uses a polyglot probe containing
+            markers for several families at once and watching which arithmetic
+            comes back computed. A greeting page that splices your name into a
+            rendered card is the classic toy example taken dangerously far.
+        - type: code
+          language: bash
+          code: |
+            $ curl -s --get --data-urlencode 'name={{7*7}}' \
+                http://target:8000/greet | grep Hello
+            Hello 49!
+
+            $ curl -s --get --data-urlencode 'name=${7*7}' \
+                http://target:8000/greet | grep Hello
+            Hello ${7*7}!
+
+            Computed output identifies the vulnerable syntax family; literal
+            echo clears that family. In the ssti-greeting room this exact
+            ladder, probe, compute, identify, escalate, ends with code
+            execution inside a card renderer, and the discipline you practice
+            here is what keeps escalation controlled and reportable.
+        - type: callout
+          tone: tip
+          markdown: |
+            Escalate in steps and narrate each: arithmetic proves evaluation,
+            attribute access proves objects reachable, and only then consider
+            anything stronger. Reports written this way read as science rather
+            than vandalism.
+        - type: prose
+          markdown: |
+            Format string confusion is the older cousin. Logging and printf
+            style functions interpret percent directives in whatever text they
+            receive, so %x/%n-style payloads read memory or write it in
+            unfixed binaries, while web apps usually leak internals through
+            error paths instead. XML adds another branch entirely: external
+            entities let crafted documents fetch files and intranets, which
+            the xxe-importer room demonstrates end to end. Treat these as one
+            lesson wearing three costumes: wherever text is interpreted as
+            more than text, ask what the interpreter accepts.
+        - type: quiz
+          question_id: auth-ssti-direction
+          question: 'What distinguishes safe template use from template injection?'
+          options:
+            - id: a
+              text: 'Whether the template engine is popular.'
+            - id: b
+              text: 'User data must enter as values, never as part of the evaluated template text.'
+            - id: c
+              text: 'Templates are unsafe unless compiled.'
+            - id: d
+              text: 'Only JSON templates can be exploited.'
+          answer_ids: [b]
+          explanation: >
+            Engines evaluate template text. User content placed among that
+            text gets evaluated too, which is the entire bug; passing user
+            strings as variables keeps them inert data.
+  cheat_sheet: |
+    # Auth, access control, and injection
+
+    Login probing:
+        diff responses/timing for valid vs invalid users
+        boring creds first: admin/admin, demo/demo
+        pace brute force; respect lockouts (-rate)
+
+    Session reads:
+        Set-Cookie flags: HttpOnly Secure SameSite
+        collect tokens, look for sequence/structure
+        replay after logout: invalidation check
+
+    IDOR proof pattern:
+        GET /obj/{id} as me     -> owner = me
+        GET /obj/{id+1} as me   -> owner = alice, 200 OK
+        document: mine, theirs, authorized
+
+    SQLi ladder:
+        probe: q=x'
+        tautology: x' OR 1=1--
+        columns: UNION SELECT NULL,NULL,...
+        defense to recommend: parameterized queries
+
+    Command injection:
+        separators: ; && || `$( )` newline
+        blind check: ; sleep 8   (time the response)
+        defense: no shell, argv arrays, allowlists
+
+    Template probe:
+        {{7*7}}  ${7*7}  <%= 7*7 %>  #{7*7}
+        computed output -> identified engine -> stepwise escalation

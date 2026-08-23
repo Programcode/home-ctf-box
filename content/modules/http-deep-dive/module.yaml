@@ -1,0 +1,398 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: http-deep-dive
+  title: 'HTTP deep dive: read every byte before you break anything'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - http
+    - curl
+    - devtools
+    - headers
+    - reporting
+spec:
+  track: web-foundations
+  summary: >-
+    Every web attack travels as HTTP, so this module teaches you to read the
+    protocol the way a musician reads sheet music. You take apart requests and
+    responses line by line, learn what methods and status codes actually
+    promise, follow headers and cookies to sessions and caches, replay and
+    mutate traffic from the terminal with curl, and watch live requests in
+    browser devtools. The module closes with a reporting habit: turning raw
+    observations into findings another person can reproduce.
+  objectives:
+    - Break down an HTTP request and response line by line and predict what each part does.
+    - Choose correct HTTP methods and interpret status codes as evidence of server behavior.
+    - Read headers and cookies to identify servers, sessions, caching, and security settings.
+    - Replay and modify requests from the terminal using curl and read its verbose output.
+    - Inspect, filter, and export live browser traffic with the devtools network panel.
+    - Write a finding from a raw observation so a stranger can reproduce it exactly.
+  sections:
+    - id: anatomy-of-an-exchange
+      title: 'Anatomy of an exchange'
+      blocks:
+        - type: prose
+          markdown: |
+            A web request is just text with strong opinions about format. When
+            you understand its grammar, nothing a browser does feels magical
+            anymore. Every request has three parts: a request line naming a
+            method, path, and protocol version; header lines shaped like
+            name-value pairs; and usually empty space where an optional body
+            would live. Responses mirror that shape with one difference. The
+            first line carries a status code instead of a method, and that code
+            is the server's shortest summary of what it decided.
+
+            Attackers love HTTP because every part is editable. The method, the
+            path, any header, any body value. A browser will not let you change
+            most of them, but curl will, and later so will your proxy tools.
+            Before you change things, though, you need to see them clearly.
+        - type: code
+          language: bash
+          code: |
+            $ curl -v http://target:8000/ -o /dev/null
+            *   Trying 10.0.0.5:8000...
+            * Connected to target (10.0.0.5) port 8000
+            > GET / HTTP/1.1
+            > Host: target:8000
+            > User-Agent: curl/8.5.0
+            > Accept: */*
+            >
+            < HTTP/1.1 200 OK
+            < Server: Werkzeug/3.0.1 Python/3.12.3
+            < Content-Type: text/html; charset=utf-8
+            < Content-Length: 2318
+            <
+            { [2318 bytes data]
+
+            Lines starting with > are what you sent. Lines starting with < are
+            what came back. That split alone makes curl -v the fastest way to
+            answer "what really happened" for the rest of your career.
+        - type: prose
+          markdown: |
+            Notice two details hiding in that output. First, the Host header:
+            on shared hosting, dozens of sites share one IP address, and the
+            Host header is how the server picks which site you meant. Change
+            it and you may land somewhere unexpected, which is a discovery
+            technique you will use in the next module. Second, the Server
+            header advertises exact software versions. Version banners are not
+            vulnerabilities by themselves, but they hand you a shopping list.
+        - type: callout
+          tone: tip
+          markdown: |
+            Run `curl -v` against every room target at least once before you
+            do anything clever. Half of all stuck beginners are stuck because
+            they never looked at the actual exchange.
+    - id: methods-and-status-codes
+      title: 'Methods and status codes'
+      blocks:
+        - type: prose
+          markdown: |
+            Methods tell the server which verb you intend. GET reads, POST
+            creates or submits, PUT replaces, PATCH edits partially, DELETE
+            removes. Servers are supposed to enforce these intentions, and
+            applications frequently fail to check them, which produces entire
+            vulnerability classes. The classic mistake is a state-changing
+            action that answers any method you send. If GET triggers a delete,
+            the safety property browsers rely on is gone, and cross-site
+            request tricks get much easier.
+
+            Status codes come in families worth memorizing. Codes from 200 to
+            299 mean success, and 204 quietly means success with no body. The
+            300 family redirects you somewhere else. Client mistakes live in
+            the 400s: 401 means who are you, 403 means I know who you are and
+            the answer is no, and confusing those two is one of the most
+            common bugs in access control testing. Server failures own the
+            500s, and an unexplained 500 during testing often means your input
+            reached something fragile.
+        - type: code
+          language: bash
+          code: |
+            $ curl -i -X DELETE http://target:8000/api/invoices/7
+            HTTP/1.1 405 Method Not Allowed
+            Allow: GET, HEAD, OPTIONS
+
+            $ curl -i -X OPTIONS http://target:8000/api/invoices/7
+            HTTP/1.1 200 OK
+            Allow: GET, HEAD, OPTIONS
+
+            A well-behaved endpoint refuses DELETE with a 405 and lists what
+            it accepts in Allow. An endpoint that answers 200 to everything
+            deserves a second look, because method confusion is sometimes a
+            shortcut past controls built only for browser-shaped requests.
+        - type: prose
+          markdown: |
+            The wrong-method room later in your catalog is built entirely on
+            this idea: an admin console that rejects ordinary browser requests
+            yet accepts the same request wearing a different method. Treat
+            status codes as conversation, not decoration. A sudden change from
+            403 to 404 after you alter one character tells you the route
+            exists and authorization made the decision, which is very
+            different information from a plain miss.
+        - type: quiz
+          question_id: http-status-meaning
+          question: 'A request returns 403 while the same URL returns 404 for a different user. What does that contrast most likely prove?'
+          options:
+            - id: a
+              text: 'The server is randomly broken and should be reported as unstable.'
+            - id: b
+              text: 'The resource exists and an authorization decision produced the different response.'
+            - id: c
+              text: 'The application prefers 404 for caching reasons.'
+            - id: d
+              text: 'Both users lack network connectivity to the resource.'
+          answer_ids: [b]
+          explanation: >
+            A 404 for one user and 403 for another means the server knows
+            the object exists and chose different answers based on identity.
+            That contrast is evidence the object is real, which matters when
+            you document hidden endpoints in a report.
+    - id: headers-cookies-and-caching
+      title: 'Headers, cookies, and caching'
+      blocks:
+        - type: prose
+          markdown: |
+            Headers carry the metadata that decides behavior: which language
+            you get, whether your session survives, whether a cache may serve
+            someone else your private page. Reading them fluently turns
+            mysterious behavior into predictable behavior. Set-Cookie tells
+            you a session started and whether its flags protect it. HttpOnly
+            keeps scripts from reading the cookie, Secure forces encrypted
+            transport, SameSite limits cross-site sending. Missing flags are
+            findings, and you will meet them again in the access control
+            module when session theft becomes practical.
+
+            Cache headers decide who may reuse a response. Cache-Control
+            states the rules, ETag names a version, Age reveals how long a
+            cached copy has existed. When a cache stores a page containing
+            personal data and serves it to strangers, that is a whole
+            vulnerability class, and the headers are where you spot the setup
+            for it.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si http://target:8000/account | head -n 12
+            HTTP/1.1 200 OK
+            Server: nginx/1.24.0
+            Set-Cookie: sid=9f2c...; Path=/
+            Cache-Control: public, max-age=60
+            X-Powered-By: Express
+
+            Read it like an auditor. The session cookie has no HttpOnly, no
+            Secure, no SameSite. A page holding account data is marked
+            public and cacheable for a minute. Two findings are already
+            sitting in six header lines before any cleverness happened.
+        - type: callout
+          tone: warning
+          markdown: |
+            A missing cookie flag is a finding with impact you must argue, not
+            assume. Note the flag, describe one realistic attack that the flag
+            would have stopped, and let severity follow that story rather
+            than a checklist.
+        - type: prose
+          markdown: |
+            Fingerprinting starts here too. Server, X-Powered-By, and odd
+            default headers such as X-AspNet-Version sketch the stack without
+            sending a single probe. Later modules build full profiles of
+            targets, but the habit begins with noticing what servers volunteer
+            about themselves on every ordinary response.
+    - id: replaying-from-the-terminal
+      title: 'Replaying from the terminal'
+      blocks:
+        - type: prose
+          markdown: |
+            Browsers protect you from yourself, which is exactly why testers
+            work in terminals. curl sends precisely the bytes you specify: no
+            autocomplete, no silent retries, no helpful corrections. Learning
+            five curl habits covers ninety percent of manual API testing. Send
+            headers with -H, send bodies with -d, choose methods with -X,
+            show response headers with -i or -v, and save responses with -o
+            when they matter as evidence.
+
+            Bodies deserve care because encoding decides interpretation. The
+            form style that -d produces defaults to
+            application/x-www-form-urlencoded, while JSON APIs expect
+            application/json, and some frameworks accept both with different
+            parsing rules. Sending a body whose content-type disagrees with
+            its shape is itself a probing technique you will sharpen in the
+            smuggling module, where parsers disagreeing about message
+            boundaries becomes the whole attack.
+        - type: code
+          language: bash
+          code: |
+            $ curl -si -X POST http://target:8000/login \
+                -H 'Content-Type: application/json' \
+                -d '{"user":"demo","pass":"demo123"}' | head -n 5
+            HTTP/1.1 302 Found
+            Location: /account
+            Set-Cookie: sid=b71e...; Path=/
+
+            $ curl -si http://target:8000/account -b 'sid=b71e...' | grep -c Welcome
+            1
+
+            Two commands performed a complete authenticated flow: submit
+            credentials, catch the session cookie, replay it with -b, and
+            confirm the personalized page answered. Scripted flows like this
+            become the backbone of every automated check you write later.
+        - type: prose
+          markdown: |
+            Save interesting exchanges as files while you work. A response
+            captured now beats a paraphrase reconstructed later, and reports
+            improve dramatically when every claim carries the command that
+            produced it. Pair each capture with a timestamped notebook entry,
+            exactly as the foundations track taught, so reproduction stays
+            trivial even weeks afterward.
+    - id: reading-live-traffic-in-devtools
+      title: 'Reading live traffic in devtools'
+      blocks:
+        - type: prose
+          markdown: |
+            Browser devtools is the observation deck for everything a page
+            really does, and the network panel is where testers live. Open it
+            with F12, switch to Network, and reload. Every request appears
+            with its method, status, size, and timing. Click one to see
+            headers, cookies, payloads, and the raw response. The filter box
+            accepts text, and buttons narrow traffic to XHR and fetch, which
+            is where single-page applications hide their real APIs. When a
+            site claims it cannot do something, the network panel routinely
+            proves otherwise by showing the endpoint that already does it.
+
+            Preserve log stops the list from clearing across page loads, and
+            disable cache keeps caching honest while you test. Both checkboxes
+            sit at the top of the panel, and both prevent classic hours-long
+            mysteries where behavior differs between clicks and scripted runs.
+        - type: code
+          language: text
+          code: |
+            Steps that pay off in every room:
+
+            1. F12, open Network, tick Preserve log and Disable cache.
+            2. Perform the action once normally; read every request it fired.
+            3. Filter to Fetch/XHR; note endpoint paths and JSON shapes.
+            4. Right-click the interesting request, choose Copy as cURL.
+            5. Paste into the terminal, confirm it replays, then start editing.
+
+            Copy as cURL hands you a perfect starting point: every cookie and
+            header included, ready to mutate field by field.
+        - type: prose
+          markdown: |
+            Beyond Network, three panels earn their keep early. Storage under
+            Application shows cookies and local storage values, which
+            deserialization work later will make you read closely. Console
+            prints errors pages try to hide, including failed permission
+            checks and framework diagnostics. The device toolbar renders
+            responsive layouts and lets you fake user agents, occasionally
+            unlocking mobile-only routes that desktop navigation never links.
+        - type: callout
+          tone: info
+          markdown: |
+            Devtools shows your own session only, so exploring it is always
+            inside scope. It is also the politest possible recon: zero extra
+            requests hit the target beyond your normal clicking.
+    - id: turning-observations-into-findings
+      title: 'Turning observations into findings'
+      blocks:
+        - type: prose
+          markdown: |
+            An observation says what happened. A finding says what happened,
+            why it matters, and how to make it happen again. The gap between
+            them is where junior testers struggle, and closing it takes a
+            fixed template applied ruthlessly. State the affected component
+            with its exact URL. Describe the steps in order, each one
+            copy-pasteable. Show the evidence, ideally the command and its
+            output together. Explain impact in terms of what an attacker gains,
+            not in adjectives. Suggest a fix a developer could implement
+            tomorrow morning.
+
+            Practice the template on small things first. A verbose version
+            banner, a missing cookie flag, a directory listing nobody meant
+            to expose. Small findings teach the writing rhythm without
+            requiring deep exploitation, and reviewers evaluating your early
+            rooms grade the clarity as much as the bug.
+        - type: code
+          language: markdown
+          code: |
+            Finding: Session cookie missing protective flags
+            Component: https://target:8000 (Set-Cookie on /login)
+            Steps:
+              1. curl -si -X POST .../login -d 'user=demo&pass=demo123'
+              2. Observe Set-Cookie line in response headers.
+            Evidence: sid=b71e...; Path=/ (no HttpOnly, Secure, SameSite)
+            Impact: script on any co-hosted origin could read the session
+              cookie; interception over plain HTTP would also expose it.
+            Fix suggestion: set HttpOnly; Secure; SameSite=Lax on session
+              cookies and mark account pages Cache-Control: private.
+        - type: prose
+          markdown: |
+            One more habit separates professionals from tourists: verify the
+            finding twice from scratch. Reset the lab, run your own steps
+            cold, and confirm the result reproduces. Findings that survive a
+            clean rerun almost never generate embarrassing review comments,
+            because reproducibility is what reviewers actually buy from you.
+        - type: quiz
+          question_id: http-finding-template
+          question: 'Which element belongs in every finding regardless of severity?'
+          options:
+            - id: a
+              text: 'A screenshot with your terminal theme visible for personality.'
+            - id: b
+              text: 'Reproduction steps, concrete evidence, impact, and a fix suggestion.'
+            - id: c
+              text: 'Your opinion about the engineering team that shipped it.'
+            - id: d
+              text: 'At least three unrelated issues bundled for convenience.'
+          answer_ids: [b]
+          explanation: >
+            Reviewers act on findings they can reproduce and fix. Steps,
+            evidence, impact, and a suggested repair are the minimum
+            contract; bundling unrelated problems or editorializing slows
+            both sides down.
+        - type: quiz
+          question_id: http-devtools-scope
+          question: 'Why is devtools exploration considered safely inside scope for any room?'
+          options:
+            - id: a
+              text: 'Devtools requests are invisible to servers.'
+            - id: b
+              text: 'It only observes your own session and fires no unusual requests beyond your actions.'
+            - id: c
+              text: 'Browsers legally exempt security researchers.'
+            - id: d
+              text: 'Scope rules apply only to terminal tools.'
+          answer_ids: [b]
+          explanation: >
+            Devtools adds no new requests beyond what the page itself does
+            while you drive it. You are inspecting traffic you are already
+            entitled to generate, which keeps the technique inside every
+            reasonable room scope.
+  cheat_sheet: |
+    # HTTP deep dive
+
+    Curl essentials:
+        curl -v URL                 # full exchange, > sent, < received
+        curl -i URL                 # include response headers
+        curl -X METHOD URL          # choose the method
+        curl -H 'K: V' URL          # add a header
+        curl -d 'a=b' URL           # form body (urlencoded)
+        curl -H 'Content-Type: application/json' -d '{}' URL
+        curl -b 'sid=x' URL         # replay a session cookie
+        curl -o out.html URL        # save body as evidence
+
+    Status families:
+        2xx success   204 success, empty body
+        3xx redirect  401 unauthenticated   403 unauthorized
+        404 missing   405 bad method        5xx server error
+
+    Header watchlist:
+        Set-Cookie flags: HttpOnly, Secure, SameSite
+        Cache-Control, ETag, Age
+        Server, X-Powered-By (fingerprinting)
+
+    Devtools network panel:
+        F12 -> Network, tick Preserve log + Disable cache
+        Filter: Fetch/XHR     Right-click: Copy as cURL
+
+    Finding template:
+        Component / Steps / Evidence / Impact / Fix
