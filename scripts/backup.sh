@@ -25,7 +25,16 @@ if [[ -n "$MINIO_CID" ]]; then
   fi
 fi
 
-sha256sum "$DEST"/*.gz "$DEST"/*.tgz >"$DEST/SHA256SUMS" 2>/dev/null || true
+(
+  cd "$DEST"
+  find . -maxdepth 1 \( -name '*.gz' -o -name '*.tgz' \) -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS
+)
+
+echo "[*] verifying checksums of the fresh backup"
+( cd "$DEST" && sha256sum --check --quiet SHA256SUMS ) || {
+  echo "FAIL: freshly written backup failed checksum verification" >&2
+  exit 1
+}
 
 echo "[+] backup complete: $DEST"
 ls -la "$DEST"

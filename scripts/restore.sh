@@ -16,6 +16,16 @@ if [[ -z "$BACKUP" || ! -f "$BACKUP/postgres.sql.gz" ]]; then
   exit 1
 fi
 
+if [[ -f "$BACKUP/SHA256SUMS" ]]; then
+  echo "[*] verifying backup checksums before touching live data"
+  ( cd "$BACKUP" && sha256sum --check --quiet SHA256SUMS ) || {
+    echo "FAIL: checksum mismatch; refusing to restore a corrupt backup" >&2
+    exit 1
+  }
+else
+  echo "[!] no SHA256SUMS in backup directory; continuing without integrity proof"
+fi
+
 echo "[!] this drops the openrange database and minio objects from $BACKUP"
 if [[ "${OPENRANGE_ASSUME_YES:-0}" != "1" ]]; then
   read -r -p "type RESTORE to continue: " answer
@@ -34,12 +44,18 @@ if [[ -f "$BACKUP/minio-data.tgz" ]]; then
   if [[ -n "$MINIO_CID" ]]; then
     echo "[*] restoring object-storage volume"
     docker compose stop minio >/dev/null
+    restore_failed=0
     MINIO_VOL="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$MINIO_CID")"
     docker run --rm \
       -v "$MINIO_VOL":/dst \
       -v "$BACKUP":/src:ro \
-      alpine:3.20 sh -c "rm -rf /dst/* /dst/..?* /dst/.[!.]* ; tar xzf /src/minio-data.tgz -C /dst"
+      alpine:3.20 sh -c "rm -rf /dst/* /dst/..?* /dst/.[!.]* ; tar xzf /src/minio-data.tgz -C /dst" || restore_failed=1
+    # MinIO must come back up even when extraction failed.
     docker compose start minio >/dev/null
+    if [[ "$restore_failed" != "0" ]]; then
+      echo "FAIL: object-storage extraction failed; minio restarted on the old volume" >&2
+      exit 1
+    fi
   fi
 fi
 

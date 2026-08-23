@@ -50,8 +50,8 @@ python_version = "3.12"
 strict = true
 warn_unreachable = true
 plugins = []
-files = ["packages"]
-mypy_path = "packages/config/src:packages/content-sdk/src:packages/scoring/src"
+files = ["apps/api/src/openrange", "packages/config/src/openrange"]
+mypy_path = "apps/api/src:packages/config/src"
 namespace_packages = true
 explicit_package_bases = true
 
@@ -62,6 +62,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests", "apps/*/tests", "packages/*/tests"]
 addopts = "-q --strict-markers"
+asyncio_mode = "auto"
 markers = [
   "integration: requires backing services (postgres/redis/minio/meilisearch)",
   "content: content bundle validation and solvers",
