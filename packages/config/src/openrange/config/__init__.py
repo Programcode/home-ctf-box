@@ -72,6 +72,8 @@ class Settings(BaseSettings):
                 problems.append(f"{name} still carries a dev placeholder")
         if not self.s3_access_key or not self.s3_secret_key:
             problems.append("s3 credentials are required outside dev")
+        elif self.s3_access_key == "openrange-dev" or self.s3_secret_key == "openrange-dev-secret":
+            problems.append("s3 credentials still carry the documented dev defaults")
         if not self.meili_master_key:
             problems.append("meili_master_key is required outside dev")
         if problems:

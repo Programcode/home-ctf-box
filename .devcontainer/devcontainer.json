@@ -2,10 +2,10 @@
   "name": "openrange-devcontainer",
   "image": "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
-    "ghcr.io/devcontainers/features/node:1": { "version": "24" },
-    "ghcr.io/devcontainers-extra/features/uv:1": {},
-    "ghcr.io/devcontainers-extra/features/pnpm:1": {}
+    "ghcr.io/devcontainers/features/docker-in-docker:2.12.0": {},
+    "ghcr.io/devcontainers/features/node:1.6.1": { "version": "24" },
+    "ghcr.io/devcontainers-extra/features/uv:1.2.0": {},
+    "ghcr.io/devcontainers-extra/features/pnpm:1.0.9": {}
   },
   "postCreateCommand": "make bootstrap",
   "customizations": {
