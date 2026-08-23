@@ -30,21 +30,29 @@ def load_yaml(path: Path) -> dict[str, object]:
 
 
 def load_bundle(path: Path) -> RoomBundle | ModuleBundle | PathBundle:
-    kind = str(load_yaml(path).get("apiVersion", "")) and str(load_yaml(path).get("kind", ""))
+    raw = load_yaml(path)
+    kind = str(raw.get("kind", ""))
     models = {"Room": RoomBundle, "Module": ModuleBundle, "Path": PathBundle}
     model = models.get(kind)
     if model is None:
         raise LoadError(path, f"unknown or missing kind: {kind!r}")
     try:
-        return model.model_validate(load_yaml(path))  # type: ignore[return-value]
+        bundle = model.model_validate(raw)
+        assert isinstance(bundle, (RoomBundle, ModuleBundle, PathBundle))
+        return bundle
     except ValidationError as exc:
         first = exc.errors()[0]
         loc = ".".join(str(p) for p in first.get("loc", []))
         raise LoadError(path, f"{loc}: {first['msg']}") from exc
+    except AssertionError as exc:  # pragma: no cover - defensive
+        raise LoadError(path, "model produced unexpected bundle type") from exc
 
 
 def load_room(room_dir: Path) -> tuple[RoomBundle, Path]:
     manifest = room_dir / "room.yaml"
     if not manifest.exists():
         raise LoadError(manifest, "room.yaml missing")
-    return load_bundle(manifest), manifest
+    bundle = load_bundle(manifest)
+    if not isinstance(bundle, RoomBundle):
+        raise LoadError(manifest, f"manifest declares kind {type(bundle).__name__}, expected Room")
+    return bundle, manifest

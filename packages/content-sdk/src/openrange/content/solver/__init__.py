@@ -14,9 +14,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-import time
-from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openrange.content.models import Validator
+
+_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+_REGEX_TIMEOUT_SECONDS = 0.5
+_REGEX_MAX_LENGTH = 4096
+_POOL = ThreadPoolExecutor(max_workers=2)
 
 
 @dataclass(slots=True)
@@ -59,8 +68,7 @@ def derive_flag(
     """The single canonical per-session flag derivation (ADR 0007)."""
     material = f"{instance_id}|{content_slug}|{task_id}".encode()
     digest = hmac.new(master_key, material, hashlib.sha256).digest()
-    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-    encoded = "".join(alphabet[b % 32] for b in digest[:20])
+    encoded = "".join(_ALPHABET[b % 32] for b in digest[:20])
     return f"FLAG{{{encoded}}}"
 
 
@@ -68,41 +76,58 @@ class ValidatorError(ValueError):
     pass
 
 
-def validate_answer(validator: object, submitted: str, expected_flag: str) -> bool:
+def _digest_equal(left: str, right: str) -> bool:
+    """compare_digest over UTF-8 bytes: safe for any submission text."""
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+
+
+def _regex_fullmatch_with_timeout(pattern: re.Pattern[str], submitted: str) -> bool:
+    future = _POOL.submit(pattern.fullmatch, submitted)
+    try:
+        return future.result(timeout=_REGEX_TIMEOUT_SECONDS) is not None
+    except FutureTimeout as exc:
+        future.cancel()
+        raise ValidatorError("regex validation timed out") from exc
+
+
+def validate_answer(validator: Validator, submitted: str, expected_flag: str) -> bool:
     """Shared validator implementation; the API and harness both call it."""
-    vtype = getattr(validator, "type", "")
-    value = getattr(validator, "value", None)
+    vtype = validator.type
+    value = validator.value
 
     if vtype == "per_session_flag":
-        return hmac.compare_digest(submitted.strip(), expected_flag)
+        return _digest_equal(submitted.strip(), expected_flag)
     if vtype == "exact":
-        return bool(value) and hmac.compare_digest(submitted.strip(), str(value))
+        return value is not None and _digest_equal(submitted.strip(), str(value))
     if vtype == "normalized":
+        if value is None:
+            return False
         norm = re.sub(r"\s+", " ", submitted.strip().lower())
-        target = re.sub(r"\s+", " ", str(value or "").strip().lower())
-        return bool(value) and hmac.compare_digest(norm, target)
+        target = re.sub(r"\s+", " ", str(value).strip().lower())
+        return _digest_equal(norm, target)
     if vtype == "regex":
-        pattern = re.compile(str(value))
-        deadline = time.monotonic() + 0.25
-        match = pattern.fullmatch(submitted)
-        if time.monotonic() > deadline:
-            raise ValidatorError("regex validation timed out")
-        return match is not None
+        if not value or len(submitted) > _REGEX_MAX_LENGTH:
+            return False
+        try:
+            pattern = re.compile(str(value))
+        except re.error as exc:
+            raise ValidatorError("invalid validator regex") from exc
+        return _regex_fullmatch_with_timeout(pattern, submitted)
     if vtype == "numeric_range":
         try:
             number = float(submitted.strip())
         except ValueError as exc:
             raise ValidatorError("answer is not numeric") from exc
-        lo = getattr(validator, "min", None)
-        hi = getattr(validator, "max", None)
+        lo = validator.min
+        hi = validator.max
         return (lo is None or number >= lo) and (hi is None or number <= hi)
     if vtype == "set":
-        allowed = set(getattr(validator, "values", None) or [])
+        allowed = {s.strip().lower() for s in (validator.values or [])}
         want = {s.strip().lower() for s in submitted.split(",") if s.strip()}
         return want == allowed
     if vtype == "file_hash":
-        digest = hashlib.sha256(submitted.encode()).hexdigest()
-        return bool(value) and hmac.compare_digest(digest, str(value))
+        digest = hashlib.sha256(submitted.encode("utf-8")).hexdigest()
+        return value is not None and _digest_equal(digest, str(value))
     if vtype == "manual":
         # Manual-review answers never auto-pass.
         return False
@@ -112,7 +137,3 @@ def validate_answer(validator: object, submitted: str, expected_flag: str) -> bo
 def find_flags(text: str) -> list[str]:
     """Extract FLAG{...} tokens matching the platform format."""
     return FLAG_RE.findall(text)
-
-
-def first_url(context: SolveContext, *names: str) -> Mapping[str, str]:
-    return context.base_urls

@@ -66,6 +66,7 @@ async def start(
         version=bundle.metadata.version,
         ports=list(bundle.spec.target.ports),
         build_context=(bundle_dir / bundle.spec.target.build_context).resolve(),
+        task_ids=[t.id for t in bundle.spec.tasks],
     )
     instance = await labsvc.start_lab(db, runner, user_id=user.id, info=info)
     return labsvc.public_view(instance)

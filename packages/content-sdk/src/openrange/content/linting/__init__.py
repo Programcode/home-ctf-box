@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openrange.content.loader import load_bundle
-from openrange.content.models import RoomBundle
+from openrange.content.models import PathBundle, RoomBundle
 
 Severity = str  # "error" | "warning"
 
@@ -63,7 +63,8 @@ def lint_room(bundle_dir: Path) -> list[Finding]:
 
     try:
         bundle = load_bundle(manifest)
-        assert isinstance(bundle, RoomBundle)
+        if not isinstance(bundle, RoomBundle):
+            return [Finding("error", "schema", f"expected kind Room, got {type(bundle).__name__}")]
     except Exception as exc:
         return [Finding("error", "schema", str(exc))]
 
@@ -157,9 +158,11 @@ def lint_room(bundle_dir: Path) -> list[Finding]:
 
 def lint_path(bundle_dir: Path) -> list[Finding]:
     try:
-        bundle = load_bundle(bundle_dir / ("path.yaml"))
+        bundle = load_bundle(bundle_dir / "path.yaml")
     except Exception as exc:
         return [Finding("error", "schema", str(exc))]
+    if not isinstance(bundle, PathBundle):
+        return [Finding("error", "schema", f"expected kind Path, got {type(bundle).__name__}")]
     findings: list[Finding] = []
     rooms_root = bundle_dir.parents[1] / "rooms"
     missing = [m.slug for m in bundle.spec.modules if not (rooms_root / m.slug).is_dir()]

@@ -122,20 +122,30 @@ def _print_findings(findings: list[Finding]) -> int:
     return 1 if errors else 0
 
 
+def _lint_directory(target: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for child in sorted(target.glob("*")):
+        if not child.is_dir():
+            continue
+        if (child / "room.yaml").exists():
+            findings.extend(lint_room(child))
+        elif (child / "path.yaml").exists():
+            findings.extend(lint_path(child))
+    return findings
+
+
 @app.command()
 def lint(target: Annotated[Path, typer.Argument()] = Path(".")) -> None:
-    """Lint one bundle directory or every bundle under content/."""
+    """Lint one bundle or a directory of bundles."""
     if (target / "room.yaml").exists():
         code = _print_findings(lint_room(target))
+    elif (target / "path.yaml").exists():
+        code = _print_findings(lint_path(target))
+    elif target.is_dir():
+        code = _print_findings(_lint_directory(target))
     else:
-        findings: list[Finding] = []
-        for room in sorted(ROOMS.glob("*")) if ROOMS.is_dir() else []:
-            if room.is_dir():
-                findings.extend(lint_room(room))
-        for path_dir in sorted(PATHS.glob("*")) if PATHS.is_dir() else []:
-            if path_dir.is_dir():
-                findings.extend(lint_path(path_dir))
-        code = _print_findings(findings)
+        console.print(f"[red]{target} is neither a bundle nor a directory[/red]")
+        code = 1
     raise typer.Exit(code)
 
 

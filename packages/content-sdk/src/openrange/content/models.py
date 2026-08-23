@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -165,6 +165,15 @@ class RoomBundle(StrictModel):
     spec: RoomSpec
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @model_validator(mode="after")
+    def _points_total_consistent(self) -> RoomBundle:
+        task_total = sum(t.points for t in self.spec.tasks)
+        if task_total != self.metadata.points:
+            raise ValueError(
+                f"metadata.points ({self.metadata.points}) != sum of task points ({task_total})"
+            )
+        return self
 
     @property
     def total_points(self) -> int:

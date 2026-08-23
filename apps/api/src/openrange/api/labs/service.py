@@ -35,6 +35,7 @@ class RoomTargetInfo:
     ports: list[int]
     build_context: Any  # Path when running from a repo checkout
     image: str | None = None
+    task_ids: list[str] | None = None
 
 
 async def active_instance_count(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -56,13 +57,24 @@ async def _record(db: AsyncSession, instance_id: uuid.UUID, event: str, detail: 
 def _derive_flags(user_id: uuid.UUID, info: RoomTargetInfo, instance_id: str) -> dict[str, str]:
     settings = get_settings()
     master = settings.flag_master_key.encode()
+    task_ids = info.task_ids or ["default"]
+    if len(task_ids) == 1:
+        return {
+            "default": derive_flag(
+                master,
+                instance_id=instance_id,
+                content_slug=f"{info.slug}@{info.version}",
+                task_id=task_ids[0],
+            )
+        }
     return {
-        "default": derive_flag(
+        tid: derive_flag(
             master,
             instance_id=instance_id,
             content_slug=f"{info.slug}@{info.version}",
-            task_id="default",
+            task_id=tid,
         )
+        for tid in task_ids
     }
 
 
@@ -96,12 +108,23 @@ async def start_lab(
             from openrange.api.labs.runner_client import RunnerClient as _RC
 
             packed = _RC.pack_context(info.build_context)
+        env = (
+            {"ROOM_FLAG": flags["default"]}
+            if info.task_ids is None or len(info.task_ids) <= 1
+            else {
+                **{"ROOM_FLAG": flags["default"]},
+                **{
+                    f"ROOM_FLAG_{tid.upper().replace('-', '_')}": flags[tid]
+                    for tid in info.task_ids
+                },
+            }
+        )
         handle = await runner.create_instance(
             instance_id=runner_instance_id,
             # Runner builds from the bundle context; prebuilt registry
             # images are the alternative path, never combined.
             image=None if info.build_context is not None else info.image,
-            env={"ROOM_FLAG": flags["default"]},
+            env=env,
             ports=info.ports,
             ttl_seconds=settings.lab_default_ttl_minutes * 60,
             labels={"room": info.slug},

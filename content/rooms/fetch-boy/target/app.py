@@ -3,6 +3,7 @@
 import os
 import threading
 import urllib.request
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from flask import Flask, Response, request
@@ -72,6 +73,13 @@ def fetch():
     url = request.args.get("url", "")
     if not url:
         return Response("missing url\n", status=400)
+    # The previewer only speaks http(s); everything else is rejected
+    # before urllib ever sees it.
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        return page(
+            '<div class="box"><h1>Preview failed</h1>'
+            "<pre>only http and https URLs are supported</pre></div>"
+        )
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:  # noqa: S310
             data = resp.read(2000).decode(errors="replace")

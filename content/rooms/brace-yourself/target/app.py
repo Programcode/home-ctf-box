@@ -1,6 +1,7 @@
 """Portal: deliberately injectable greeting endpoint. Room target only."""
 
 import os
+import re
 
 from flask import Flask, request
 
@@ -39,14 +40,20 @@ def index():
     )
 
 
+MAX_NAME_LENGTH = 120
+HUGE_FIELD_WIDTH = re.compile(r":\d{4,}")
+
+
 @app.get("/welcome")
 def welcome():
     name = request.args.get("name", "")
+    if len(name) > MAX_NAME_LENGTH or HUGE_FIELD_WIDTH.search(name):
+        return page('<div class="box"><h1>Oops</h1><p>name is too long or too wide</p></div>')
     fmt = "<h2>Welcome " + name + "</h2><p>Your plan: {plan}</p>"
     try:
         # The flaw: user input becomes part of the template itself.
         out = fmt.format(**CTX)
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, ValueError):
         return page('<div class="box"><h1>Oops</h1><p>bad name</p></div>')
     return page(f'<div class="box">{out}</div>')
 

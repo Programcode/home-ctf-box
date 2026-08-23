@@ -17,8 +17,8 @@ Migrated from legacy: all 20 bundles exist and pass the automated gate
 match). Instructional review happens through the review workflow before
 they count as published.
 
-| Slug                | Track | Difficulty | Type          | Status      |
-| ------------------- | ----- | ---------- | ------------- | ----------- |
+| Slug                | Track | Difficulty | Type          | Status          |
+| ------------------- | ----- | ---------- | ------------- | --------------- |
 | busted-login        | A     | beginner   | guided web    | bundle-verified |
 | nosy-files          | A     | beginner   | guided web    | bundle-verified |
 | ping-of-doom        | A     | easy       | challenge web | bundle-verified |
