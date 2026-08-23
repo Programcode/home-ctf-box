@@ -68,7 +68,9 @@ module = ["celery.*", "meilisearch.*", "boto3.*", "botocore.*", "docker.*", "pyo
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "apps/*/tests", "packages/*/tests"]
+# apps/lab-gateway is excluded from the uv workspace (own lockfile), so its
+# tests only run in their own environment, not in the root one.
+testpaths = ["tests", "apps/api/tests", "apps/lab-runner/tests", "packages/*/tests"]
 addopts = "-q --strict-markers"
 asyncio_mode = "auto"
 markers = [
