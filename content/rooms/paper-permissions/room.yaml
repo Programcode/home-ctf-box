@@ -31,7 +31,7 @@ spec:
   safety:
     simulated_only: true
     no_real_malware: true
-    reviewer_notes: >-
+    reviewer_notes: sshd requires setuid and DAC overrides for privilege separation and the learner shell; capabilities are bounded to the ssh server profile.
       Disposable Debian container on an internal lab network. sshd must run as
       root inside the container because binding port 22 and privilege
       separation require it; every login session drops to the unprivileged
@@ -39,6 +39,7 @@ spec:
       inside the same container; no escalation path beyond reading the
       deliberately world-readable backup is possible. The image ships a minimal python3 solely because the harness TCP healthcheck execs python3 inside targets.
   target:
+    privilege_profile: elevated
     build_context: ./target
     ports: [22]
     healthcheck:
