@@ -8,6 +8,7 @@ from logging.config import fileConfig
 from alembic import context
 from openrange.api.db.base import Base
 from openrange.api.labs import models as labs_models  # noqa: F401 - register tables
+from openrange.api.learning import models as learning_models  # noqa: F401 - register tables
 from openrange.api.users import models  # noqa: F401 - register tables
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config

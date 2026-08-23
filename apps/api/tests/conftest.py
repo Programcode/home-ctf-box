@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 
@@ -11,8 +12,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 TEST_DB_URL = "postgresql+asyncpg://openrange:openrange@localhost:15432/openrange_test"
+_TEST_DB_DSN = "postgresql://openrange:openrange@localhost:15432/openrange_test"
 
 TABLES = [
+    "certificates",
+    "hint_events",
+    "notes",
+    "quiz_attempts",
+    "section_progress",
+    "enrollments",
     "user_roles",
     "roles",
     "sessions",
@@ -34,8 +42,8 @@ def _env() -> None:
 
 @pytest.fixture
 async def db_engine() -> AsyncIterator[AsyncEngine]:
-    """A fresh engine per test: asyncpg connections bind to one event loop."""
-    from openrange.api.db import dispose_engine, init_engine
+    """Engine for tests that run raw SQL; disposal happens in _reset_db."""
+    from openrange.api.db import init_engine
 
     os.environ["OPENRANGE_DATABASE_URL"] = TEST_DB_URL
     init_engine(TEST_DB_URL)
@@ -43,14 +51,33 @@ async def db_engine() -> AsyncIterator[AsyncEngine]:
 
     assert engine is not None
     yield engine
-    await dispose_engine()
+
+
+async def _db_reachable() -> bool:
+    """Cheap probe so unit-only runs (no Postgres service) skip resets."""
+    import asyncpg
+
+    try:
+        conn = await asyncio.wait_for(asyncpg.connect(_TEST_DB_DSN, timeout=2), timeout=3)
+    except Exception:
+        return False
+    await conn.close()
+    return True
 
 
 @pytest.fixture(autouse=True)
-async def _reset_db(db_engine: AsyncEngine) -> AsyncIterator[None]:
+async def _reset_db() -> AsyncIterator[None]:
     yield
-    async with db_engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {', '.join(TABLES)} CASCADE"))
+    if await _db_reachable():
+        from openrange.api.db import dispose_engine, init_engine
+
+        init_engine(TEST_DB_URL)
+        from openrange.api.db import engine
+
+        assert engine is not None
+        async with engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE {', '.join(TABLES)} CASCADE"))
+        await dispose_engine()
     # Rate-limit counters must not leak between tests.
     from openrange.api.auth import ratelimit
 
