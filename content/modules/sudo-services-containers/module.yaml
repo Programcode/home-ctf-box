@@ -1,0 +1,344 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: sudo-services-containers
+  title: 'Sudo rules, scheduled work, services, and container walls'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - sudo
+    - cron
+    - systemd
+    - timers
+    - containers
+spec:
+  track: linux-networking
+  summary: >-
+    The richest escalation paths on modern Linux hide in the machinery that
+    keeps systems running. This module teaches you to read sudo policy output
+    like its author never intended you to, to spot wildcard and environment
+    tricks that turn harmless-looking rules into root shells, and to audit
+    cron jobs, systemd services, and timers for writable scripts and unit
+    files. It closes with container boundaries: how to tell you are inside a
+    container, what separates a restricted one from a privileged one, and why
+    that difference decides whether the wall is load-bearing.
+  objectives:
+    - Read sudo -l output precisely, including runas users, tags, and command scopes.
+    - Recognize sudo rule patterns that grant unintended root through wildcards or editors.
+    - Audit cron directories and systemd units for writable scripts, PATH overrides, and timers.
+    - Detect container environments and enumerate their capability and mount boundaries.
+    - Judge which container misconfigurations enable real escapes versus local noise.
+    - Chain findings across sudo, scheduled work, and services into a working escalation plan.
+  sections:
+    - id: reading-sudo-policy-precisely
+      title: 'Reading sudo policy precisely'
+      blocks:
+        - type: prose
+          markdown: |
+            `sudo -l` is usually the first command anyone runs after landing on
+            a Linux box, and it is also the most commonly misread. Every token
+            in its output changes what you are allowed to attempt. The parenthetical
+            names the account your command will run as. Tags modify behavior:
+            NOPASSWD removes the password prompt, SETENV lets you set
+            environment variables for the command, NOEXEC attempts to block
+            further executions. Command scoping matters just as much, because a
+            rule granting /usr/bin/systemctl * with a trailing glob is a very
+            different animal from a rule granting exactly one unit's restart.
+        - type: code
+          language: text
+          code: |
+            $ sudo -l
+            Matching Defaults entries for dev on web01:
+                env_reset, env_keep+="LD_PRELOAD", secure_path=...
+
+            User dev may run the following commands on web01:
+                (root) NOPASSWD: /usr/bin/systemctl restart backup.service
+                (ALL : ALL) NOPASSWD: /usr/bin/vim /etc/hosts
+
+            Reading it back:
+              line 1: restart exactly one service as root, passwordless
+              line 2: edit exactly one file as ANY user, passwordless
+              env_keep: LD_PRELOAD survives env_reset, worth remembering
+        - type: prose
+          markdown: |
+            That synthetic policy hides three gifts. Restarting backup.service
+            as root matters only if we can influence something that service
+            reads, so the audit question becomes "what does its unit file
+            execute, and can I write any of it?" The vim entry looks narrow,
+            but vim is a general-purpose editor whose cataloged escapes apply
+            the moment it starts, regardless of which file it was pointed at;
+            opening /etc/hosts and typing `:!sh` hands over a root shell under
+            most configurations. And an LD_PRELOAD kept by env_reset pairs
+            beautifully with any sudo-executed binary compiled without
+            hardened flags. None of these leaps are obvious from skimming; all
+            of them follow from reading tokens carefully.
+        - type: callout
+          tone: tip
+          markdown: >
+            Translate every sudo line into a plain sentence before moving on:
+            who runs what, as whom, from where, with what tags. Misread policies
+            waste more lab time than missing exploits do.
+    - id: wildcards-editors-and-environment-tricks
+      title: 'Wildcards, editors, and environment tricks'
+      blocks:
+        - type: prose
+          markdown: >
+            Three rule shapes produce outsized trouble. Wildcard rules such as
+            `/usr/bin/zip /var/backups/*` invite argument injection because the
+            shell expands the asterisk using filenames an attacker may control,
+            and zip happens to accept options that invoke other programs.
+            Editor rules assume pointing at one file constrains the editor,
+            when editors are platforms. Environment rules, especially anything
+            keeping LD_PRELOAD, LD_LIBRARY_PATH, or PYTHONPATH alive across the
+            privilege boundary, let unprivileged code inject behavior into
+            privileged execution. Each shape has decades of history behind it.
+        - type: quiz
+          question_id: ssc-wildcard-rule-risk
+          question: 'A cron job running as root executes `tar czf /tmp/backup.tar.gz *` inside a directory your account can write files to. Why is this dangerous?'
+          options:
+            - id: a
+              text: 'tar archives compress poorly when given too many files, crashing the host.'
+            - id: b
+              text: 'The shell expands the asterisk to filenames you choose, and tar accepts checkpoint options that execute arbitrary commands.'
+            - id: c
+              text: 'Root-owned archives in /tmp can be deleted by any user.'
+            - id: d
+              text: 'It is safe, because tar validates every filename before use.'
+          answer_ids: [b]
+          explanation: >
+            Argument injection through controlled filenames is the mechanism:
+            files named --checkpoint-action=exec=... become options rather than
+            data once the shell expands them. The same pattern applies to rsync,
+            zip, find, and chown, which is why wildcard rules deserve their own
+            checklist line during audits.
+        - type: code
+          language: bash
+          code: |
+            $ sudo vim /etc/hosts
+            # inside vim, type:
+            :!sh
+            $ id
+            uid=0(root) gid=0(root) groups=0(root)
+
+            $ cat > shell.c <<'EOF'
+            #include <stdio.h>
+            #include <stdlib.h>
+            void _init() { system("id"); exit(0); }
+            EOF
+            $ gcc -shared -fPIC -o /tmp/shell.so shell.c
+            $ LD_PRELOAD=/tmp/shell.so sudo id
+            uid=0(root) gid=0(root) euid=0(root) groups=...
+        - type: prose
+          markdown: >
+            Both demonstrations assume lab conditions you have verified with
+            your own eyes: an editor escape under a permissive terminal, and an
+            LD_PRELOAD kept by env_reset against a dynamically linked sudo.
+            Modern distributions harden several variants of these, which is
+            exactly why verification comes before celebration. The transferable
+            skill is pattern recognition: see the shape, recall the primitive,
+            test cheaply, document honestly either way.
+    - id: cron-and-timers-audit
+      title: 'Cron jobs and systemd timers'
+      blocks:
+        - type: prose
+          markdown: >
+            Scheduled work is privilege escalation waiting for a schedule.
+            Cron entries run repeatedly as fixed users with predictable
+            environments, so any influence over their inputs compounds forever.
+            The audit reads four locations in order: personal crontabs via
+            `crontab -l`, the system table /etc/crontab, the drop-in directory
+            /etc/cron.d, and the periodic spools under /etc/cron.hourly and
+            friends. For each entry ask three questions: which user runs this,
+            what script does it execute, and can I write that script or
+            anything it sources?
+        - type: code
+          language: bash
+          code: |
+            $ cat /etc/crontab | grep -v '^#'
+            SHELL=/bin/sh
+            PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+            * * * * * root /usr/local/bin/cleanup.sh
+
+            $ ls -la /usr/local/bin/cleanup.sh
+            -rwxrwxr-x 1 root dev 214 /usr/local/bin/cleanup.sh
+                              ^^ group dev may write
+
+            $ systemctl list-timers --all | head -4
+            NEXT LEFT                    UNIT            ACTIVATES
+            Thu 2026-08-24 00:00:00 UTC  logrotate.timer logrotate.service
+            Thu 2026-08-24 00:05:00 UTC  fstrim.timer    fstrim.service
+        - type: prose
+          markdown: >
+            Two escalations live in that output. The group-write bit on
+            cleanup.sh means our dev membership lets us append commands that
+            root will execute within sixty seconds, no exploit required beyond
+            patience. The PATH line teaches a subtler lesson: cron uses a short
+            default search path, so if cleanup.sh ever calls a helper by bare
+            name and /usr/local/bin precedes /bin in that path, planting a
+            same-named helper there hijacks the job even without write access
+            to the script itself. Systemd timers deserve equal treatment; each
+            timer points at a service unit, and the next section shows why
+            unit files are often softer targets than the services they launch.
+    - id: writable-service-units
+      title: 'Writable service units'
+      blocks:
+        - type: prose
+          markdown: >
+            A systemd unit file is a root-shaped configuration script: it names
+            binaries, arguments, users, and environment. When an unprivileged
+            user can write a unit file, or a drop-in override under
+            /etc/systemd/system/name.service.d/, and some allowed operation
+            reloads or restarts that unit, privilege follows mechanically.
+            Auditing means listing installed units, testing writability of both
+            unit files and their ExecStart targets, and mapping which restart
+            operations sudo rules permit. The combination of "writable target"
+            plus "allowed restart" appears constantly in cloud images where
+            operators loosen permissions to fix a broken deployment and forget.
+        - type: code
+          language: bash
+          code: |
+            $ systemctl cat backup.service | grep -E 'ExecStart|User'
+            ExecStart=/opt/scripts/run-backup.sh
+            User=root
+
+            $ ls -la /opt/scripts/run-backup.sh
+            -rw-rw-r-- 1 root dev 389 /opt/scripts/run-backup.sh
+            $ echo 'cp /bin/bash /tmp/rootbash2 && chmod u+s /tmp/rootbash2' >> /opt/scripts/run-backup.sh
+            $ sudo systemctl restart backup.service && sleep 2 && ls -la /tmp/rootbash2
+            -rwsr-xr-x 1 root dev 1183448 Aug 23 12:10 /tmp/rootbash2
+        - type: prose
+          markdown: >
+            Here the sudo rule from earlier finally pays off. We could always
+            restart backup.service as root; now the script it launches carries
+            a group-writable bit, so the restart becomes our delivery
+            mechanism. This is chaining in miniature: no single finding was
+            fatal, but the union was. Note the discipline too. In a lab you
+            restore the script afterward and note the modification time change
+            you caused, because on real engagements those side effects belong
+            in the report under cleanup performed.
+    - id: container-boundaries
+      title: 'Container boundaries'
+      blocks:
+        - type: prose
+          markdown: >
+            Containers wrap processes in namespaces and cgroups, but the
+            kernel is shared, so the security of the boundary depends entirely
+            on configuration. Enumeration tells you which world you occupy.
+            Presence of /.dockerenv suggests Docker; reading /proc/1/cgroup
+            often reveals the runtime name; a PID 1 that looks like an
+            application instead of init confirms the suspicion. Then measure
+            the walls: `capsh --print` lists retained capabilities, mount
+            listings expose host paths bound into the container, and whether
+            fdisk can see the host's disks hints at elevated device access.
+        - type: code
+          language: bash
+          code: |
+            $ ls /.dockerenv && head -3 /proc/1/cgroup
+            0::/
+
+            $ capsh --print | grep -E 'Current|Bounding'
+            Current: cap_chown,cap_dac_override,...,cap_net_bind_service,... (full list)
+            Bounding set =cap_chown,cap_dac_override,...
+
+            $ grep -E 'docker|host' /proc/mounts
+            /dev/nvme0n1p2 /host-root ext4 rw,relatime 0 0
+        - type: prose
+          markdown: >
+            Decode the evidence honestly. A trimmed bounding set with no host
+            mounts describes a well-configured container: privilege stays
+            inside, and your escalation story probably ends at the boundary.
+            The second sample is different. Seeing the host filesystem mounted
+            at /host-root converts everything from earlier modules into escape
+            tools, because writing a setuid bash copy or an SSH key into a
+            mounted volume acts directly on the host. Chrooting into that
+            mount, editing its shadow file, and connecting afterward is the
+            canonical demonstration, and it works only because the mount made
+            two worlds one filesystem.
+        - type: quiz
+          question_id: ssc-container-wall-judgment
+          question: 'Inside a container you hold cap_sys_admin and the host root filesystem is mounted read-write at /host. Which statement is accurate?'
+          options:
+            - id: a
+              text: 'Namespaces make host compromise impossible regardless of capabilities or mounts.'
+            - id: b
+              text: 'The mount collapses the boundary: modifying files under /host alters the host, and cap_sys_admin enables mounting tricks on top.'
+            - id: c
+              text: 'Only the Docker daemon itself can ever be a risk; containers cannot affect hosts.'
+            - id: d
+              text: 'Escape requires finding a new kernel zero-day before anything is possible.'
+          answer_ids: [b]
+          explanation: >
+            Containers isolate through configuration, not magic. A read-write
+            host mount is a direct bridge, and powerful capabilities widen
+            what can be done across it. Well-run environments avoid both,
+            which is why enumerating mounts and capabilities first is the
+            professional move before dreaming about exotic kernel bugs.
+    - id: chaining-your-escalation-plan
+      title: 'Chaining your escalation plan'
+      blocks:
+        - type: prose
+          markdown: >
+            Real boxes fall to combinations, so finish by practicing assembly.
+            Take your action list from the enumeration module and mark every
+            sudo rule, writable script, unit file, timer, and container
+            indicator. Draw arrows between items: this rule restarts that
+            service, that service runs this script, my group writes this file.
+            The shortest arrow path to root becomes plan A, and every leftover
+            arrow stays documented as plan B, because production engagements
+            rarely hand you the first chain undamaged.
+        - type: quiz
+          question_id: ssc-chain-ordering
+          question: 'You hold these facts: NOPASSWD sudo for systemctl restart app.service; app.service ExecStart points at /srv/app/run.sh; your account owns /srv/app/run.sh. What is the fastest reliable escalation?'
+          options:
+            - id: a
+              text: 'Search the internet for Ubuntu kernel exploits matching uname -a.'
+            - id: b
+              text: 'Append a payload to run.sh, then trigger the permitted restart and wait for root execution.'
+            - id: c
+              text: 'Brute-force the root password over SSH since you know the box is old.'
+            - id: d
+              text: 'Delete /srv/app/run.sh so systemd fails open into a root shell.'
+          answer_ids: [b]
+          explanation: >
+            Own-the-script plus permitted-restart is a complete chain requiring
+            no new vulnerabilities. Option D misunderstands systemd, option C
+            is noise that will lock accounts, and option A ignores the door
+            standing open. Fastest reliable wins, and the same arithmetic
+            applies in the sudo-side-door room waiting at the end of this
+            path.
+        - type: prose
+          markdown: >
+            Carry the whole toolkit into the sudo-side-door room, where a
+            single careless rule opens exactly the kind of door this module
+            taught you to notice, and then into suid-story for the file-bits
+            half of the story. Between the two rooms and the notebook habits
+            from earlier, you now own the standard playbook auditors and
+            attackers share: enumerate calmly, read configs literally, chain
+            small facts, verify every claim before writing it down.
+  cheat_sheet: |
+    # Sudo, scheduled work, services, containers
+
+    sudo -l decode:
+        (runas) TAG: /path [glob]
+        NOPASSWD no prompt | SETENV keep env | NOEXEC block exec
+        watch: wildcards, editors, LD_PRELOAD/PYTHONPATH in env_keep
+
+    Editor escape shape:
+        sudo vim FILE -> :!sh -> root shell (verify config first)
+
+    Cron audit order:
+        crontab -l; /etc/crontab; /etc/cron.d; /etc/cron.{hourly,daily}
+        questions: who runs it, what does it exec, can I write it?
+        PATH in crontab precedes system dirs => plant helpers there
+
+    Unit audit:
+        systemctl list-units --type=service; systemctl cat NAME
+        check writability of unit + ExecStart target
+        writable target + permitted restart = chain
+
+    Container recon:
+        ls /.dockerenv; cat /proc/1/cgroup; ps -p 1
+        capsh --print; grep -E 'docker|host' /proc/mounts
+        host mount rw + strong caps => boundary is decorative

@@ -1,0 +1,332 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: suid-sgid-capabilities
+  title: 'SUID, SGID, and capabilities deep dive'
+  version: 0.1.0
+  difficulty: medium
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - suid
+    - sgid
+    - capabilities
+    - permissions
+spec:
+  track: linux-networking
+  summary: >-
+    Linux grants privilege in three file-level currencies, and attackers who
+    can read only the first one miss most of the market. This module takes
+    permission bits apart character by character, explains exactly what the
+    kernel does differently for setuid and setgid executables, walks through
+    how custom SUID binaries become attack surface, and then introduces file
+    capabilities as the modern, finer-grained alternative. You finish with an
+    audit-and-harden pass that mirrors what defenders should already be doing.
+  objectives:
+    - Decode full permission strings including setuid, setgid, and sticky positions.
+    - Hunt SUID and SGID binaries across a filesystem and separate stock from anomalous.
+    - Exploit misconfigured custom SUID binaries using PATH manipulation inside a lab.
+    - Read file capabilities and identify dangerous ones such as cap_setuid on interpreters.
+    - Use GTFOBins-style references to confirm which legitimate binaries grant shells.
+    - Audit and harden a system by removing unneeded special bits and capabilities.
+  sections:
+    - id: permission-bits-character-by-character
+      title: 'Permission bits character by character'
+      blocks:
+        - type: prose
+          markdown: |
+            Every experienced tester can read `ls -l` output the way musicians
+            read a staff, so we build that fluency properly. A permission
+            string holds ten characters. The first names the file type: dash
+            for regular files, d for directories, l for symlinks. Then come
+            nine permission characters grouped in threes for owner, group, and
+            everyone else, each triple reading r, w, x in that order. Where an
+            x would sit, a capital or lowercase s, t, or S can appear instead,
+            and those substitutions are precisely where escalation stories
+            begin.
+        - type: code
+          language: text
+          code: |
+            -rwsr-xr-x 1 root root 16712 Mar  4  2024 /usr/bin/passwd
+             |  |  |  |
+             |  |  |  +-- others: r-x (read and execute)
+             |  |  +----- group: r-x
+             |  +-------- owner: rws (read, write, SETUID)
+             +----------- regular file
+
+            drwxrwxrwt 12 root root 4096 Aug 23 09:41 /tmp
+                   ^ sticky bit: only the owner may delete their own files here
+        - type: prose
+          markdown: |
+            Lowercase s means the special bit is set and the execute bit is
+            also present; capital S means the special bit is set but nobody can
+            actually execute the file, which is almost always a configuration
+            mistake rather than a security measure. The same convention applies
+            to t versus T on directories. Octal arithmetic rounds this out:
+            read is 4, write is 2, execute is 1, and each leading digit beyond
+            the classic three covers setuid at 4000, setgid at 2000, and sticky
+            at 1000. So 4755 reads as setuid plus rwxr-xr-x, and being able to
+            produce that translation without pausing makes every later step in
+            this module faster.
+        - type: callout
+          tone: tip
+          markdown: |
+            Practice drill: run `stat -c '%A %a %n' FILE` on five files in your
+            home directory and predict the octal string before looking. Speed
+            here compounds everywhere else.
+    - id: what-setuid-actually-does
+      title: 'What setuid actually does'
+      blocks:
+        - type: prose
+          markdown: |
+            Normally a program runs with the privileges of whoever launched
+            it. When an executable carries the setuid bit, the kernel instead
+            runs it with the privileges of the file's owner, which is why
+            /usr/bin/passwd can edit root-owned password databases while an
+            ordinary user executes it. Setgid does the same trick for group
+            membership, and on directories it changes inheritance so new files
+            adopt the directory's group. These mechanisms exist because
+            legitimate software needs them; they become vulnerabilities when
+            they land on binaries that were never designed to carry such power.
+        - type: code
+          language: bash
+          code: |
+            $ find / -xdev -perm -4000 -type f 2>/dev/null
+            /usr/bin/sudo
+            /usr/bin/passwd
+            /usr/bin/chsh
+            /usr/lib/openssh/ssh-keysign
+            /usr/local/bin/report-generator
+
+            $ find / -xdev -perm -2000 -type f 2>/dev/null | head -3
+            /usr/bin/write
+            /usr/bin/wall
+            /usr/sbin/unix_chkpwd
+        - type: prose
+          markdown: |
+            The hunting command deserves dissection. `-xdev` stays on one
+            filesystem, preventing a crawl into mounted network shares;
+            `-perm -4000` matches any file where the setuid bit is on,
+            regardless of the other bits; redirecting stderr discards the
+            permission-denied noise that full-filesystem finds always produce.
+            The output rewards comparison against a known baseline such as the
+            package manager's inventory. Four of those five results ship with
+            Ubuntu by default. One of them lives in /usr/local/bin, which is
+            where locally written software goes, and locally written software
+            is where assumptions go to break.
+        - type: quiz
+          question_id: ssc-find-flag-meaning
+          question: 'In `find / -xdev -perm -6000 -type f`, the mode argument -6000 selects files that have which property?'
+          options:
+            - id: a
+              text: 'Exactly the bits 6000 and no other permission bits.'
+            - id: b
+              text: 'Both setuid and setgid set, whatever the rest of the permissions are.'
+            - id: c
+              text: 'Files owned by uid 6000.'
+            - id: d
+              text: 'Files modified within the last 6000 minutes.'
+          answer_ids: [b]
+          explanation: >
+            With a leading dash, -perm means all of the listed bits must be
+            set while every other bit is ignored, so -6000 matches files
+            carrying both special bits regardless of the rw bits around them.
+            Matching exact bits would require -perm 6000, which is rarely what
+            a hunter wants.
+    - id: when-custom-suid-turns-dangerous
+      title: 'When custom SUID turns dangerous'
+      blocks:
+        - type: prose
+          markdown: |
+            A setuid binary written by your own development team inherits every
+            weakness of ordinary programs and adds a terrifying multiplier:
+            its mistakes now run as root. The classics repeat across a decade
+            of real incidents. The binary calls another program by bare name,
+            trusting the PATH environment variable it inherited. It writes logs
+            into a world-writable directory following attacker-chosen names. It
+            loads configuration from a file users can edit. None of these look
+            like vulnerabilities in code review focused on features; all of
+            them are root handouts under mild conditions.
+        - type: code
+          language: bash
+          code: |
+            $ ls -la /usr/local/bin/report-generator
+            -rwsr-xr-x 1 root root 18944 Jan 17 10:02 /usr/local/bin/report-generator
+
+            $ strings report-generator | grep -E 'system|popen|bin/'
+            /bin/sh
+            uptime >> /tmp/report.log
+
+            $ echo $PATH
+            /home/dev/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+            $ mkdir -p /home/dev/.local/bin
+            $ printf '#!/bin/sh\ncp /bin/bash /tmp/rootbash && chmod u+s /tmp/rootbash\n' \
+                > /home/dev/.local/bin/uptime
+            $ chmod +x /home/dev/.local/bin/uptime
+            $ report-generator >/dev/null && ls -la /tmp/rootbash
+            -rwsr-xr-x 1 root dev 1183448 Aug 23 11:03 /tmp/rootbash
+        - type: prose
+          markdown: |
+            Walk the logic slowly because interviewers love it. The vulnerable
+            helper runs as root but executes `uptime` by name. The shell
+            resolves that name through PATH, and PATH begins with the user's
+            private bin directory. We placed our own script there first, so
+            root executed our instructions as root, and our instructions minted
+            a setuid copy of bash that keeps the elevation available even after
+            the original process exits. In this lab that is the whole puzzle.
+            On an engagement it would already be game over, which is why the
+            defensive half of this module matters.
+    - id: capabilities-the-finer-grained-currency
+      title: 'Capabilities, the finer-grained currency'
+      blocks:
+        - type: prose
+          markdown: |
+            Full root is a blunt instrument, so modern kernels split root's
+            powers into named units called capabilities. A ping binary needs
+            cap_net_raw and nothing else; a service binding port 80 needs only
+            cap_net_bind_service. Granting exactly the needed capability avoids
+            handing out setuid, which is why distributions increasingly prefer
+            them. For attackers the question changes shape: not "which binaries
+            are setuid" but "which files hold which powers". The tooling is
+            getcap for discovery and capsh for translating numbers into words.
+        - type: code
+          language: bash
+          code: |
+            $ getcap -r / 2>/dev/null
+            /usr/bin/ping = cap_net_raw+ep
+            /usr/bin/traceroute6.db = cap_net_raw+ep
+            /opt/tools/collector = cap_chown,cap_dac_override+ep
+            /usr/bin/python3.12 = cap_setuid+ep
+
+            $ capsh --decode=cap_setuid+ep
+            cap_setuid+ep = Setuid (change user id) + Effective+Permitted
+
+            $ /usr/bin/python3.12 -c 'import os; os.setuid(0); os.system("id")'
+            uid=0(root) gid=1000(dev) groups=1000(dev)
+        - type: prose
+          markdown: >
+            Three findings, three different stories. Ping carrying cap_net_raw
+            is normal and harmless. The collector needing cap_chown and
+            cap_dac_override deserves a design conversation, because together
+            they let it rewrite arbitrary file ownership and bypass most
+            permission checks. Python holding cap_setuid is indefensible: any
+            local user can ask the interpreter to become root, as the final
+            line demonstrates. Capability hunting belongs beside your SUID
+            sweep in every methodology, because teams migrate between the two
+            models and misconfigurations follow the migration.
+        - type: callout
+          tone: warning
+          markdown: >
+            Interpreters and editors must never keep ambient capabilities.
+            Anything that can execute arbitrary input while holding
+            cap_setuid, cap_dac_override, or cap_sys_admin is a root service
+            with a login prompt attached.
+    - id: gtfobins-style-thinking
+      title: 'GTFOBins-style thinking'
+      blocks:
+        - type: prose
+          markdown: |
+            Half of privilege escalation knowledge is cataloged already. The
+            GTFOBins project documents, per binary, which escapes work under
+            which privilege context: sudo rules, SUID bits, or capability
+            grants. Reading it teaches a transferable skill rather than a
+            lookup table. Binaries escape because they offer some form of
+            execution, file reading, or file writing, and once you classify a
+            binary by what primitives it exposes you can evaluate brand-new
+            software without waiting for a writeup.
+        - type: quiz
+          question_id: ssc-primitive-classification
+          question: 'A sudo rule lets your account run /usr/bin/find with NOPASSWD. Using primitive classification, why does this yield root?'
+          options:
+            - id: a
+              text: 'find parses dates, and date parsers historically contain memory corruption bugs.'
+            - id: b
+              text: 'find can execute commands against everything it matches through -exec, so it runs arbitrary programs as root.'
+            - id: c
+              text: 'find reads /etc/shadow directly when given -type f.'
+            - id: d
+              text: 'It does not yield root; find lacks file-writing primitives entirely.'
+          answer_ids: [b]
+          explanation: >
+            find exposes an execution primitive via -exec, and sudo context
+            makes those executions inherit root. The same classification also
+            flags vim exclamation escapes, less shell commands, awk system()
+            calls, and tcpdump postrotate hooks, which shows why learning
+            primitives beats memorizing individual entries.
+        - type: prose
+          markdown: >
+            Build the reflex in two steps. First, when you meet any privileged
+            binary, name its primitives out loud: executes input? prints files?
+            opens an editor? loads plugins from disk? Second, check the catalog
+            for confirmation and for technique variants you had not considered.
+            The catalog then becomes a study guide, and the suid-story room at
+            the end of this path gives you a purpose-built target for turning
+            that theory into muscle memory.
+    - id: audit-and-harden-pass
+      title: 'Audit and harden pass'
+      blocks:
+        - type: prose
+          markdown: >
+            Attack and defense use identical enumeration, which is what makes
+            this module doubly valuable. An auditor asks the same questions an
+            attacker asks and then fixes the answers. Sweep setuid and setgid
+            binaries and diff against package-manager baselines so locally
+            added specials surface immediately. Sweep file capabilities the
+            same way. For each anomaly, ask who created it, whether the
+            privilege grant is still needed, and whether a narrower grant or a
+            redesign removes the need entirely.
+        - type: code
+          language: bash
+          code: |
+            $ dpkg -V sudo passwd 2>/dev/null; dpkg -L passwd | grep bin/
+            /usr/bin/passwd
+            /usr/bin/chsh
+
+            $ find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null \
+                | sort > /tmp/current-specials.txt
+            $ wc -l < /tmp/current-specials.txt
+            27
+
+            $ setcap -r /usr/bin/python3.12 && getcap /usr/bin/python3.12 || true
+            /usr/bin/python3.12:
+            $ echo "capability removed; verify service still functions"
+        - type: prose
+          markdown: >
+            Removing a capability or special bit can break the feature it was
+            granted for, so hardening follows a verify loop: remove, test the
+            owning function, restore narrowly if truly required, document the
+            decision either way. Track the count over time. A server whose
+            special-bit inventory grows between quarters is telling you that
+            developers are patching symptoms with privilege, and that trend is
+            a finding worth reporting before any single binary becomes the
+            next report-generator.
+  cheat_sheet: |
+    # SUID, SGID, and capabilities
+
+    Read the string:
+        -rwsr-x---  owner rws => setuid + exec
+        capital S/T => special bit without exec (misconfig)
+        octal: 4000 setuid, 2000 setgid, 1000 sticky
+
+    Hunt:
+        find / -xdev -perm -4000 -type f 2>/dev/null
+        find / -xdev -perm -2000 -type f 2>/dev/null
+        getcap -r / 2>/dev/null
+
+    Classic custom-SUID failures:
+        calls helpers by bare name       => PATH hijack
+        writes predictable /tmp paths    => symlink race
+        loads config users can edit      => config injection
+
+    Dangerous capabilities:
+        cap_setuid on interpreters   => instant root
+        cap_dac_override             => ignore file perms
+        cap_net_raw                  => spoof/sniff traffic
+
+    Primitive classes for GTFOBins-style triage:
+        execute input, read files, write files, load plugins
+
+    Harden loop:
+        inventory -> compare to baseline -> remove ->
+        test function -> narrow or restore -> document

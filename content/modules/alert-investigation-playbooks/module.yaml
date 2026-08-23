@@ -1,0 +1,347 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: alert-investigation-playbooks
+  title: 'Investigating network, web, and phishing alerts'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - playbooks
+    - network-forensics
+    - web-attacks
+    - phishing
+    - case-notes
+spec:
+  track: defense-cloud
+  summary: >-
+    Playbooks turn analyst judgment into repeatable process without replacing
+    the judgment part. This module walks three alert families end to end:
+    suspicious network connections where beaconing and scanning rhythms
+    matter, web attack alerts decoded straight from access logs, and phishing
+    reports handled safely without a single click. It closes with the craft
+    that binds all investigations together, extracting indicators cleanly and
+    writing case notes that let any colleague reconstruct every decision you
+    made.
+  objectives:
+    - Investigate suspicious connection alerts using rhythm, destination, and context pivots.
+    - Recognize scanning, brute force, and injection patterns in raw web access logs.
+    - Triage reported emails safely without clicking links or opening attachments.
+    - Extract and validate indicators such as IPs, domains, URLs, and file hashes.
+    - Write case notes that reconstruct decisions for any later reader.
+    - Close cases with explicit dispositions and feedback that improves detections.
+  sections:
+    - id: why-playbooks-work
+      title: 'Why playbooks work'
+      blocks:
+        - type: prose
+          markdown: |
+            A playbook is a written checklist for one recurring decision,
+            built so a tired version of you at hour nine still performs well.
+            Good ones share a skeleton: trigger conditions naming which alerts
+            invoke the procedure, investigation steps in dependency order with
+            exact queries, decision branches mapping evidence to verdicts, and
+            closure requirements listing what notes must contain before the
+            case can close. The skeleton matters because it converts panic
+            into sequence. Under pressure nobody wants to invent methodology;
+            they want to follow one they trust.
+        - type: prose
+          markdown: |
+            Playbooks also encode institutional memory cheaply. When your best
+            analyst leaves, their mental model of "what to check on weird DNS"
+            leaves too, unless someone wrote it down while they were still
+            around. Teams that write playbooks from real closed cases build a
+            library that compounds; teams that rely on tribal knowledge rebuild
+            the same investigation from scratch every six months. The three
+            families in this module, network connections, web attacks, and
+            phishing, cover most tier-one volume, which makes them the right
+            first entries in anyone's library.
+        - type: callout
+          tone: tip
+          markdown: >
+            After closing any real case, spend ten minutes updating the
+            playbook you used with whatever surprised you. Future you accepts
+            the gift gratefully.
+    - id: network-connection-alerts
+      title: 'Network connection alerts'
+      blocks:
+        - type: prose
+          markdown: |
+            Suspicious connection alerts usually flag either rhythm or
+            destination. Rhythm findings claim this host talks to that address
+            with machine-like regularity, the signature of command-and-control
+            beacons checking in. Destination findings claim traffic reached an
+            address with bad reputation, unusual geography, or no business
+            purpose. Investigate both with the same three pivots: characterize
+            the timing precisely, identify the destination thoroughly, and
+            establish what the internal host is and who owns it. Order matters
+            because timing evidence survives even when reputation feeds lie or
+            time out.
+        - type: code
+          language: bash
+          code: |
+            $ tshark -r conn.pcap -Y 'ip.addr==203.0.113.7' \
+                -T fields -e frame.time_epoch 2>/dev/null | head -6
+            1787463122.114
+            1787463182.091
+            1787463242.103
+            1787463302.088
+            1787463362.110
+
+            $ python3 - <<'EOF'
+            gaps = [60.0, 60.0, 60.0, 60.0]
+            print("interval mean:", sum(gaps)/len(gaps), "jitter:", max(gaps)-min(gaps))
+            EOF
+            interval mean: 60.0 jitter: 0.023
+        - type: prose
+          markdown: >
+            Five connections spaced sixty seconds apart with twenty-three
+            milliseconds of total jitter describe software, not humans, and
+            that single computation carries more weight than any reputation
+            feed. The destination pivot then asks ownership questions: who
+            registered the domain, when, behind which registrar, does TLS
+            exist and what certificate identity does it present. The asset
+            pivot closes the loop by asking whether a database server has any
+            business speaking to a hosting provider at all. When all three
+            pivots agree the story is wrong, escalate with confidence; when
+            one disagrees, hunt for the reason before deciding anything.
+        - type: quiz
+          question_id: aip-beacon-vs-update-checks
+          question: 'An hourly HTTPS connection pattern resolves to a major OS vendor update domain, and the internal hosts are fleet machines checking updates. Verdict?'
+          options:
+            - id: a
+              text: 'True positive; hourly regularity always means command-and-control.'
+            - id: b
+              text: 'Benign true positive; the rhythm detection worked correctly, and documented update infrastructure explains it.'
+            - id: c
+              text: 'False positive; the rule should fire only on unknown domains.'
+            - id: d
+              text: 'Uninvestigable without sandboxing the payload first.'
+          answer_ids: [b]
+          explanation: >
+            The behavior happened exactly as detected, so the rule told the
+            truth, but legitimate update mechanisms produce identical rhythm.
+            Documenting the vendor domain and host population as the benign
+            explanation, then proposing a scoped exclusion tied to those facts,
+            is precisely the benign-true-positive workflow from triage theory
+            now applied in practice.
+    - id: web-attack-alerts-from-access-logs
+      title: 'Web attack alerts from access logs'
+      blocks:
+        - type: prose
+          markdown: |
+            Web attack alerts point at requests, and requests live in access
+            logs line by line, which makes these the most self-contained
+            investigations in the queue. Learn to read the combined log format
+            fluently: client address, identity dashboards, timestamp, request
+            line with method and path and protocol, status code, response
+            size, referer, and user agent. Attack patterns then announce
+            themselves through combinations. Scanners show hundreds of varied
+            paths against few clients with mostly error statuses. Brute force
+            shows repeated POSTs to one login endpoint across many accounts.
+            Injection attempts carry metacharacters inside query strings.
+        - type: code
+          language: text
+          code: |
+            203.0.113.7 - - [23/Aug/2026:09:14:03 +0000] \
+              "GET /product?id=1 HTTP/1.1" 200 5312 "-" "curl/8.5.0"
+            203.0.113.7 - - [23/Aug/2026:09:14:05 +0000] \
+              "GET /product?id=1'%20OR%20'1'='1 HTTP/1.1" 200 18432 "-" "curl/8.5.0"
+            203.0.113.7 - - [23/Aug/2026:09:14:07 +0000] \
+              "GET /product?id=1%20UNION%20SELECT%20username,password%20FROM%20users-- HTTP/1.1" 200 41021 "-" "curl/8.5.0"
+
+            URL-decoded second request:
+              /product?id=1' OR '1'='1     -> classic tautology probe
+            Third request returns 41 KB vs baseline 5 KB -> likely data exfil
+        - type: prose
+          markdown: >
+            Decode before judging: percent-encoded payloads hide from casual
+            reading, and tools like `python3 -c "import urllib.parse;
+            print(urllib.parse.unquote('...'))"` undo them instantly. Then let
+            response sizes sharpen the story, because the jump from a normal
+            5 KB product page to 41 KB after a UNION statement suggests the
+            application echoed extra rows, elevating the event from probing to
+            probable data theft. Finish with scope questions the log cannot
+            answer alone: was the account authenticated, did other sources see
+            the same client, and did anything succeed beyond this endpoint?
+            Those answers decide whether you close a nuisance or open an
+            incident.
+    - id: phishing-triage-without-clicking
+      title: 'Phishing triage without clicking'
+      blocks:
+        - type: prose
+          markdown: |
+            Reported email arrives pre-contaminated: someone may already have
+            clicked, so your discipline protects everyone else. Never open
+            attachments outside detonation tooling, never click links, and
+            never visit the sending infrastructure from corporate networks.
+            Everything needed for first-pass judgment hides safely in headers
+            and structure. Read the Authentication-Results header for SPF,
+            DKIM, and DMARC verdicts, walk the Received chain bottom-up to
+            find the true entry point into your environment, compare the
+            From header against the envelope sender, and inspect link
+            destinations by hovering metadata or extracting href values
+            programmatically rather than following them.
+        - type: code
+          language: text
+          code: |
+            Authentication-Results: mx.corp.example;
+              dkim=fail (2048-bit key) header.d=invoice-portal.example;
+              spf=fail (domain owner forbids) smtp.mailfrom=mailer.kitsune.example;
+              dmarc=fail action=quarantine header.from=invoice-portal.example
+
+            Received chain (bottom-up):
+              #3 mx.corp.example   <- entered our infra here
+              #2 vps-provider.net  198.51.100.9
+              #1 unknown.host      203.0.113.99 (origin)
+
+            From: Invoice Portal <billing@invoice-portal.example>
+            Links: https://invoice-portal.example.tl/verify?id=8842
+                   (registrable domain differs from sender brand domain)
+        - type: prose
+          markdown: >
+            That synthetic header block fails all three authentication checks,
+            which together with a lookalike registrable domain and a
+            credential-shaped URL path settles disposition fast: malicious
+            phishing impersonating a billing portal. The remaining work is
+            blast radius, not identification. Search mail flow for the same
+            subject and sender across recipients, check whether anyone
+            submitted credentials afterward by correlating sign-in logs for
+            the target accounts around delivery time, and purge matching
+            messages through your mail security console rather than asking
+            users to delete things manually.
+        - type: quiz
+          question_id: aip-phishing-first-action
+          question: 'A user forwards a suspicious invoice email. What belongs first in your handling order?'
+          options:
+            - id: a
+              text: 'Visit the verification link once in a private browser window to confirm it is fake.'
+            - id: b
+              text: 'Preserve the full message including headers, read authentication results and the received chain, extract link destinations programmatically.'
+            - id: c
+              text: 'Reply to the sender asking whether the invoice is genuine.'
+            - id: d
+              text: 'Forward it to coworkers asking if anyone else received something similar.'
+          answer_ids: [b]
+          explanation: >
+            Header analysis extracts nearly every fact safely, and preserving
+            the complete message keeps later forensic steps possible. Visiting
+            links tips off attackers and risks your own session, replying
+            confirms a live mailbox to fraudsters, and informal forwarding
+            spreads the attack internally. Curiosity belongs in sandboxes,
+            not inboxes.
+    - id: indicators-and-case-notes
+      title: 'Indicators and case notes'
+      blocks:
+        - type: prose
+          markdown: |
+            Investigations produce two durable artifacts: indicators others
+            can hunt, and notes others can trust. Extract indicators with
+            deliberate hygiene. Hash files with sha256sum rather than md5 when
+            tooling allows. Record domains in registrable form so
+            subdomain-shuffling attackers do not defeat simple matching.
+            Timestamp every observation in UTC. Mark each indicator's context,
+            because an IP observed delivering malware and an IP merely seen in
+            a log deserve different confidence labels downstream.
+        - type: code
+          language: bash
+          code: |
+            $ sha256sum attachment.pdf
+            3b1d...e9a2  attachment.pdf
+
+            $ python3 - <<'EOF'
+            import urllib.parse
+            url = "https://invoice-portal.example.tl/verify?id=8842"
+            host = urllib.parse.urlparse(url).hostname
+            print("host:", host)
+            print("registrable:", ".".join(host.split(".")[-3:]))
+            EOF
+            host: invoice-portal.example.tl
+            registrable: invoice-portal.example.tl
+        - type: prose
+          markdown: |
+            Notes then bind everything together using the five-question spine
+            from triage training, with each answer followed by its proof.
+            Write queries verbatim, include negative findings like "no other
+            recipients matched", and separate observations from conclusions
+            visibly, because reviewers must retrace reasoning without adopting
+            your assumptions. A useful test before submitting: hand the draft
+            to imagination and ask what question a skeptical incident commander
+            would ask first. If the document already answers it with evidence
+            attached, ship it. If not, the gap tells you exactly which sentence
+            still needs writing.
+    - id: closing-cases-and-feedback
+      title: 'Closing cases and feeding detections back'
+      blocks:
+        - type: prose
+          markdown: |
+            Every case deserves one of four dispositions stated explicitly:
+            confirmed malicious, suspicious but unresolved, benign identified,
+            or duplicate of another case. Anything vaguer pollutes metrics and
+            misleads tuning. Closing also means acting: malicious findings
+            spawn containment or escalation tickets referencing evidence,
+            benign findings spawn exclusion proposals carrying expiry dates,
+            and unresolved ones stay open with named owners rather than dying
+            quietly. The final habit separates growing teams from churning
+            ones: feed lessons back into detections by proposing rule changes,
+            parser fixes, or new coverage with the closed case cited as
+            justification.
+        - type: quiz
+          question_id: aip-closing-loop
+          question: 'After confirming a real SQL injection attempt succeeded against an internet-facing app, which closing package is complete?'
+          options:
+            - id: a
+              text: 'Close as true positive; the alert worked as designed.'
+            - id: b
+              text: 'Escalate to incident response with timeline, queries, indicator list, affected endpoint, and a proposed WAF rule referencing the payload family.'
+            - id: c
+              text: 'Close and privately patch the vulnerable endpoint yourself.'
+            - id: d
+              text: 'Wait for more attacks before escalating so the report looks stronger.'
+          answer_ids: [b]
+          explanation: >
+            Confirmed exploitation of production is an incident, not a closed
+            ticket, and the package in option B contains everything responders
+            need plus a concrete detection improvement. Silent patching hides
+            compromise evidence, and waiting for more success to justify
+            urgency trades customer data for report drama, which is the worst
+            trade available.
+        - type: prose
+          markdown: >
+            You now hold the full loop: alerts arrive, playbooks direct, notes
+            remember, tuning improves. Practice it against artifacts instead
+            of prose in the packet-diary room, where captured traffic rewards
+            exactly the rhythm-and-destination method, and knock-knock, where
+            port-knocking sequences test whether your connection-alert
+            instincts survive clever concealment. Both rooms grade the habits
+            this module taught, not trivia about them.
+  cheat_sheet: |
+    # Network, web, and phishing playbooks
+
+    Connection alert pivots (in order):
+        1 timing: intervals + jitter (tshark -T fields -e frame.time_epoch)
+        2 destination: registrar, cert identity, reputation
+        3 asset: owner, role, business reason
+
+    Access log reading:
+        addr user [time] "METHOD path proto" status bytes ref ua
+        scanner: many paths, few clients, mostly 40x
+        bruteforce: repeated POST one endpoint
+        injection: metacharacters in query; decode first!
+        size jumps after UNION => probable data echo
+
+    Phishing safety:
+        preserve full message + headers
+        read Authentication-Results: spf/dkim/dmarc
+        Received chain bottom-up = entry point
+        extract hrefs programmatically; never click
+        search mail flow + auth logs for blast radius
+
+    Indicator hygiene:
+        sha256sum > md5; registrable domains; UTC stamps
+        label each indicator with context + confidence
+
+    Dispositions:
+        malicious | suspicious-unresolved | benign | duplicate
+        every close proposes one detection improvement

@@ -1,0 +1,343 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: tcpip-routing-subnetting
+  title: 'TCP/IP internals, routing, and subnetting'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - tcp
+    - ip
+    - subnetting
+    - routing
+spec:
+  track: linux-networking
+  summary: >-
+    Security work assumes you can follow a packet's journey without guessing.
+    This module walks the TCP/IP stack layer by layer, watches real TCP state
+    transitions live in ss, drills the binary math behind masks and CIDR until
+    subnetting becomes arithmetic instead of anxiety, decodes Linux routing
+    tables including longest prefix match, and finishes with a layered
+    diagnosis method that tells you where connectivity dies before you touch
+    a single tool at random.
+  objectives:
+    - Describe what each TCP/IP layer adds to data on its way to the wire.
+    - Trace TCP connection states through handshake, transfer, and teardown.
+    - Compute masks, network addresses, broadcast addresses, and host ranges by hand.
+    - Split networks into subnets of required size under time pressure.
+    - Read Linux routing tables and predict the next hop for any destination.
+    - Diagnose connectivity failures layer by layer with ss, ping, and traceroute.
+  sections:
+    - id: layers-and-encapsulation
+      title: 'Layers and encapsulation'
+      blocks:
+        - type: prose
+          markdown: |
+            Every packet is an onion built in seconds. Application data such
+            as an HTTP request gets wrapped by the transport layer, where TCP
+            adds source and destination ports plus sequencing machinery that
+            turns an unreliable wire into ordered streams. The network layer
+            wraps again with IP headers carrying addresses that route across
+            networks. The link layer adds hardware addressing for one local
+            segment hop. Receiving hosts peel the onion in reverse, each layer
+            reading only its own wrapper. Security tooling lives at specific
+            layers, so knowing which layer answers which question saves hours:
+            firewalls mostly speak layer 3 and 4, proxies understand layer 7,
+            and ARP tricks operate below both.
+        - type: code
+          language: text
+          code: |
+            $ curl -s http://10.20.4.9:8000/ >/dev/null & sleep 0.2
+            $ ss -t | grep 8000
+            ESTAB 0      10.20.4.100:52814   10.20.4.9:8000
+
+            Reading the onion for this connection:
+              application : GET / HTTP/1.1
+              transport   : tcp, sport 52814 -> dport 8000, seq numbers...
+              network     : src 10.20.4.100 dst 10.20.4.9, ttl 64
+              link        : my MAC -> gateway MAC (same subnet here)
+        - type: prose
+          markdown: >
+            Ports deserve their own moment because they confuse newcomers
+            constantly. They belong to the transport layer and identify
+            services within one machine, nothing more; port scans enumerate
+            listeners, they do not read applications. Addresses belong to IP
+            and identify machines across networks. When someone says the
+            firewall blocks ports, they mean it filters transport headers;
+            when a proxy filters URLs, it reads inside the application layer.
+            Keeping those vocabularies straight makes vendor documentation,
+            rule syntax, and attack descriptions all suddenly precise.
+        - type: callout
+          tone: info
+          markdown: >
+            Mental drill: for anything you do online today, name the four
+            layers' contributions out loud once. Fluency compounds quietly.
+    - id: watching-tcp-states-live
+      title: 'Watching TCP states live'
+      blocks:
+        - type: prose
+          markdown: |
+            TCP earns reliability through visible machinery, and watching the
+            machinery beats memorizing diagrams. A connection begins with a
+            three-way handshake: the client sends SYN, the server answers
+            SYN-ACK, the client confirms with ACK, and only then does data
+            flow. Teardown reverses politely with FIN exchanges, or rudely
+            with RST when one side vanishes. The kernel exposes all of this in
+            `ss -tate`, whose columns show state names, timers, and per-flow
+            statistics. Ten minutes spent provoking states on your own machine
+            teaches more than ten pages about them.
+        - type: code
+          language: bash
+          code: |
+            $ nc -l 9999 &
+            $ (nc 127.0.0.1 9999 &) ; sleep 0.3
+            $ ss -tan | grep 9999
+            ESTAB 0 0 127.0.0.1:53301 127.0.0.1:9999
+            ESTAB 0 0 127.0.0.1:9999  127.0.0.1:53301
+
+            $ pkill -f 'nc 127.0.0.1 9999'; sleep 0.2
+            $ ss -tan | grep 9999
+            TIME-WAIT 0 0 127.0.0.1:53301 127.0.0.1:9999
+        - type: prose
+          markdown: >
+            Two observations from that experiment matter professionally. First,
+            both peers show independent state, which is why half-open
+            connections exist and why SYN floods exhaust server tables while
+            leaving clients untouched. Second, TIME-WAIT lingers on the side
+            that closed first for roughly a minute, holding socket slots;
+            servers that open thousands of short connections accumulate these
+            entries, and misreading them as attacks wastes incident hours.
+            Stateful firewalls track the same table externally, which is why
+            unsolicited packets claiming established sessions fail against
+            properly configured devices: no matching state entry, no passage.
+        - type: quiz
+          question_id: trs-syn-then-rst
+          question: 'You connect to a port and immediately receive RST after your SYN. What does that observation prove?'
+          options:
+            - id: a
+              text: 'The service accepted the connection then crashed.'
+            - id: b
+              text: 'Something answered: either no listener exists and the kernel refused, or a filter rejected the attempt, but a host definitely received your packet.'
+            - id: c
+              text: 'The packet was silently dropped by a firewall.'
+            - id: d
+              text: 'The remote machine is offline.'
+          answer_ids: [b]
+          explanation: >
+            RST is an answer, not silence. Distinguishing refusal (RST) from
+            dropping (no reply) is foundational scanning knowledge: drops
+            suggest filtering, resets suggest reachable hosts with closed or
+            protected ports. Offline machines usually yield timeouts or ICMP
+            unreachable instead, though careful attackers know both can be
+            forged, which is why conclusions cite method alongside result.
+    - id: masks-and-binary-math
+      title: 'Masks and binary math'
+      blocks:
+        - type: prose
+          markdown: >
+            Subnetting frightens people only until the arithmetic shows up.
+            An IPv4 address is 32 bits split into network portion and host
+            portion, and the mask simply declares where the split sits. The
+            slash notation counts network bits directly: /24 reserves the
+            first 24 bits, leaving 8 host bits, giving 256 raw addresses of
+            which the first identifies the network itself, the last is
+            broadcast, and 254 serve hosts. Powers of two do all the work: /25
+            halves into 128 addresses, /26 quarters into 64, and so on down to
+            /30 pairs usable for router links. Memorize the block sizes 128,
+            64, 32, 16, 8, 4, 2 and every calculation reduces to counting.
+        - type: code
+          language: text
+          code: |
+            Question: network 10.20.4.130/26 -> which subnet? broadcast? hosts?
+
+            Step 1: /26 => block size 64 in the 4th octet
+                    boundaries: 0, 64, 128, 192
+            Step 2: .130 falls in 128..191
+            Answer:
+              network    10.20.4.128/26
+              broadcast  10.20.4.191
+              usable     10.20.4.129 - 10.20.4.190  (62 hosts)
+
+            Check with ipcalc-style reasoning:
+              130 - 128 = 2  -> second usable address in the block
+        - type: prose
+          markdown: >
+            Practice the reverse direction too, because interviews and exams
+            love it: given a requirement like "12 subnets supporting at least
+            50 machines", compute that 50 needs 6 host bits (64 minus network
+            and broadcast leaves 62), so the mask keeps 27 network bits and
+            the answer is a /27 carve-up yielding exactly enough rooms. Doing
+            this by hand matters beyond tests: whiteboard speed wins design
+            meetings, and analysts who cannot size ranges quickly misfire
+            scope statements, firewall rules, and detection queries alike.
+    - id: subnetting-under-pressure
+      title: 'Subnetting under pressure'
+      blocks:
+        - type: prose
+          markdown: >
+            Timed practice converts understanding into reflex, so run drills
+            with a visible clock until the pattern library sits in your hands.
+            The reliable procedure stays identical no matter the question:
+            convert the requirement into host bits or subnet count, derive
+            the prefix from block sizes, snap the address onto its boundary,
+            then read off network, broadcast, first host, and last host. Work
+            each drill twice, once forward from an address to its range and
+            once backward from requirements to a prefix, because both
+            directions appear in real work: sizing new lab networks runs one
+            way, and interpreting someone else's firewall ruleset runs the
+            other.
+        - type: code
+          language: text
+          code: |
+            Drill A: 192.168.44.77/27 -> which range?
+              block 32; boundaries 64..96 contains .77? yes (64+13)
+              network 192.168.44.64/27, broadcast .95,
+              hosts .65 - .94 (30 usable)
+
+            Drill B: need 6 subnets from 172.16.9.0/24, equal size
+              6 needs 3 borrowed bits -> /27, eight subnets of 32
+              first three: .0/.32/.64, broadcast of third = .95
+
+            Drill C: smallest prefix covering 10.20.4.0 and 10.20.7.255
+              span = 8 addresses of octet math -> /22 covers 10.20.4.0-7.255
+        - type: prose
+          markdown: >
+            Check every answer mechanically while learning, using `ipcalc`,
+            Python's ipaddress module, or a quick mental re-derivation, then
+            wean off the tools as accuracy holds. Speed targets worth hitting:
+            any single range inside fifteen seconds, any full carve-up inside
+            two minutes. Those numbers sound arbitrary until the day you sit
+            in a change-freeze bridge call where someone must state, out loud
+            and immediately, whether 10.30.12.66 belongs to the DMZ or the
+            office pool before traffic gets allowed. That moment is what the
+            drills are actually for.
+    - id: routing-tables-and-next-hops
+      title: 'Routing tables and next hops'
+      blocks:
+        - type: prose
+          markdown: >
+            Routing decides where packets go next, and the algorithm is
+            beautifully simple: longest prefix match. For a destination, the
+            kernel scans its table for every route whose network contains the
+            address, then picks whichever entry has the most specific mask;
+            ties break by metric. Everything else is bookkeeping. The default
+            route is merely the least-specific match, catching whatever nobody
+            else claimed. Reading `ip route` therefore means asking one
+            question per line: which destinations do I claim here, and who
+            forwards the rest?
+        - type: code
+          language: bash
+          code: |
+            $ ip route show
+            default via 10.20.0.1 dev eth0 metric 100
+            10.20.0.0/16 dev eth0 proto kernel scope link src 10.20.4.100
+            10.30.0.0/16 via 10.20.0.254 dev eth0 metric 50
+            172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+
+            Predictions:
+              to 10.20.4.9    -> direct on eth0 (link scope)
+              to 10.30.7.1    -> via 10.20.0.254 (/16 beats default)
+              to 172.17.0.5   -> direct on docker0 (container traffic)
+              to 93.184.216.34-> default via 10.20.0.1
+        - type: prose
+          markdown: >
+            Each prediction follows mechanically from specificity ordering,
+            and tracing them aloud builds the reflex security reviews need.
+            Attackers exploit the same table with route injection and with
+            containers whose bridge rules surprise operators; defenders audit
+            it because unexpected routes reveal tunnels, forgotten VPNs, and
+            misconfigured bridges that bypass intended chokepoints. When a
+            box reaches networks policy says it should not, `ip route get`
+            names the exact path taken, turning an argument about intentions
+            into a demonstration of facts, which is the strongest position an
+            analyst can occupy in any review meeting.
+    - id: layered-diagnosis-method
+      title: 'Layered diagnosis method'
+      blocks:
+        - type: prose
+          markdown: >
+            Connectivity complaints become solvable when you climb the stack
+            deliberately instead of typing tools at random. Start at the
+            bottom: does the interface have an address and a default route?
+            Then test the local segment with a neighbor lookup. Then probe
+            reachability across the path, watching whether failures come back
+            as refusals, timeouts, or unreachable messages, since each points
+            at a different layer. Only after the path proves clear do you
+            knock on the actual service port, where refusal now means
+            something entirely different than it did at step one. Writing
+            findings per layer keeps the investigation honest and repeatable.
+        - type: code
+          language: bash
+          code: |
+            $ ip -brief addr show eth0; ip route | head -1
+            UP             10.20.4.100/24 eth0
+            default via 10.20.0.1 dev eth0
+
+            $ ping -c2 -W1 10.20.4.9 | tail -2
+            2 packets transmitted, 2 received, 0% packet loss
+
+            $ nc -zv -w2 10.20.4.9 8000
+            Connection to 10.20.4.9 8000 port [tcp/*] succeeded!
+
+            $ traceroute -n 10.20.4.9 2>/dev/null | head -3
+             1  10.20.0.1  0.4 ms
+             2  10.20.4.9  0.6 ms
+        - type: prose
+          markdown: >
+            Four commands answered four questions in order: configuration,
+            path, service, and route detail. When the sequence breaks, the
+            break's location is the diagnosis: address missing means DHCP or
+            config, ping failing while routes look right suggests ACLs or
+            isolation policies, ping passing while the port refuses means the
+            service or its firewall, not the network. That final case trips
+            newcomers constantly, so burn it in now: reaching a machine and
+            reaching a service are different claims requiring different
+            evidence.
+        - type: quiz
+          question_id: trs-layered-failure-localization
+          question: 'From your workstation, ping to the app server succeeds, but nc to port 5432 returns refused, while a colleague on another subnet connects fine. Most likely explanation?'
+          options:
+            - id: a
+              text: 'The database process is dead, since refusal always means no listener.'
+            - id: b
+              text: 'The path and listener are fine; something between your workstation and the server, likely a firewall scoped by source, refuses your connection specifically.'
+            - id: c
+              text: 'Your workstation lacks a default route, blocking TCP but not ICMP.'
+            - id: d
+              text: 'DNS resolution differs between you and your colleague.'
+          answer_ids: [b]
+          explanation: >
+            A colleague succeeding over the same protocol proves the listener
+            lives and the service works, so refusal localized to your source
+            address implicates a source-scoped control rather than the daemon.
+            Option A ignores the witness, option C contradicts successful
+            ping, and option D is irrelevant to a numeric-IP connection test.
+            Layered thinking converts confusing symptoms into one tidy fact.
+  cheat_sheet: |
+    # TCP/IP, routing, subnetting
+
+    Encapsulation order:
+        app data -> tcp (ports, seq) -> ip (addrs, ttl) -> ether (macs)
+
+    TCP states worth knowing:
+        SYN -> SYN-ACK -> ACK = established
+        FIN/FIN = polite close; RST = abort
+        TIME-WAIT ~60s on first-closer; SYN flood kills server tables
+
+    Mask math:
+        block sizes /25.. /30: 128 64 32 16 8 4 2
+        network = addr AND mask; +block-1 = broadcast
+        usable = block - 2; hosts need log2(hosts+2) bits
+
+    Longest prefix match:
+        most specific mask wins; default = last resort
+        ip route get DEST prints chosen path
+
+    Layered diagnosis:
+        1 ip -brief addr + ip route     (config)
+        2 ping neighbor/gateway         (segment/path)
+        3 traceroute -n                 (where path dies)
+        4 nc -zv HOST PORT              (service)
+        refusal late in chain != failure early

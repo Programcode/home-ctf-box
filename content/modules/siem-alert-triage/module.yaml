@@ -1,0 +1,324 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: siem-alert-triage
+  title: 'SIEM concepts and the alert triage mindset'
+  version: 0.1.0
+  difficulty: easy
+  points: 130
+  estimated_minutes: 55
+  tags:
+    - siem
+    - triage
+    - alerts
+    - soc
+spec:
+  track: defense-cloud
+  summary: >-
+    Before you can investigate an alert you need to understand where it came
+    from and what it is asking of you. This module follows a single event from
+    log line to page on an analyst screen, explains what parsing, correlation,
+    and detection rules actually do, and then trains the triage mindset that
+    separates calm analysts from drowning ones. You learn to classify true,
+    false, and benign outcomes consistently, to escalate with context instead
+    of noise, and to tune detections so tomorrow's queue is quieter than
+    today's.
+  objectives:
+    - Describe each stage between raw log collection and an alert reaching an analyst.
+    - Triage alerts using severity, confidence, and impact rather than gut feel.
+    - Answer the five questions every investigation must settle before closure.
+    - Classify findings as true positives, false positives, or benign true positives.
+    - Escalate cases with complete context so the next analyst never starts cold.
+    - Propose detection tuning that reduces noise without hiding real attacks.
+  sections:
+    - id: life-of-an-alert
+      title: 'Life of an alert'
+      blocks:
+        - type: prose
+          markdown: |
+            An alert is the last survivor of a long pipeline, and knowing the
+            pipeline tells you why alerts look the way they do. Collection
+            agents and log shippers gather events from hosts, firewalls,
+            identity providers, and applications. Parsing turns each event
+            from its native format into shared field names, because one vendor's
+            src_ip is another's clientAddress. Normalization maps values into
+            common vocabularies such as category names for processes or
+            verdicts for files. Detection logic then matches rules over the
+            normalized stream: threshold checks like five failures in ten
+            minutes, statistical baselines like this host rarely talks to that
+            country, and signature matches like known tool hashes.
+        - type: code
+          language: text
+          code: |
+            [collection]  auth.log line arrives from web01
+            [parsing]     sshd: Failed password for admin from 203.0.113.7
+                          -> { "event.action": "ssh_login_failure",
+                               "source.ip": "203.0.113.7",
+                               "user.name": "admin" }
+            [correlation] rule counts source.ip failures per 10m window
+            [threshold]   count = 14 >= threshold 5
+            [alert]       case created, severity high, routed to tier-1 queue
+        - type: prose
+          markdown: |
+            Read that trace with a skeptic's eye, because every stage is a
+            place where truth can bend. A parser that misreads the username
+            field poisons every downstream check. A threshold tuned for one
+            network fires constantly in another. Correlation across time zones
+            can silently merge or split attacker activity. When an alert later
+            seems to make no sense, professional analysts debug backwards
+            through this chain instead of shrugging: find the original events,
+            confirm the parsed fields, recompute the rule by hand. That habit
+            alone puts you ahead of most newcomers, who treat the alert as
+            gospel rather than as a claim produced by fallible machinery.
+        - type: callout
+          tone: info
+          markdown: |
+            The SIEM does not know what happened. It knows what logs claim
+            happened. Your job is to find independent evidence before anyone
+            acts.
+    - id: severity-confidence-impact
+      title: 'Severity, confidence, and impact'
+      blocks:
+        - type: prose
+          markdown: |
+            Three words decide your first minutes with any alert, and confusing
+            them causes most triage chaos. Severity is how bad the situation
+            would be if the alert were true; it belongs to the scenario, not
+            to your feelings about it. Confidence is how likely the detection
+            is correct given the evidence; it belongs to the rule and the data
+            quality. Impact blends likelihood with business consequence and
+            ultimately decides priority. A high-severity, low-confidence alert
+            deserves fast verification but not a 3 a.m. incident bridge, while
+            medium-severity, high-confidence activity touching a payment
+            server may justify waking people up.
+        - type: prose
+          markdown: |
+            Practicing the split changes how you speak. Instead of "this looks
+            really bad", you say "credential dumping on a domain controller is
+            severity critical; current confidence is moderate because only one
+            telemetry source reported the process access". That sentence tells
+            a team lead exactly what would raise or lower your urgency: more
+            sources agreeing, or the process lineage proving benign. Vendors
+            label alerts with their own severity numbers, but those are
+            marketing until you verify them against your environment, since no
+            vendor knows whether the target host is a forgotten test box or the
+            crown jewels.
+        - type: quiz
+          question_id: sat-severity-vs-confidence
+          question: 'An alert claims ransomware encryption on a file server. You verify the flagged process is your backup agent doing scheduled integrity hashing. How do the three axes sort out?'
+          options:
+            - id: a
+              text: 'High impact anyway, because ransomware always means an incident.'
+            - id: b
+              text: 'Severity was correctly high for the claimed scenario, but confidence collapses once the process owner is identified, so priority drops to routine.'
+            - id: c
+              text: 'Severity should be lowered retroactively since the rule fired wrongly.'
+            - id: d
+              text: 'Impact rises because false positives prove attackers are probing the environment.'
+          answer_ids: [b]
+          explanation: >
+            Severity describes the hypothetical, confidence describes the
+            evidence, and priority combines both with business weight. The
+            rule was right to scream about the pattern and wrong about the
+            actor; identifying the backup agent destroys confidence without
+            changing what severity means. Writing it exactly that way in the
+            case notes is the professional habit this module builds.
+    - id: five-questions-every-alert-must-answer
+      title: 'The five questions every alert must answer'
+      blocks:
+        - type: prose
+          markdown: |
+            Investigations drift when they have no spine, so give yours one.
+            Five questions, answered in order, close any alert: who or what
+            acted, on which asset, at exactly what times, through which
+            technique, and did it succeed. Write them as headings at the start
+            of a case and fill them as you go. The discipline prevents the two
+            classic failure modes: investigating for hours without deciding
+            anything, and closing cases whose notes answer none of the
+            questions the next reader will ask.
+        - type: code
+          language: markdown
+          code: |
+            Case: possible SSH brute force against bastion
+
+            Who/what:   203.0.113.7 (ASN: hosting provider), targeting user admin
+            Which asset:bastion-01 (10.20.4.9), exposed on port 22
+            When:       09:12:04Z to 09:19:41Z, 14 failures, then silence
+            Technique:  password guessing, single account, low rate
+            Succeeded?: NO. No successful auth from that IP in 30 days of logs.
+
+            Disposition: attempted intrusion, blocked by policy, no compromise.
+        - type: prose
+          markdown: |
+            Notice how the template forces decisions. Answering "did it
+            succeed" required checking successful logins, not just failures,
+            which is the step tired analysts skip most often. Answering "who"
+            required enriching the IP beyond the alert, which took one lookup
+            and immediately framed expectations. If any question cannot be
+            answered with available telemetry, that gap itself goes in the
+            notes as a visibility finding, because telling defenders what they
+            cannot see is part of the job, not an admission of failure.
+    - id: true-false-and-benign-outcomes
+      title: 'True, false, and benign outcomes'
+      blocks:
+        - type: prose
+          markdown: |
+            Every alert ends as exactly one of three verdicts, and using the
+            vocabulary precisely keeps statistics honest. A true positive
+            means the detected behavior occurred and was genuinely malicious;
+            the response path opens. A false positive means the detected
+            behavior never occurred; the rule misfired on parsing or logic.
+            The third category confuses newcomers: a benign true positive
+            means the behavior occurred exactly as detected but was performed
+            legitimately, such as an administrator running psexec during a
+            maintenance window or the backup agent hashing thousands of files.
+            The detection worked; the world just had an innocent explanation.
+        - type: prose
+          markdown: |
+            The distinction drives different actions. False positives call for
+            rule fixes: correct a parser, add an exclusion, adjust a threshold.
+            Benign true positives call for context documentation: register the
+            change management ticket ID, tag the service account, and consider
+            whether a suppression with an expiry date is appropriate. Collapsing
+            both into "false alarm" throws away exactly the information tuning
+            needs, which is how queues stay noisy forever. Teams that track the
+            three categories separately watch their benign-positive rate become
+            a map of their own environment.
+        - type: quiz
+          question_id: sat-benign-classification
+          question: 'A detection flags mimikatz-style credential access. Investigation shows the security team ran a red team exercise that evening, and the tooling matches their signed operator workstation. Correct verdict?'
+          options:
+            - id: a
+              text: 'False positive, because no real attacker was involved.'
+            - id: b
+              text: 'Benign true positive, documented against the exercise authorization, with the ticket referenced in the case.'
+            - id: c
+              text: 'True positive requiring incident response since credential dumping tools ran.'
+            - id: d
+              text: 'Unclassifiable; verdicts apply only to malware detections.'
+          answer_ids: [b]
+          explanation: >
+            The telemetry told the truth: credential access behavior ran.
+            Authorization made it legitimate, which is the definition of benign
+            true positive. Calling it a false positive would accuse the rule
+            of lying and discourage its authors; calling it a hostile true
+            positive would burn response capacity. Documentation plus
+            reference is the whole job here.
+    - id: escalation-that-analysts-respect
+      title: 'Escalation that analysts respect'
+      blocks:
+        - type: prose
+          markdown: |
+            Tier two analysts remember who hands them garbage, so build your
+            escalations like gifts. A complete handoff contains the alert
+            identifiers, the five answers from earlier, the evidence queries
+            themselves rather than only conclusions, what you ruled out and
+            how, and a single clearly stated ask. Copy-pasting the alert body
+            plus "please review" wastes a senior salary on redoing your
+            morning. The craft is leaving a trail another person can walk in
+            twenty minutes, including the dead ends, so nobody repeats them.
+        - type: code
+          language: markdown
+          code: |
+            ESCALATION - case #48213 -> tier2 (analyst: dev)
+
+            Ask: approve host isolation decision for bastion-01? Evidence below.
+            Summary: successful auth as svc-backup from new ASN at 03:11Z,
+                     followed by /tmp upload executed within 4 minutes.
+            Ruled out: backup schedule (runs Sundays, not today),
+                       VPN pool ranges (source not in CIDR list).
+            Queries used: saved search "auth-success-by-asn", kql snippet attached.
+            Confidence: high on execution, medium on intent. Severity: high.
+        - type: prose
+          markdown: |
+            Study what that example does. The ask comes first because readers
+            triage top-down. Every claim names its proof. The ruled-out section
+            saves the next analyst an hour of rediscovery and demonstrates
+            work rather than asserting effort. Confidence and severity carry
+            explicit qualifiers, inviting correction instead of argument.
+            Nothing in the handoff required special talent, just the humility
+            to assume a stranger with limited time is the audience. That
+            assumption, applied everywhere, is the difference between an
+            analyst teams fight to keep and one they quietly route around.
+    - id: beating-alert-fatigue
+      title: 'Beating alert fatigue'
+      blocks:
+        - type: prose
+          markdown: |
+            Fatigue is an engineering problem wearing a human costume. Analysts
+            facing hundreds of daily alerts stop reading carefully within
+            hours, and attackers know queues are where attention goes to die.
+            The countermeasure is systematic tuning driven by your triage
+            statistics. For every recurring benign true positive, either fix
+            upstream data, add scoped exclusions tied to business facts, or
+            raise thresholds where evidence supports it. Every exclusion gets
+            an expiry date and an owner, because environments change and stale
+            suppressions become attacker hideouts.
+        - type: prose
+          markdown: |
+            Measure the program, not the heroics. Useful weekly numbers
+            include total alerts by rule, percentage closed as benign versus
+            false versus true, mean time to triage per severity, and the
+            count of exclusions past expiry. Two trends deserve immediate
+            action: any single rule generating more than roughly a third of a
+            queue is begging for redesign, and rising triage time at stable
+            volume signals data quality decay rather than analyst laziness.
+            Tuning meetings armed with these numbers stay short and factual.
+        - type: quiz
+          question_id: sat-tuning-suppression
+          question: 'Your SOC wants to silence a noisy scanner-detection rule. Which approach best balances quiet with safety?'
+          options:
+            - id: a
+              text: 'Delete the rule permanently; scanners are always noise.'
+            - id: b
+              text: 'Suppress only the known scanner IPs with a named owner and a 90-day expiry, and keep tracking how often the suppression would have hidden other hits.'
+            - id: c
+              text: 'Lower the rule threshold so it triggers less often overall.'
+            - id: d
+              text: 'Route the alerts to a folder nobody reads, keeping official metrics clean.'
+          answer_ids: [b]
+          explanation: >
+            Scoped, owned, expiring suppressions shrink queues without
+            blinding you, and monitoring suppressed hits catches the day the
+            scanner IP gets spoofed or the exclusion grows stale. Deleting
+            detections, loosening thresholds globally, or hiding alerts
+            unofficially all trade tomorrow's visibility for today's peace,
+            which is the exact bargain fatigue-driven teams learn to refuse.
+        - type: prose
+          markdown: |
+            Carry this mindset straight into the next module, where the raw
+            materials of everything above, the logs themselves, get examined
+            in their native formats. Then the playbooks module turns triage
+            into repeatable investigations, and the packet-diary and
+            knock-knock rooms let you practice the full loop on artifacts
+            rather than slides. Calm beats fast, verified beats loud, written
+            down beats remembered. Everything else is commentary.
+  cheat_sheet: |
+    # SIEM concepts and triage mindset
+
+    Pipeline stages:
+        collect -> parse -> normalize -> correlate -> alert
+        debug alerts backwards through the chain
+
+    First-minute axes:
+        severity   = how bad if true (scenario)
+        confidence = how likely true (evidence)
+        impact     = likelihood x business weight (priority)
+
+    Five questions:
+        who/what, which asset, when exactly,
+        which technique, did it succeed
+
+    Verdicts:
+        true positive        malicious and detected
+        false positive       never happened, rule wrong
+        benign true positive happened, legitimate actor
+
+    Handoff contents:
+        ask first, summary, evidence queries,
+        ruled out + how, confidence/severity qualifiers
+
+    Tuning rules:
+        every exclusion has owner + expiry
+        one rule > ~1/3 of queue => redesign
+        measure categories weekly
