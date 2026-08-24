@@ -86,8 +86,10 @@ async def register_device(
     db: AsyncSession, *, user_id: Any, name: str, public_key: str, settings: VpnSettings
 ) -> tuple[VpnDevice, VpnLease, str]:
     """Create device + lease and return them with the rendered client config."""
-    # Fail before touching the pool when issuance is unconfigured.
-    render_client_config(address="0.0.0.0", settings=settings)  # noqa: S104 - placeholder, never bound
+    # Fail before touching the pool when issuance is unconfigured. The
+    # placeholder address is never bound anywhere; it only exercises the
+    # template renderer.
+    render_client_config(address="127.0.0.1", settings=settings)  # noqa: S104 - placeholder, never bound
 
     duplicate = await db.scalar(select(VpnDevice).where(VpnDevice.public_key == public_key))
     if duplicate is not None:
