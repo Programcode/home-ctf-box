@@ -1,0 +1,78 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: pipeline-spill
+  title: 'Pipeline Spill'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 30
+  tags: [ci-cd, secrets, log-analysis, supply-chain]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    A billing service build finished green, but the CI runner published its
+    full console output to the evidence share. Masking hid the deploy token
+    behind asterisks, yet two different lines leak complementary halves: one
+    prints the token base64 encoded and truncated, the other shows the raw
+    tail as a verification fingerprint. Reassemble the token and call the
+    deploy endpoint yourself.
+  objectives:
+    - 'Recognize that masking fails when separate log lines leak complementary parts of one secret.'
+    - 'Decode a truncated base64 value and splice it together with a fingerprint suffix.'
+    - 'Replay the reconstructed deploy token against the pipeline API and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single Flask target serving a static synthetic build log; the deploy endpoint compares against a constant token and holds only synthetic data. No external systems are contacted and no real credentials exist in the bundle.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: rebuild-the-token
+      title: 'Rebuild the spilled deploy token'
+      prompt: >-
+        Fetch the leaked CI output from /evidence/build-1234.log. One line
+        shows DEPLOY_TOKEN_B64 with its tail masked after 20 characters,
+        and a later line shows a verify fingerprint ending in four raw
+        characters. Reconstruct the full deploy token from those two lines
+        and call GET /api/deploy?token=... to release the flag.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'The mask policy line tells you exactly how much of each form survived: 20 of 28 base64 characters, and the last 4 raw characters of the fingerprint.'
+        - cost: 10
+          text: 'Base64 decodes in 4 character groups, so a clean 20 character prefix is a complete chunk. Decode Y2ktOWYyN2Q0YzFhZTgz with base64 or Python and see what falls out.'
+        - cost: 25
+          text: 'The decoded prefix ends at ci-9f27d4c1ae83 and the fingerprint line supplies b650, so the token is ci-9f27d4c1ae83b650. GET http://target:8000/api/deploy?token=ci-9f27d4c1ae83b650 returns the flag.'
+      solution: |
+        1. Open the case page on http://target:8000/ and download
+           /evidence/build-1234.log.
+        2. Read the mask policy note, then find the export step. It prints
+           DEPLOY_TOKEN_B64=Y2ktOWYyN2Q0YzFhZTgz****, which keeps the first
+           20 of 28 base64 characters.
+        3. Decode the visible prefix. It is a whole number of base64 blocks,
+           so `echo Y2ktOWYyN2Q0YzFhZTgz | base64 -d` yields the raw string
+           ci-9f27d4c1ae83 with nothing truncated mid-character.
+        4. Find the later verify step. Its fingerprint keeps the last four
+           characters of the raw token: b650.
+        5. Splice prefix and suffix into ci-9f27d4c1ae83b650. The old
+           rotated token earlier in the log is fully masked and useless,
+           which is the normal case; this one slipped through because two
+           maskers each covered only half.
+        6. Replay it: GET
+           http://target:8000/api/deploy?token=ci-9f27d4c1ae83b650.
+           The accepted deploy page prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

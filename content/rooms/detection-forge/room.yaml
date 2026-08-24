@@ -1,0 +1,86 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: detection-forge
+  title: 'Detection Forge'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 60
+  tags: [detection-engineering, yara, regex, threat-hunting, supply-chain]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    The detection engineering team left four rule slots empty on the forge
+    and a bundle of labeled attack traces on the evidence share. Each slot
+    guards a different supply-chain relevant signal: union-based SQL
+    injection in query strings, path traversal with encoding tricks,
+    exfiltration payloads smuggled through short base64 parameters, and
+    DNS tunnel labels. Author one rule per slot, submit them to the
+    validator, and pass every positive and negative fixture to earn the
+    flag.
+  objectives:
+    - 'Write regex detection rules that separate attack traces from benign lookalikes.'
+    - 'Tune rules against adversarial near-miss negatives like JWT parameters and word-boundary traps.'
+    - 'Ship a complete validated ruleset through the forge API.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'All traces are short synthetic strings defined as constants in the target; no malware, exploit code execution, or live telemetry exists. Rules are compiled with bounded pattern length against fixed fixture lists inside a disposable container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: ship-the-ruleset
+      title: 'Author four detections that pass every fixture'
+      prompt: >-
+        Download the labeled trace bundle from /evidence/traces.json. For
+        each of the four rule ids author a regex pattern that matches all
+        positives and none of the negatives when evaluated case
+        insensitively with search semantics. POST the full mapping to
+        /forge as {"rules": {id: pattern}}. When all four rules validate,
+        the response carries the flag.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'Evaluation uses re.search with re.IGNORECASE, so your pattern only needs to appear somewhere in each positive and nowhere in any negative. Read the near-miss negatives first; they define the precision bar.'
+        - cost: 10
+          text: 'The negatives are engineered traps: reunion selection kills bare UNION matching, docs/../index.html demands two or more traversal hops, session JWT params force you to pin parameter names, and long benign hostnames cap label length thinking.'
+        - cost: 25
+          text: "A workable set: \\\\bUNION\\\\b[\\\\s+]+(?:ALL[\\\\s+]+)?SELECT ; (?:\\\\.\\\\.[/\\\\\\\\]){2,}|%2e%2e(?:%2f|[\\\\\\\\/]) ; [?&](?:d|c|cmd|blob)=[A-Za-z0-9+/]{16,}={0,2} ; \\\\b[A-Za-z0-9]{40,}\\\\."
+      solution: |
+        1. GET http://target:8000/evidence/traces.json and study each rule
+           block: positives are attack traces the rule must catch,
+           negatives are benign strings it must never fire on.
+        2. sqli-union-select needs word boundaries plus flexible spacing:
+           \bUNION\b[\s+]+(?:ALL[\s+]+)?SELECT matches the decoded and
+           plus-encoded positives while reunion selection, plain SELECT
+           statements, and UNIONIZED all stay quiet.
+        3. path-traversal requires repetition or full encoding:
+           (?:\.\.[/\\]){2,}|%2e%2e(?:%2f|[\\/]) catches ../../ chains,
+           backslash chains, and %2e%2e%2f blobs, while single-hop
+           docs/../index.html and dotted filenames do not fire.
+        4. exfil-base64-param pins suspicious short parameter names:
+           [?&](?:d|c|cmd|blob)=[A-Za-z0-9+/]{16,}={0,2} matches the
+           payload params but ignores session JWTs, colors, and ids.
+        5. dns-tunnel-label keys on label length:
+           \b[A-Za-z0-9]{40,}\. fires on hex and base32 tunnel labels and
+           stays silent on normal corporate hostnames.
+        6. Submit once:
+           curl -X POST http://target:8000/forge -H 'Content-Type: application/json'
+             -d '{"rules":{"sqli-union-select":"...","path-traversal":"...","exfil-base64-param":"...","dns-tunnel-label":"..."}}'
+           The validator reports per-rule match counts. Iterate until
+           solved:true appears, then read FLAG{...} from the response.
+      validator:
+        type: per_session_flag

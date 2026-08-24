@@ -1,0 +1,94 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: threat-hunt-northstar
+  title: 'Threat Hunt Northstar'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 70
+  tags: [threat-hunting, log-analysis, c2, beaconing, dns-tunneling]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    Overnight, a billing workstation behaved like attacker
+    infrastructure. Three synchronized synthetic sources hold the full
+    story: vpn authentication with a password-spray burst, egress proxy
+    requests including a steady-interval beacon, and resolver traffic
+    carrying long hex labels. Work the hunt desk's five stage hypothesis
+    chain in order, pivoting from the compromised account to the C2
+    domain, and close the incident.
+  objectives:
+    - 'Chain hypotheses across authentication, proxy, and DNS telemetry.'
+    - 'Distinguish staging infrastructure from beaconing by request shape and timing.'
+    - 'Identify a fixed-interval C2 channel and complete the hunt chain.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'All three logs are deterministic synthetic strings generated inside the Flask target; timestamps, hosts, and credentials are fictional. The hunt endpoint compares answers to constants and holds no live data.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: hunt-the-beacon
+      title: 'Work the five stage chain to the C2 domain'
+      prompt: >-
+        Pull auth.log, proxy.log, and dns.log from /evidence/. Drive the
+        hunt desk at /hunt: GET returns your current stage question,
+        POST {'answer': '...'} validates it. Stage one asks for the
+        compromised account, then its external source IP, the staging
+        host that received the upload, the DNS tunnel parent domain, and
+        finally the metronome-steady beaconing C2 domain. Completing all
+        five stages prints the flag.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'Start in auth.log. A service account takes at least five consecutive failures from one address outside the 10.x range before succeeding. The assign event right after the success maps the session onto a workstation IP you will filter everything else by.'
+        - cost: 10
+          text: 'With the workstation IP, proxy.log narrows to two external hosts: one takes an oversized POST upload, the other repeats an identical GET on a fixed rhythm. dns.log shows TXT queries whose first label is long hex under one parent domain.'
+        - cost: 25
+          text: 'The chain answers are svc-backup, 203.0.113.77, files-share-fast.net, dnsync-services.net, cdn-metrics-sync.top. The C2 is the host contacted every exactly 300 seconds; submit each answer lowercase to /hunt in order.'
+      solution: |
+        1. Download all three evidence files from
+           http://target:8000/evidence/ and skim each for format.
+        2. Stage 1, compromised account: grep auth.log for result=failure.
+           svc-backup fails eight times between 02:09 and 02:14, mixing
+           reason=password then reason=mfa, classic spray then push-fatigue,
+           while its only other activity is scheduled batch logins from
+           the internal file service. Answer svc-backup.
+        3. Stage 2, source: the same burst and the eventual success share
+           src=203.0.113.77, an external address. Answer with that IP.
+        4. Pivot: the assign line binds the successful session to
+           ops-wks-04 at ip=10.60.4.44.
+        5. Stage 3, staging: filtering proxy.log on client=10.60.4.44
+           shows GET files-share-fast.net/drop/q3-forecast.zip followed by
+           POST files-share-fast.net/upload at 48213 bytes, an oversized
+           outbound body consistent with document exfil. Answer
+           files-share-fast.net.
+        6. Stage 4, tunneling: dns.log shows the workstation sending TXT
+           queries like
+           9f27c4ae83b65011ff02ee55cc88ab.dnsync-services.net where the
+           first label is 30+ hex characters, data hidden in the name.
+           Answer with the parent domain dnsync-services.net.
+        7. Stage 5, the beacon: among victim proxy requests,
+           cdn-metrics-sync.top/api/pixel?id=7f3a91 repeats identically at
+           exactly 300 second intervals, machine-timed unlike human
+           browsing. That regularity identifies it as C2. Answer
+           cdn-metrics-sync.top and receive FLAG{...}.
+        8. Defensive reading: this chain was visible without any agent.
+           Alert on service accounts failing repeatedly then succeeding
+           from novel geos, fixed-interval duplicate egress requests, and
+           high-entropy subdomain labels.
+      validator:
+        type: per_session_flag

