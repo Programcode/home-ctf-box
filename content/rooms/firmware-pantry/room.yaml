@@ -1,0 +1,96 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: firmware-pantry
+  title: 'Firmware Pantry'
+  version: 1.0.0
+  difficulty: medium
+  points: 275
+  estimated_minutes: 40
+  tags: [firmware, binwalk, tar-xz, password-cracking, shadow-file]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    PantryGate publishes a synthetic firmware image for its simulated
+    gate controller at /evidence, laid out like a real update package:
+    a printable vendor stub, a custom container magic, then a
+    compressed POSIX tar holding the root filesystem. You will slice
+    the archive out of the image the way binwalk-style magic scanning
+    works, extract the simulated shadow file, recover the admin
+    password by hashing a provided wordlist offline, and log into the
+    admin desk for the flag.
+  objectives:
+    - 'Locate an embedded archive inside a firmware-style container using documented offsets and magic bytes.'
+    - 'Read credential material from a simulated shadow database.'
+    - 'Crack a salt-free hash against a supplied wordlist entirely offline.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The firmware image is assembled inside the Flask process from strings and stdlib tarfile/lzma; it is not a real vendor image, contains no executable code, and the shadow entry is labeled sim with a plain SHA-256 hash chosen for determinism rather than any real credential.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: crack-and-login
+      title: 'Extract the rootfs, crack admin, log in'
+      prompt: >-
+        Download firmware.bin from the evidence shelf, use the
+        documented container layout to cut the embedded archive free,
+        extract etc/shadow-sim from the root filesystem, recover the
+        admin password by hashing the provided wordlist offline, and
+        submit it at POST /admin/login as form fields user=admin and
+        password to receive the flag.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'The release notes printed on the case page document the layout: 512-byte printable stub, then the 8-byte magic FSQSIM1, then the archive. The stub prose also spells FSQSIM1 when describing itself, so trust only the occurrence immediately followed by the xz signature fd 37 7a 58 5a 00; everything after those bytes is a POSIX tar compressed with xz, openable with tar -xJf or Python tarfile.'
+        - cost: 10
+          text: 'Inside the extracted tree, etc/shadow-sim carries admin:s record formatted $sim$<64 hex digits>, the sim convention for a plain SHA-256 of the password with no salt. Fetch /evidence/wordlist.txt and hash every line, comparing lowercase hex digests.'
+        - cost: 25
+          text: 'The matching word hashes sha256(word) == the stored digest. Then POST http://target:8000/admin/login with form fields user=admin and password=<that word>. A match returns the flag page.'
+      solution: |
+        1. GET http://target:8000/evidence/firmware.bin and keep the
+           bytes local.
+        2. Read the first 512 bytes as text: the vendor stub is the
+           release notes and states the container contract outright,
+           stub of 512 bytes, magic FSQSIM1, then a tar.xz archive.
+           This is the documented-offset path.
+        3. Confirm with a magic scan the way binwalk would. Naive
+           first-find fails here on purpose: the stub prose spells
+           FSQSIM1 while describing itself, so iterate occurrences and
+           accept only the one immediately followed by the xz
+           signature b"\xfd7zXZ\x00". It sits exactly at offset 512.
+           Everything after the magic plus its 8 bytes is the payload.
+           This validate-the-neighborhood habit is what separates
+           carvers from false positives on real images.
+        4. Open the archive: `python3 -c "import tarfile;
+           t=tarfile.open('rootfs.tar.xz'); t.extractall('rootfs')"`
+           or tar -xJf. The tree contains etc/shadow-sim,
+           etc/passwd-sim, etc/release-notes.txt, usr/bin/pantryctl,
+           and README-SIM.txt. No real firmware ships these names;
+           every file is simulation scaffolding.
+        5. Read etc/shadow-sim. The admin line reads
+           admin:$sim$<hash>:... where <hash> is 64 hex characters.
+           The $sim$ marker replaces real shadow schemes like
+           yescrypt because this room wants deterministic, offline
+           friendly math: the digest equals hashlib.sha256(password).
+        6. Crack offline: iterate /evidence/wordlist.txt, strip
+           newlines, compute hex digests, compare against <hash>.
+           Exactly one word matches. This mirrors hashcat mode 1400
+           against raw SHA-256, just with stdlib code.
+        7. Log in: POST http://target:8000/admin/login with form
+           fields user=admin, password=<the cracked word>. The desk
+           verifies and prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

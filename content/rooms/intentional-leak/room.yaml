@@ -1,0 +1,98 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: intentional-leak
+  title: 'Intentional Leak'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 35
+  tags: [android, intents, exported-components, webview-bridge, sensitive-data]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    Pantryview's developer build exposes its activity stack through a
+    simulated intent router so you can rehearse component-level attack
+    chains with no device or emulator. A debug notes activity accepts
+    attacker-controlled extras and renders them through a WebView-style
+    template that can read the app settings store. Chain a crafted
+    intent into an interpolated settings read, lift the debug token out
+    of the renderer log, and exchange it at the internal endpoint for
+    your flag.
+  objectives:
+    - 'Enumerate an activity stack and reason about exported components and intent filters.'
+    - 'Craft an intent whose unsanitized extra reaches a privileged template context.'
+    - 'Exfiltrate a secret through renderer output and replay it against an internal endpoint.'
+  prerequisites:
+    - apk-breadcrumbs
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'No Android runtime, emulator, or real application participates anywhere. The activity stack, intent router, renderer, and settings store are data structures inside one disposable Flask container, and the debug token exists only in this simulated store.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: chain-the-intent-leak
+      title: 'Chain an intent into a settings leak'
+      prompt: >-
+        Map the activity stack at GET /api/activities, then send a
+        crafted intent JSON to POST /api/intent that reaches the notes
+        renderer in webview mode with a note extra reading the debug
+        token out of the settings store. Read the value back from
+        GET /api/render-log and present it at GET /internal/debug as
+        the token parameter to receive the flag.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'GET /api/activities lists every component with its exported flag and accepted extras. The internal activity is not exported, so a direct intent gets a SecurityException; the notes activity is exported but only fires when the intent action matches its filter.'
+        - cost: 10
+          text: 'In render_mode webview the renderer treats {{settings.KEY}} as a bridge read against the settings store, exactly like addJavascriptInterface exposing app state to page content. POST /api/intent with action com.pantryview.action.RENDER_NOTE, component .NotesRenderActivity, and extras {"note": "{{settings.debug_token}}", "render_mode": "webview"}.'
+        - cost: 25
+          text: 'GET /api/render-log shows the rendered line with the token interpolated in place of the bridge expression. Copy that hex token and GET /internal/debug?token=<value> on http://target:8000. A match prints the flag.'
+      solution: |
+        1. GET http://target:8000/api/activities. Three components:
+           .MainActivity (exported), .NotesRenderActivity (exported,
+           action filter com.pantryview.action.RENDER_NOTE, extras
+           note and render_mode), .InternalDebugActivity (not
+           exported). The stack view mirrors what `adb shell dumpsys
+           activity` reveals about a real build.
+        2. Confirm the boundary: POST /api/intent with body
+           {"component": ".InternalDebugActivity"} returns a
+           SecurityException-shaped error, because non-exported
+           components are unreachable from outside the app.
+        3. Build the malicious intent. POST /api/intent with
+           {"action": "com.pantryview.action.RENDER_NOTE",
+            "component": ".NotesRenderActivity",
+            "extras": {"note": "{{settings.debug_token}}",
+                       "render_mode": "webview"}}.
+           The response queues a render job. Plain render_mode would
+           print the braces literally; only the webview path runs the
+           template, mirroring how WebView content alone can reach a
+           JavaScript bridge.
+        4. GET /api/render-log. The newest line shows the note after
+           rendering: the bridge expression replaced by the actual
+           debug token, a 24-character hex string. This is the leak;
+           on a device you would read it from logcat or a visible
+           TextView instead of an API endpoint.
+        5. Redeem it: GET /internal/debug?token=<that hex value>.
+           The internal desk compares tokens and, on match, prints
+           FLAG{...}. Submit it.
+        6. As you go, map each hop to its real counterpart: exported
+           activity plus weak filter equals any installed app can
+           start it; unsanitized extras reaching a privileged context
+           equals injection; bridge reads over sensitive settings
+           equal data exposure; and secrets in logs equal incident
+           reports. The lesson file expands all four.
+      validator:
+        type: per_session_flag
