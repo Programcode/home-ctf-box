@@ -28,9 +28,8 @@ jobs:
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          config-path: security/gitleaks.toml
-          redact: true
+          # gitleaks-action v2 takes no inputs; it auto-detects ./gitleaks.toml.
+          GITLEAKS_ENABLE_COMMENTS: 'false'
 
   python-sast-and-deps:
     runs-on: ubuntu-latest
