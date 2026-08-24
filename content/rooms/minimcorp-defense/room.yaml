@@ -1,0 +1,116 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: minimcorp-defense
+  title: 'MinimCorp Defense'
+  version: 1.0.0
+  difficulty: hard
+  points: 400
+  estimated_minutes: 75
+  tags: [blue-team, incident-response, forensics, containment, simulation]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    The blue-team mirror of the MinimCorp breach, built from the same
+    estate artifacts frozen into exported logs. One locked container
+    plays the incident response console and serves the edge access log,
+    the wiki audit export, the finance API access export, and the
+    directory-sim verification log. Reconstruct the four-stage attack
+    timeline with minute precision, enumerate every affected identity
+    using the playbook's rule, choose containment actions that cover
+    every root cause without destroying evidence or taking healthy
+    services offline, then close the case. Only a correct full response
+    across all three stages pays out the master flag.
+  objectives:
+    - 'Correlate four exports into one ordered intrusion timeline with defensible timestamps.'
+    - 'Apply an explicit scoping rule to separate affected identities from bystanders mentioned in the same logs.'
+    - 'Select containment that addresses root causes while preserving evidence and availability, and defend why the rejected options fail.'
+  prerequisites: [packet-diary, quiet-persistence]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: one locked Flask app serves synthetic JSON
+      and plain-text evidence exports plus a small stateful case API.
+      There is no SIEM backend, no log shipper, and no corporate network;
+      the artifacts freeze the same three-host MinimCorp estate the red
+      team room simulates. The console does exact comparisons against
+      this session's flag-derived answers and resets on restart.
+      Unprivileged app user, capabilities dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: close-the-case
+      title: 'Reconstruct, scope, contain, and close the case'
+      prompt: >-
+        Work the MinimCorp IR console at http://target:8000. Read /case
+        and /evidence, fetch all four exports, then submit three stages:
+        POST /timeline with the four attack steps in order as
+        {"steps": [{"time": "HH:MM", "event": "<slug>"}]} using the stage
+        vocabulary from /playbook; POST /accounts with
+        {"affected": [...]} applying the affected_rule to every event in
+        all four exports; POST /contain with {"actions": [...]} chosen
+        only from the playbook options so every root cause is covered,
+        nothing is destroyed, and nothing healthy goes offline. When all
+        three stages are accepted, POST /close-case returns the FLAG
+        value to submit.
+      points: 400
+      hints:
+        - cost: 0
+          text: 'Read /playbook before anything else: it defines exactly how timeline entries, affected identities, and containment choices are graded. Then read all four evidence exports end to end before submitting anything.'
+        - cost: 10
+          text: 'Timeline: map each stage to its slug (config fetch, wiki auth reuse, invoice reads, sso token issue) and take HH:MM from the first event of each stage. Accounts: count principals authenticated as, impersonated, or whose records were returned; colleagues merely present in logs do not count.'
+        - cost: 25
+          text: 'Containment wants exactly five actions covering each chain root cause: the stale edge backup, the reused wiki secret, the static finance key, the legacy sso signing scheme, and the missing per-record authorization. Reject anything that powers off healthy services, deletes audit trails, or fixes only one credential. Close with POST /close-case for the FLAG{...}.'
+      solution: |
+        The graded deliverable is the flag returned by step 6.
+        1. GET http://target:8000/ and read the disclosure: one
+           container serves synthetic exports and a case API that resets
+           on restart.
+        2. GET /case and /playbook. Note the grading rules: timeline
+           slugs with minute-precision first-event times, the affected
+           identity rule, and containment options with effects.
+        3. Fetch evidence: GET /evidence/edge-access.log shows
+           02:14 fetch of /static/vpn.conf.bak by 198.51.100.66
+           (config-exposure). GET /evidence/wiki-audit.json shows
+           02:21 svc_wiki auth followed by finance-runbook page and
+           revision reads (credential-reuse). GET
+           /evidence/finance-access.json shows 02:38 invoice reads of
+           employee_id 1001 (record j.novak) and 1013 (record e.szabo)
+           using key fin-api-key-7788 (data-enumeration). GET
+           /evidence/directory-sso.json shows 03:05 sso-verify for
+           a.adams with role estate-admin returning token-issued
+           (privilege-forgery).
+        4. Submit the timeline: POST /timeline {"steps": [{"time":
+           "02:14", "event": "config-exposure"}, {"time": "02:21",
+           "event": "credential-reuse"}, {"time": "02:38", "event":
+           "data-enumeration"}, {"time": "03:05", "event":
+           "privilege-forgery"}]}. Accepted.
+        5. Apply the affected_rule across all events: svc_wiki was
+           authenticated as, j.novak and e.szabo had their records
+           returned, a.adams was impersonated. f.okafor only performed a
+           benign earlier login, m.horvath never appears. POST /accounts
+           {"affected": ["a.adams", "e.szabo", "j.novak", "svc_wiki"]}.
+           Accepted.
+        6. Choose containment per the rule: purge-stale-vpn-backups,
+           rotate-wiki-service-credentials, revoke-fin-api-key,
+           retire-legacy-sso-signing,
+           add-per-record-authorization. POST /contain {"actions":
+           [those five slugs]}. Accepted. Then POST /close-case; the
+           response reports closed=true and returns the FLAG{...}.
+           Submit that value.
+      validator:
+        type: per_session_flag
