@@ -1,0 +1,338 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: dns-http-tls-operations
+  title: 'DNS, HTTP, and TLS operations'
+  version: 0.1.0
+  difficulty: easy
+  points: 130
+  estimated_minutes: 55
+  tags:
+    - dns
+    - http
+    - tls
+    - certificates
+spec:
+  track: linux-networking
+  summary: >-
+    Names, web traffic, and encryption make up most of what crosses a network
+    wire, so this module teaches the three as working systems rather than
+    acronyms. You follow resolution from your stub resolver down to
+    authoritative servers while reading record types and TTL behavior,
+    replay full HTTP transactions including redirects and cache headers from
+    the terminal, then inspect TLS handshakes and certificate chains until
+    expiry dates, SANs, and verification failures all become readable facts
+    instead of browser warnings.
+  objectives:
+    - Explain recursive versus authoritative roles during live DNS resolution.
+    - Read common DNS records and predict TTL-driven caching behavior.
+    - Replay HTTP transactions end to end with redirects, methods, and cache headers.
+    - Inspect TLS connections, chains, SANs, and expiry directly from the terminal.
+    - Recognize operational red flags such as dangling CNAMEs and mismatched certificates.
+    - Run safe name-and-web experiments against lab targets only.
+  sections:
+    - id: names-to-addresses
+      title: 'How names become addresses'
+      blocks:
+        - type: prose
+          markdown: |
+            DNS is a global delegation game, and understanding who answers
+            which question explains almost every name-related mystery you will
+            ever debug. Your machine asks a stub resolver, usually your
+            operating system's configured recursive, which does the legwork:
+            if nobody cached the answer, it queries a root server for the top
+            level domain, the TLD servers for the authoritative nameservers of
+            the specific domain, then those authoritative servers for the
+            record itself. Each level either answers definitively or points
+            one step closer. Recursion is the walking; authority is knowing.
+            Public resolvers simply perform the same walk for anyone and cache
+            aggressively.
+        - type: code
+          language: bash
+          code: |
+            $ dig +noall +answer example.test | tail -2
+            example.test. 300 IN A 203.0.113.10
+
+            $ dig +norecurse example.test @ns1.example-dns.test
+            ;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 4242
+            example.test. 300 IN A 203.0.113.10
+
+            $ dig example.test @1.1.1.1 | grep -E 'Query time|SERVER'
+            ;; Query time: 4 msec
+            ;; SERVER: 1.1.1.1#53(1.1.1.1)
+        - type: prose
+          markdown: >
+            The second query demonstrates authority directly: asking an
+            authoritative server with recursion disabled still returns the
+            record because that server owns the zone and needs no upstream
+            help. Analysts exploit role separation constantly during
+            investigations. Asking public resolvers reveals what strangers
+            see; querying authoritative servers directly bypasses caches to
+            read current truth; comparing both exposes propagation lag,
+            geo-steering, and manipulation. When malware resolves a domain to
+            one address while your workstation sees another, cache position,
+            not magic, is usually the explanation, and role-aware querying
+            proves it in minutes.
+        - type: callout
+          tone: info
+          markdown: >
+            Keep two reflexes for life: `dig +trace DOMAIN` shows the whole
+            delegation walk, and querying each layer separately locates exactly
+            where answers diverge.
+    - id: records-ttls-and-caching
+      title: 'Records, TTLs, and caching behavior'
+      blocks:
+        - type: prose
+          markdown: >
+            Record types are the vocabulary of investigations. A records map
+            names to IPv4 addresses, AAAA to IPv6, CNAME points names at other
+            names, MX lists mail handlers in priority order, TXT carries
+            arbitrary text that today mostly means SPF and domain verification,
+            NS delegates zones, and SOA holds zone metadata including the
+            negative-cache TTL. Every answer arrives stamped with a TTL in
+            seconds, and caches everywhere, your stub resolver, the corporate
+            recursive, public resolvers, honor it independently. Low TTLs
+            propagate changes fast but multiply query load; high TTLs calm
+            load but stretch migrations into hours of mixed answers.
+        - type: code
+          language: bash
+          code: |
+            $ dig +noall +answer example.test www.example.test
+            example.test.     3600 IN A     203.0.113.10
+            www.example.test. 300  IN CNAME example.test.
+
+            $ dig +short MX example.test
+            10 mail1.example.test.
+            20 mail2.example.test.
+
+            $ dig +noall +answer -x 203.0.113.10
+            10.113.0.203.in-addr.arpa. 86400 IN PTR mail1.example.test.
+        - type: prose
+          markdown: >
+            That output sketches a small but complete story: visiting
+            www costs two lookups because the CNAME adds a hop; mail flows to
+            mail1 first and fails over to mail2; reverse DNS for the address
+            confirms the mail host's identity, which strict receivers check
+            before accepting messages. Analysts read TTLs operationally too:
+            when hunting a domain that just switched infrastructure, cached
+            answers mean different clients see different servers for minutes
+            or hours, so evidence collected at one moment describes one view
+            of reality rather than all of them. Noting TTL alongside every
+            observed resolution keeps timelines honest.
+    - id: http-transactions-end-to-end
+      title: 'HTTP transactions end to end'
+      blocks:
+        - type: prose
+          markdown: |
+            HTTP rewards people who read it raw. A transaction is a request
+            line plus headers plus optional body, answered by a status line
+            plus headers plus body, and everything interesting for security
+            lives in those headers: redirects announce themselves in Location,
+            authentication state rides Set-Cookie flags, caching negotiates
+            through Cache-Control and ETag, and security posture shows in
+            headers like Strict-Transport-Security. Browsers hide this layer
+            behind convenience, so terminal tools remain the analyst's way to
+            see exactly what both parties said.
+        - type: code
+          language: bash
+          code: |
+            $ curl -sI http://example.test:8000/admin
+            HTTP/1.1 302 FOUND
+            Location: /login?next=/admin
+            Set-Cookie: session=eyJhbGciOi...; HttpOnly; Path=/
+            Cache-Control: no-store
+
+            $ curl -si -H 'Cookie: session=eyJhbGciOi...' \
+                http://example.test:8000/admin | head -3
+            HTTP/1.1 200 OK
+            Content-Type: text/html; charset=utf-8
+            Cache-Control: private
+
+            $ curl -s -o /dev/null -w '%{http_code} %{size_download}\n' \
+                http://example.test:8000/login
+            200 1843
+        - type: prose
+          markdown: >
+            Three requests taught four facts. Unauthenticated access bounces
+            to login while planting a session cookie, whose HttpOnly flag
+            blocks script theft even if its value format hints at JWTs worth
+            decoding later. The authenticated replay proves cookie possession
+            alone unlocks the admin surface, which is why session tokens rank
+            among the highest-value secrets anywhere. The final one-liner
+            introduces curl's format variables for scripted checks, turning
+            repeated probing into measurable output. None of this required a
+            browser, which matters when you must document behavior precisely
+            or automate verification across many endpoints.
+        - type: callout
+          tone: tip
+          markdown: >
+            Memorize three curl forms: -i to see headers, -I for HEAD probes,
+            and -w '%{http_code}' for scripts. They cover most daily needs.
+    - id: tls-what-the-handshake-proves
+      title: 'TLS and what the handshake proves'
+      blocks:
+        - type: prose
+          markdown: >
+            TLS wraps HTTP in three guarantees: the server's identity is
+            attested by a certificate chain reaching a trusted root, the
+            traffic is confidential against eavesdroppers, and tampering gets
+            detected. It says nothing about the server being honest software;
+            phishing sites hold perfectly valid certificates constantly,
+            because authorities vouch for domain control, not virtue. Reading
+            handshakes yourself keeps that boundary vivid. The client offers
+            protocol versions and cipher suites, the server chooses and
+            presents its chain, keys get agreed without ever crossing the
+            wire, and encrypted application data begins.
+        - type: code
+          language: bash
+          code: |
+            $ echo | openssl s_client -connect example.test:443 -servername example.test 2>/dev/null \
+                | openssl x509 -noout -subject -issuer -dates -ext subjectAltName
+            subject=CN = example.test
+            issuer=C = US, O = Let's Encrypt, CN = R11
+            notBefore=Aug  1 04:00:00 2026 GMT
+            notAfter=Oct 30 04:00:00 2026 GMT
+            X509v3 Subject Alternative Name:
+                DNS:example.test, DNS:www.example.test
+        - type: prose
+          markdown: >
+            Certificate inspection answers operational questions in seconds:
+            validity windows reveal lapses before browsers do, the issuer line
+            distinguishes public authorities from internal CAs whose roots
+            must exist in client trust stores, and SAN entries enumerate every
+            hostname the certificate covers, which occasionally surfaces
+            forgotten internal names worth knowing during scoping exercises.
+            Chain problems explain the classic partial-failure symptom where
+            curl succeeds but embedded devices fail: the server omitted
+            intermediate certificates, desktop browsers paper over the gap by
+            fetching missing links, stricter clients refuse, and `openssl
+            s_client` shows the incomplete list directly.
+        - type: quiz
+          question_id: dht-valid-cert-phish
+          question: 'A reported phishing page loads with a valid padlock and a certificate issued hours ago by a public authority for its lookalike domain. What does the padlock prove?'
+          options:
+            - id: a
+              text: 'The site is safe because authorities vet ownership and intent.'
+            - id: b
+              text: 'Only transport authenticity: you are encrypted talking to whoever controls that domain. It says nothing about honesty, and fresh issuance fits phishing playbooks.'
+            - id: c
+              text: 'The site passed human review within hours.'
+            - id: d
+              text: 'The certificate must be forged, since real issuance takes days.'
+          answer_ids: [b]
+          explanation: >
+            Certificates attest key control over a name, nothing about the
+            operator's character. Automated issuance makes same-day phishing
+            deployments routine, and fresh-certificate-plus-lookalike-domain
+            remains one of the strongest triage signals available. Teaching
+            users that padlocks equal safety was a decades-long industry
+            mistake; analysts should model the correct reading out loud.
+    - id: red-flags-in-names-and-web
+      title: 'Operational red flags'
+      blocks:
+        - type: prose
+          markdown: >
+            Certain configurations deserve immediate attention whenever
+            discovered, whether you wear attacker or defender hats. Dangling
+            CNAME records pointing at deprovisioned cloud resources invite
+            subdomain takeover, since anyone may claim the abandoned target
+            and start serving content under your trusted name. Wildcard
+            certificates pasted onto load balancers widen blast radius for any
+            key compromise. Open resolvers answering strangers amplify
+            reflection attacks and leak internal naming. Mixed content pages
+            loading scripts over plain HTTP undo TLS guarantees entirely,
+            because one modified script controls everything after it. Each
+            pattern has a cheap check and an expensive failure mode.
+        - type: code
+          language: bash
+          code: |
+            $ dig +short legacy.example.test
+            old-app.cloud-provider.example
+
+            $ dig +short old-app.cloud-provider.example
+            # (empty: target gone, record still points)
+
+            $ openssl s_client -connect example.test:443 </dev/null 2>/dev/null | grep -E 'Verify return'
+            Verify return code: 0 (ok)
+        - type: prose
+          markdown: >
+            The empty second answer is the takeover setup in miniature: a name
+            inside your zone delegating to infrastructure that now belongs to
+            nobody. Fixing costs one deleted or updated record; ignoring it
+            hands attackers your brand's credibility. The verification line
+            demonstrates the opposite health state, and building both checks
+            into periodic scans converts this section from trivia into a
+            recurring control, which is exactly how operations teams consume
+            security knowledge.
+    - id: safe-experiment-habits
+      title: 'Safe experiment habits'
+      blocks:
+        - type: prose
+          markdown: >
+            Everything in this module can be practiced safely, provided scope
+            discipline holds. Queries against public resolvers about domains
+            you do not own are passive reads and fine; port-knocking stranger
+            networks, scanning hosts outside your lab, or pointing experiment
+            traffic at employers' infrastructure crosses lines this platform
+            exists to teach you never to cross. Inside the range, break things
+            deliberately: lower TTLs and watch propagation, install a
+            self-signed certificate and read the resulting client errors,
+            add redirect loops and trace them with curl's verbose mode.
+            Failure states teach more than success states, and labs are the
+            only ethical place to collect them.
+        - type: quiz
+          question_id: dht-scope-discipline
+          question: 'You want to test whether a company you dislike leaves dangling CNAMEs. Which action stays within acceptable practice?'
+          options:
+            - id: a
+              text: 'Query their public DNS passively and report findings privately through their security contact.'
+            - id: b
+              text: 'Register the dangling target first so their traffic lands on your proof page.'
+            - id: c
+              text: 'Scan their whole address space for related weaknesses to strengthen the report.'
+            - id: d
+              text: 'Post the finding publicly to force remediation pressure.'
+          answer_ids: [a]
+          explanation: >
+            Passive observation plus responsible disclosure respects both law
+            and impact. Taking over the name, expanding scanning beyond the
+            original question, or shaming publicly all exceed authorization
+            regardless of intention, converting a good deed into the kind of
+            story that ends careers. Range platforms like this one exist so
+            aggressive curiosity has somewhere legal to live.
+        - type: prose
+          markdown: >
+            With names, web mechanics, and TLS readable from your terminal,
+            the next module puts eyes on the wire itself: capture workflows,
+            stream reconstruction, tunneling concepts, and the pivoting theory
+            that explains how attackers turn one foothold into network-wide
+            reach. If you want a warm-up target meanwhile, the busted-login
+            room exercises header and cookie fluency directly, and first-shell
+            rewards the layered diagnosis method from earlier modules.
+  cheat_sheet: |
+    # DNS, HTTP, TLS operations
+
+    Resolution roles:
+        stub -> recursive (does legwork) -> root/tld/authoritative
+        dig +trace shows full delegation walk
+
+    Records quick table:
+        A/AAAA addr | CNAME alias | MX mail prio | TXT spf/verify
+        NS delegate | SOA zone meta | PTR reverse
+
+    TTL rule:
+        caches honor per-record TTL; note TTL beside observations
+
+    curl patterns:
+        -i show headers | -I HEAD probe | -L follow | -w '%{http_code}'
+        redirects: Location header; sessions: Set-Cookie flags
+
+    openssl essentials:
+        s_client -connect H:443 -servername H
+        x509 -noout -subject -issuer -dates -ext subjectAltName
+        Verify return code 0 = chain ok
+
+    Red flags:
+        dangling CNAME => takeover risk
+        open resolver, wildcard certs, mixed content
+        valid cert != honest site

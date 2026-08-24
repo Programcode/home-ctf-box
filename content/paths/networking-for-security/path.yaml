@@ -1,0 +1,32 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: networking-for-security
+  title: 'Networking for Security'
+  version: 0.1.0
+  difficulty: easy
+  points: 450
+  estimated_minutes: 225
+  tags:
+    - networking
+    - tcp-ip
+    - subnetting
+    - dns
+    - wireshark
+    - pivoting
+spec:
+  track: linux-networking
+  summary: >-
+    Security tools assume you already speak networking, so this path teaches
+    the language properly. You walk packets through the TCP/IP stack, watch a
+    real handshake change states in ss, do subnetting math at whiteboard
+    speed, read routing tables the way the kernel does, follow DNS from your
+    resolver down to the authoritative server, and inspect HTTP and TLS until
+    redirects and certificate chains stop being surprises. A Wireshark
+    workflow turns captures into answers, tunneling concepts explain what VPN
+    traffic really is, and pivoting theory shows how attackers chain network
+    positions and where defenders see the chains.
+  modules:
+    - slug: tcpip-routing-subnetting
+    - slug: dns-http-tls-operations
+    - slug: wireshark-tunneling-pivoting

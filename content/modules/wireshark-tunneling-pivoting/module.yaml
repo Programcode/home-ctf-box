@@ -1,0 +1,335 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: wireshark-tunneling-pivoting
+  title: 'Wireshark methodology, tunneling, and pivoting theory'
+  version: 0.1.0
+  difficulty: medium
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - wireshark
+    - tshark
+    - vpn
+    - pivoting
+spec:
+  track: linux-networking
+  summary: >-
+    Captures turn networking from theory into evidence, and this module gives
+    you a working method instead of a toolbar tour. You build capture
+    workflows around filters that answer questions, reconstruct application
+    conversations through stream following, learn what VPNs and tunnels really
+    do including split-tunnel tradeoffs, fingerprint common covert tunnels in
+    otherwise boring traffic, and finish with pivoting theory: how attackers
+    chain positions across network boundaries and which traces the hopping
+    leaves behind for defenders who know where to look.
+  objectives:
+    - Build capture workflows using capture and display filters for specific questions.
+    - Reconstruct conversations with follow-stream analysis and protocol decode.
+    - Explain VPN models, tunneling mechanics, and split-tunnel tradeoffs.
+    - Fingerprint DNS and ICMP tunneling plus beaconing rhythms in captures.
+    - Reason about pivoting chains, proxy hops, and their observable side effects.
+    - Capture responsibly under scope, privacy, and storage constraints.
+  sections:
+    - id: capture-workflow-and-filters
+      title: 'Capture workflow and filters'
+      blocks:
+        - type: prose
+          markdown: |
+            Good capture work starts before any packet flies. Decide the
+            question first: which host, which timeframe, which interface,
+            and whether you need full payloads or just headers, because those
+            choices set filter syntax and file size. Wireshark separates two
+            filter worlds that beginners constantly conflate. Capture filters
+            use BPF syntax at the kernel level and decide what gets recorded;
+            they are cheap but unforgiving, since discarded packets return
+            never. Display filters use Wireshark's richer language after the
+            fact and decide what gets shown; they cost nothing to change.
+            Record broadly inside scope, then slice with display filters.
+        - type: code
+          language: bash
+          code: |
+            $ sudo tcpdump -i eth0 -w /tmp/cap.pcap 'host 10.20.4.9' &
+            $ curl -s http://10.20.4.9:8000/ >/dev/null; sleep 0.3; pkill tcpdump
+
+            $ tshark -r /tmp/cap.pcap -Y 'http.request.method == "GET"' \
+                -T fields -e frame.number -e ip.src -e http.host -e http.request.uri
+            4   10.20.4.100   10.20.4.9   /
+            8   10.20.4.100   10.20.4.9   /admin
+
+            $ capinfos /tmp/cap.pcap | grep -E 'Number of packets|Capture duration'
+            Number of packets = 14
+            Capture duration = 0 seconds
+        - type: prose
+          markdown: >
+            The pipeline shown is the daily driver of every network analyst:
+            record with a scoped BPF expression, interrogate with display
+            filters projected into columns via tshark's fields mode, and
+            describe the whole file with capinfos so reports can state exactly
+            what evidence exists. Learning ten display filter primitives
+            covers most triage: comparisons on any field, membership sets,
+            logical operators, and protocol presence checks. Everything else
+            is lookup, since field names follow the protocol tree visible in
+            the GUI, meaning you never memorize blindly; you click a packet,
+            find the interesting field, and read its name straight off the
+            tree.
+    - id: following-the-conversation
+      title: 'Following the conversation'
+      blocks:
+        - type: prose
+          markdown: >
+            Individual packets lie by omission; conversations tell truth.
+            TCP reassembles segments into ordered byte streams, and Wireshark's
+            follow feature prints them as readable transcripts, optionally
+            filtered to one direction or rendered per protocol. This single
+            move converts captures into stories: login exchanges become
+            visible with credentials where TLS does not intervene, API calls
+            reveal their parameters, and malware check-ins show their exact
+            request grammar. When encrypted, the same feature still teaches,
+            because handshake metadata, certificate details, and timing all
+            remain legible even while payloads stay opaque.
+        - type: code
+          language: bash
+          code: |
+            $ tshark -r /tmp/cap.pcap -q -z follow,tcp,ascii,0 | head -12
+            GET / HTTP/1.1
+            Host: 10.20.4.9:8000
+            User-Agent: curl/8.5.0
+            Accept: */*
+
+            HTTP/1.1 200 OK
+            Content-Type: text/html; charset=utf-8
+            Content-Length: 2318
+
+            <!doctype html>
+        - type: prose
+          markdown: >
+            Stream zero printed as ASCII shows both directions interleaved
+            with direction markers, which is how you verify claims quickly:
+            did the client actually send that header, did the server truly
+            answer 200, how large was each body. Protocol-specific decodes go
+            further, reassembling HTTP bodies into files exportable directly
+            from captures, a technique that recovers malware samples and
+            exfiltrated documents alike during investigations. The habit to
+            build now: whenever a summary statistic looks suspicious, drop
+            into the underlying conversation and read it before believing the
+            aggregate, because tools misclassify and streams do not.
+        - type: callout
+          tone: tip
+          markdown: >
+            In the GUI, right-click any packet then Follow, then TCP Stream.
+            On the CLI, `-z follow,tcp,ascii,N` where N is the stream index.
+    - id: vpn-and-tunnel-concepts
+      title: 'VPN and tunnel concepts'
+      blocks:
+        - type: prose
+          markdown: >
+            A tunnel wraps packets inside other packets so networks accept
+            traffic they would otherwise refuse or cannot understand. VPNs are
+            tunnels with identity attached: WireGuard exchanges keys
+            aggressively and hides almost everything behind UDP with minimal
+            handshake noise; OpenVPN runs over TCP or UDP with more visible
+            negotiation; IPsec operates closer to the kernel with two modes
+            separating transport protection from full gateway-to-gateway
+            encapsulation. Split tunneling decides scope: send everything
+            through the corporate path for maximum control and visibility, or
+            route only internal destinations for performance, accepting that
+            endpoints browse the internet outside your telemetry. That
+            tradeoff is a security decision disguised as a performance one.
+        - type: prose
+          markdown: >
+            Recognizing tunnels matters to both sides of the house. Defenders
+            inventory them because every tunnel is a policy boundary crossing
+            that deserves documentation; attackers build them wherever egress
+            filtering permits only some protocols, dressing forbidden traffic
+            as permitted wrappers. The wrapper insight generalizes beyond
+            VPNs: SSH port forwards, SOCKS proxies over SSH, HTTPS CONNECT
+            methods, and cloud mesh overlays are all the same concept wearing
+            different uniforms, payload inside carrier with trust decided at
+            the ends. Once you see tunnels this way, firewall rules read
+            differently too, since permitting a protocol means permitting
+            everything that can hide inside it.
+        - type: quiz
+          question_id: wtp-split-tunnel-tradeoff
+          question: 'A company switches remote workers from full-tunnel to split-tunnel VPN. Which consequence should security review first?'
+          options:
+            - id: a
+              text: 'Employee devices now reach the internet outside corporate telemetry, shrinking visibility into browser-based threats.'
+            - id: b
+              text: 'VPN authentication will stop working entirely.'
+            - id: c
+              text: 'Internal applications become unreachable from home networks.'
+            - id: d
+              text: 'Encryption strength decreases because fewer packets get wrapped.'
+          answer_ids: [a]
+          explanation: >
+            Split tunneling leaves internet-bound traffic outside the tunnel,
+            outside corporate DNS filtering, logging, and inspection. Internal
+            routes keep working, authentication stays intact, and per-packet
+            encryption strength is unchanged; the real cost is visibility, and
+            the review question is whether endpoint protections compensate for
+            what the tunnel no longer sees.
+    - id: spotting-covert-tunnels
+      title: 'Spotting covert tunnels'
+      blocks:
+        - type: prose
+          markdown: >
+            Covert tunnels borrow quiet protocols as carriers, and each
+            borrowing leaves fingerprints. DNS tunneling encodes payloads into
+            subdomain labels, producing lookups with long random-looking
+            names, unusual query types like TXT against non-mail domains, and
+            volume per client wildly unlike normal name service. ICMP
+            tunneling pads echo requests past their usual payload sizes.
+            Beaconing reveals itself statistically regardless of wrapper:
+            machines talk with metronome regularity humans never produce.
+            None of these survive scrutiny well, which is exactly why
+            detection focuses on shape rather than content.
+        - type: code
+          language: bash
+          code: |
+            $ tshark -r dns.pcap -Y 'dns.qry.type == 16' \
+                -T fields -e frame.time_epoch -e dns.qry.name | head -3
+            1787464001.2  aGVsbG8.dns-tun.example
+            1787464003.8  d29ybGQ.dns-tun.example
+            1787464006.1  ZXhmaWx0.dns-tun.example
+
+            $ python3 -c "import base64; print(base64.b64decode('aGVsbG8=').decode())"
+            hello
+        - type: prose
+          markdown: >
+            Three TXT queries whose subdomains base64-decode into words make
+            the diagnosis trivial once displayed, and real cases follow the
+            same recipe at scale: group by client, measure label entropy and
+            length distributions, compare against baseline name-service
+            behavior, then read decoded samples to confirm intent. Defenders
+            deploy the identical logic as scheduled detections over resolver
+            logs, no capture infrastructure required. The lesson underneath
+            the technique: protocols carry expectations about shape, and
+            violating expectations is detectable even when contents stay
+            unreadable, a principle that will outlast every specific tool
+            mentioned here.
+    - id: pivoting-theory
+      title: 'Pivoting theory'
+      blocks:
+        - type: prose
+          markdown: >
+            Pivoting describes turning access to one machine into reach across
+            its neighbors, the difference between owning a host and owning a
+            network segment. The mechanics chain familiar pieces: a foothold
+            becomes a relay when you forward ports through it, spawn SOCKS
+            proxies over SSH, or run tooling on the compromised box itself so
+            scans originate internally where trust runs higher. Each hop moves
+            the attacker's apparent origin, which is why perimeter-centric
+            thinking fails modern environments. Theory matters here more than
+            commands, because platforms vary, but the questions stay constant:
+            what can this position reach, what would the next position grant,
+            and what traces does transiting leave on both boxes.
+        - type: code
+          language: bash
+          code: |
+            # from workstation, via foothold web01 (SSH available):
+            $ ssh -D 1080 dev@web01
+            $ proxychains4 nmap -sT -Pn 10.30.0.0/24 --top-ports 50 2>/dev/null | tail -3
+            Nmap done: 256 IP addresses (12 hosts up) scanned
+
+            # defender view on web01 during the same activity:
+            $ ss -tn state established '( dport = :22 )' | head -3
+            ESTAB 10.20.4.100:52814  10.20.4.9:22
+            ESTAB 127.0.0.1:1080->10.30.x.y flows appear as web01-originated
+        - type: prose
+          markdown: >
+            Read both halves together and the defender lesson emerges: scans
+            arriving from an idle jump host, new outbound sessions from
+            servers that normally speak only to databases, and proxy listeners
+            binding locally all mark pivoting activity hours before payloads
+            land elsewhere. Attackers compress these signals with care;
+            defenders catch careless ones constantly. For lab practice, the
+            knock-knock room hides reachable surfaces behind port-knocking
+            sequences that reward precisely this reach-versus-trace reasoning,
+            and packet-diary grades your capture methodology end to end
+            against artifacts shaped like real incidents.
+        - type: quiz
+          question_id: wtp-pivot-fingerprint
+          question: 'A database server that historically connects only to its app tier starts initiating hundreds of short sessions across its whole local subnet. Which interpretation best fits pivoting behavior?'
+          options:
+            - id: a
+              text: 'Normal database replication traffic.'
+            - id: b
+              text: 'Someone likely runs discovery or scanning from the database host itself, a classic post-foothold pattern worth escalating immediately.'
+            - id: c
+              text: 'A routing change redirected background updates through it.'
+            - id: d
+              text: 'Nothing actionable until payloads are decrypted.'
+          answer_ids: [b]
+          explanation: >
+            Role drift is the pivot signature: machines suddenly behaving like
+            workstations deserve immediate scrutiny, especially quiet
+            infrastructure roles. Replication follows predictable peers,
+            routing changes have tickets, and waiting for decodable payloads
+            ignores that behavior alone already justifies escalation. Baseline
+            knowledge turns simple connection summaries into detections, which
+            is why defenders document normal before hunting abnormal.
+    - id: responsible-capture-practice
+      title: 'Responsible capture practice'
+      blocks:
+        - type: prose
+          markdown: >
+            Captures are surveillance instruments, so professionalism means
+            scoping them like any powerful tool. Capture only on networks and
+            hosts within your authorization, because recording others' traffic
+            violates law and trust identically whether malice was intended.
+            Minimize retention: ring buffers bound disk usage automatically,
+            and deleting raw captures on schedule protects bystanders whose
+            passwords, tokens, and personal data ride unencrypted protocols
+            more often than anyone expects. Where possible capture metadata
+            rather than content, since flow records answer capacity and
+            rhythm questions without storing payloads at all.
+        - type: code
+          language: bash
+          code: |
+            $ sudo dumpcap -i eth0 -b filesize:51200 -b files:20 \
+                -w /tmp/ring/cap.pcapng 'net 10.20.4.0/24'
+            $ ls /tmp/ring | head -3; du -sh /tmp/ring
+            cap_20260823_00001_00001.pcapng
+            ...
+            1.0G    /tmp/ring   # hard ceiling reached, oldest rotates out
+        - type: prose
+          markdown: >
+            Twenty rotating fifty-megabyte files cap evidence at a gigabyte
+            forever, which converts an open-ended privacy liability into a
+            bounded operational artifact. Redaction before sharing completes
+            the discipline: strip or anonymize addresses and credentials when
+            publishing examples, teach teammates the same defaults, and write
+            the scope statement down before starting rather than defending it
+            afterward. Analysts who treat captures casually eventually capture
+            something someone cares about deeply, and by then the habit gap is
+            the story. Range labs let you practice everything aggressive about
+            this module while the ethics stay transferable to production
+            networks unchanged.
+  cheat_sheet: |
+    # Wireshark, tunneling, pivoting
+
+    Workflow:
+        1 question -> 2 scoped BPF capture -> 3 display-filter slicing
+        capture filter (BPF, kernel): host/net/port
+        display filter (post): ip.addr==X && tcp.port==Y
+
+    Daily drivers:
+        tcpdump -i IF -w FILE 'BPF'
+        tshark -r FILE -Y 'filter' -T fields -e f1 -e f2
+        tshark -r FILE -q -z follow,tcp,ascii,N
+        capinfos FILE
+
+    Tunnel fingerprints:
+        dns txt + long high-entropy labels per client
+        icmp oversize payloads; steady periodic beacons
+        ssh -D socks, port forwards, CONNECT proxies
+
+    Pivoting signs:
+        role drift: servers acting like scanners
+        local proxy listeners, odd origination points
+        ask: reach? next hop grants? traces left?
+
+    Responsibility:
+        scope written first; ring buffers cap retention
+        prefer metadata-only; redact before sharing

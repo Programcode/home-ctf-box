@@ -1,0 +1,33 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: soc-analyst-1
+  title: 'SOC Analyst I'
+  version: 0.1.0
+  difficulty: easy
+  points: 400
+  estimated_minutes: 210
+  tags:
+    - soc
+    - siem
+    - triage
+    - logs
+    - phishing
+spec:
+  track: defense-cloud
+  summary: >-
+    Alerts are where defensive security becomes real work. This path builds
+    the triage mindset first: decide fast, verify before escalating, write it
+    all down. You learn where logs come from and how syslog, Windows event
+    streams, JSON, and CEF differ, what a SIEM actually does between raw
+    collection and a page to your screen, and how to work network connection,
+    web attack, and phishing alerts with repeatable playbooks. Case notes get
+    the same care as findings, because an investigation another analyst cannot
+    follow might as well not have happened.
+  modules:
+    - slug: siem-alert-triage
+    - slug: log-sources-and-formats
+    - slug: alert-investigation-playbooks
+  capstones:
+    - packet-diary
+    - knock-knock

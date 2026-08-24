@@ -1,0 +1,34 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: linux-privilege-escalation
+  title: 'Linux Privilege Escalation'
+  version: 0.1.0
+  difficulty: medium
+  points: 500
+  estimated_minutes: 240
+  tags:
+    - privesc
+    - linux
+    - sudo
+    - suid
+    - capabilities
+    - containers
+spec:
+  track: linux-networking
+  summary: >-
+    A low-privilege shell is a starting position, not a finish line. This path
+    teaches you to enumerate a Linux box methodically instead of guessing, to
+    read permission bits, SUID and SGID binaries, and file capabilities until
+    anomalies jump out of the noise, and to audit sudo rules, cron jobs,
+    systemd services, and container boundaries for the gaps that turn a user
+    shell into a root one. You close in two hands-on rooms: sudo-side-door,
+    where one careless sudo rule opens the way, and suid-story, where an
+    overlooked binary tells its whole story.
+  modules:
+    - slug: privesc-enumeration-methodology
+    - slug: suid-sgid-capabilities
+    - slug: sudo-services-containers
+  capstones:
+    - sudo-side-door
+    - suid-story

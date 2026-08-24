@@ -1,0 +1,332 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: log-sources-and-formats
+  title: 'Log sources and formats for analysts'
+  version: 0.1.0
+  difficulty: easy
+  points: 130
+  estimated_minutes: 55
+  tags:
+    - logs
+    - syslog
+    - windows-events
+    - json
+    - timestamps
+spec:
+  track: defense-cloud
+  summary: >-
+    Every investigation is only as good as the logs behind it, and logs arrive
+    speaking a dozen dialects. This module maps where useful records actually
+    come from across Linux, Windows, network gear, and applications, then
+    teaches you to read the formats themselves: syslog priorities, structured
+    JSON and CEF, and the Windows event IDs that carry most triage weight. A
+    full section on timestamps, time zones, and clock skew saves you from the
+    single most common analytical mistake in the field.
+  objectives:
+    - Inventory log sources on Linux, Windows, network devices, and applications.
+    - Decode syslog facility, severity, and format details directly from raw lines.
+    - Parse structured JSON and CEF events without corrupting fields or timestamps.
+    - Interpret the Windows event IDs that matter most during alert triage.
+    - Normalize timestamps across ISO 8601, epoch time, and clock skew confidently.
+    - Choose between grep, jq, journalctl, and query pipelines for each task.
+  sections:
+    - id: where-logs-come-from
+      title: 'Where logs come from'
+      blocks:
+        - type: prose
+          markdown: |
+            Before reading any line, know who wrote it and why it exists. On
+            Linux, the kernel and services write through syslog or journald,
+            authentication lands in auth.log or secure, package managers,
+            cron, and sudo all keep their own trails, and web servers append
+            access logs in a format chosen decades ago. Windows centralizes
+            nearly everything in the event log with distinct channels:
+            Security for audit policy events, System for service health,
+            Sysmon's custom channel when someone deployed it deliberately.
+            Network devices emit firewall session records, DNS resolver
+            queries, and VPN authentications. Applications add their own
+            streams shaped by whichever framework their authors preferred.
+        - type: prose
+          markdown: |
+            Two properties decide how much help a source will be during an
+            incident. Coverage asks whether the events you will need were ever
+            recorded; an environment without command-line auditing simply has
+            nothing to say about what an attacker typed. Retention asks how
+            long answers survive before rotation deletes them; thirty days of
+            auth logs cannot explain activity from last quarter. Analysts ask
+            both questions per source, early, because discovering mid-case
+            that the channel you needed most had a two-day retention window
+            turns an investigation into an apology. Knowing your estate's logging map
+            before trouble starts is quiet, unglamorous preparation that pays
+            for itself every single incident.
+        - type: callout
+          tone: tip
+          markdown: >
+            Keep a personal inventory table for each environment you defend:
+            source, transport, format, retention, owner. Filling one unknown
+            row per week beats reconstructing the whole table at 2 a.m.
+    - id: syslog-facilities-and-priorities
+      title: 'Syslog facilities and priorities'
+      blocks:
+        - type: prose
+          markdown: |
+            Syslog is the oldest common language on Unix systems and still the
+            one most devices speak. Each message carries a PRI value that packs
+            two numbers together: facility times eight plus severity.
+            Facilities name the origin family, with kern at 0, mail at 2,
+            auth at 4, daemon at 3, and local0 through local7 reserved for site
+            use. Severities run from 0 emergency down through error at 3,
+            warning at 4, informational at 6, to 7 debug. Decode PRI 34 by
+            dividing: 34 divided by 8 gives facility 4 (auth) remainder 2,
+            which is severity info. That arithmetic appears on job interviews
+            and in real parser debugging sessions alike.
+        - type: code
+          language: bash
+          code: |
+            $ logger -p auth.warning "test message from module"
+            $ tail -1 /var/log/auth.log
+            Aug 23 13:02:11 web01 dev: test message from module
+
+            $ journalctl -u ssh --since -10m --no-pager | tail -3
+            Aug 23 12:55:03 web01 sshd[9181]: Failed password for admin from 203.0.113.7 port 51444 ssh2
+            Aug 23 12:55:07 web01 sshd[9181]: Failed password for admin from 203.0.113.7 port 51444 ssh2
+            Aug 23 12:56:40 web01 sshd[9183]: Accepted password for dev from 198.51.100.4 port 51998 ssh2
+
+            $ printf '%d\n' $(( 4 * 8 + 6 ))
+            38
+        - type: prose
+          markdown: >
+            The auth.log excerpt reads like a tiny story once formatting stops
+            being noise: two failed attempts against account admin from one
+            address, then a successful login for a different account from a
+            different address four minutes later. Whether those facts connect
+            is exactly the question correlation rules exist to ask. Notice too
+            what the lines omit: no country, no user agent, no outcome beyond
+            accept or fail. Knowing what your sources do not record prevents
+            confident conclusions built on absent data, which remains the most
+            professional-sounding way to be wrong in this field.
+        - type: prose
+          markdown: >
+            Severity fields deserve respectful skepticism. Application authors
+            mark almost everything informational regardless of importance, and
+            some mark errors as warnings out of optimism. Treat severities as
+            claims by the sender rather than measurements by the platform, and
+            build detection logic around event meaning rather than label text
+            wherever you can.
+    - id: structured-json-and-cef
+      title: 'Structured JSON and CEF'
+      blocks:
+        - type: prose
+          markdown: >
+            Structured formats trade human brevity for machine reliability.
+            Instead of hoping a regex splits the right words, each event ships
+            named fields ready for filtering and aggregation. JSON dominates
+            cloud and application logging, and jq is its universal pocketknife.
+            ArcSight's Common Event Format survives in enterprise tooling,
+            encoding extension fields as key=value pairs prefixed with short
+            codes such as src for source address and suser for source user.
+            Both reward the same discipline: inspect real samples before
+            writing parsers, because vendor documentation lags vendor reality.
+        - type: code
+          language: bash
+          code: |
+            $ cat auth-event.json | jq '{user: .user.name, ip: .source.ip, action}'
+            {
+              "user": "admin",
+              "ip": "203.0.113.7",
+              "action": "ssh_login_failure"
+            }
+
+            $ journalctl -u app -o json --no-pager | jq -r '.MESSAGE' | head -2
+
+            $ cat cef-sample.txt
+            CEF:0|Security|gateway|1.0|100|Blocked connection|5|src=10.20.4.9
+            dst=203.0.113.7 suser=dev requestContext=login cs1Label=rule cs1=geo-block
+        - type: prose
+          markdown: >
+            The jq projection shows the analyst superpower structured formats
+            enable: asking exactly three questions of a million events and
+            getting exactly three columns back, fast. The CEF sample decodes
+            to a blocked connection from our recurring internal host toward
+            the external address we have been watching, enforced by a rule the
+            vendor labels geo-block, with severity five. When ingestion breaks
+            such formats, symptoms include empty aggregations and alerts whose
+            fields read undefined, which is your cue to compare live samples
+            against parser expectations rather than blaming the detection
+            logic downstream.
+    - id: windows-event-ids-that-matter
+      title: 'Windows event IDs that matter'
+      blocks:
+        - type: prose
+          markdown: >
+            Windows Security auditing emits thousands of possible IDs, and
+            triage lives comfortably inside about twenty of them. Logon events
+            anchor nearly everything: 4624 records success, 4625 failure, with
+            subtypes called logon types that distinguish interactive console
+            sign-ins (type 2), network logons (type 3), batch jobs (type 4),
+            and the notorious type 9 used by credential-injection tricks.
+            Process creation arrives as 4688 whenever command-line auditing is
+            enabled, service installations as 7045, account lockouts as 4740,
+            and audit-log clearing as 1102, an event whose mere presence
+            usually means someone has something to hide.
+        - type: code
+          language: powershell
+          code: |
+            PS> Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625} -MaxEvents 3 |
+                Select-Object TimeCreated,
+                  @{n='User';e={$_.Properties[5].Value}},
+                  @{n='Workstation';e={$_.Properties[13].Value}} | Format-Table
+
+            TimeCreated           User     Workstation
+            -----------           ----     -----------
+            08/23/2026 09:41:02   svc-web  WEB01
+            08/23/2026 09:41:05   svc-web  WEB01
+            08/23/2026 09:41:09   admin    UNKNOWN
+
+            PS> Get-WinEvent -FilterHashtable @{LogName='Security'; Id=1102} -MaxEvents 1 |
+                Format-List TimeCreated, Message
+        - type: prose
+          markdown: >
+            Read the sample output as a tier-one analyst would. Three failures
+            within seven seconds against two accounts, one from a workstation
+            name that does not resolve cleanly, is textbook credential
+            spraying rhythm, and the property-index extraction demonstrates a
+            practical truth about Windows events: fields live positionally,
+            so verifying index positions against a known-good sample beats
+            trusting memory. Running the second query, even returning zero
+            rows, proves you checked whether logs were cleared, and writing
+            that check into case notes converts absence of evidence into
+            documented diligence.
+        - type: quiz
+          question_id: lsf-windows-4624-type3
+          question: 'A 4624 success event shows Logon Type 3 for a domain account. What does type 3 tell you?'
+          options:
+            - id: a
+              text: 'Someone signed in interactively at the console.'
+            - id: b
+              text: 'The authentication arrived over the network, typical of SMB shares, remote APIs, and pass-the-hash style access.'
+            - id: c
+              text: 'A scheduled task ran under that account.'
+            - id: d
+              text: 'The account was just unlocked by a helpdesk tool.'
+          answer_ids: [b]
+          explanation: >
+            Logon type 3 marks network logons, which never involve the console
+            and therefore carry no interactive session. It is the normal type
+            for file share access and API authentication and simultaneously
+            the signature of lateral movement techniques that authenticate
+            without logging in properly. Interpreting types correctly changes
+            both what the event means and what you hunt next.
+    - id: timestamps-timezones-and-skew
+      title: 'Timestamps, time zones, and skew'
+      blocks:
+        - type: prose
+          markdown: >
+            Timeline errors begin as timestamp errors, and timestamp errors
+            begin as unit confusion. Learn the three representations until
+            conversion feels boring. ISO 8601 strings such as
+            2026-08-23T09:41:02Z sort lexically and state their zone openly;
+            the trailing Z means UTC, while explicit offsets like +02:00 name
+            Budapest summer time. Epoch values count seconds since 1970-01-01
+            UTC and dominate system logs; millisecond epochs appear throughout
+            browser and cloud telemetry and differ from seconds by three
+            digits, a difference worth double-checking because misreading it
+            scatters events years into the future. Localized formats such as
+            23/08/2026 vary by locale and deserve immediate normalization.
+        - type: code
+          language: bash
+          code: |
+            $ date -u -d @1787463662 '+%Y-%m-%dT%H:%M:%SZ'
+            2026-08-23T09:41:02Z
+
+            $ date -u -d '2026-08-23T09:41:02Z' '+%s'
+            1787463662
+
+            $ TZ=Europe/Budapest date -d '2026-08-23T09:41:02Z' '+%H:%M %Z'
+            11:41 CEST
+        - type: prose
+          markdown: >
+            Clock skew is the subtler hazard: different machines disagree
+            about now, sometimes by minutes, because NTP is broken somewhere
+            nobody owns. Symptoms include attack steps appearing to precede
+            their causes and correlation windows that mysteriously miss.
+            Handle skew by recording each source's offset once you detect it,
+            shifting timelines explicitly, and noting the adjustment in case
+            notes so reviewers can recompute everything. Never silently edit
+            raw timestamps; annotate instead, because provenance matters more
+            than tidiness when findings face hostile review.
+        - type: callout
+          tone: warning
+          markdown: >
+            Before declaring any cross-host timeline impossible, check for
+            skew. An attacker landing before they connected is usually your
+            infrastructure lying politely about what time it thinks it is.
+    - id: choosing-your-toolkit
+      title: 'Choosing your toolkit'
+      blocks:
+        - type: prose
+          markdown: >
+            Tool choice follows task shape. Grep excels at quick existence
+            checks across flat files and stays readable at small scale.
+            journalctl speaks journald natively, filtering by unit, boot, and
+            time without touching files by hand. jq owns structural questions
+            over JSON streams, and query languages such as KQL or SPL take
+            over when volume makes local tools irrelevant and aggregation
+            becomes the point. The mistake to avoid is loyalty: analysts who
+            force one tool everywhere waste hours that curiosity about the
+            next tool would have saved.
+        - type: quiz
+          question_id: lsf-tool-selection
+          question: 'You must count failed SSH logins per source IP over 30 days across 40 hosts whose auth logs already stream into a central store. Which tool fits best?'
+          options:
+            - id: a
+              text: 'grep piped to wc on each host, results merged by hand.'
+            - id: b
+              text: 'The SIEM query language, grouping failures by source IP over the window.'
+            - id: c
+              text: 'jq, because the pipeline stores JSON.'
+            - id: d
+              text: 'Opening representative files in a spreadsheet.'
+          answer_ids: [b]
+          explanation: >
+            Aggregation over many hosts and a fixed window is precisely what
+            centralized query engines exist for; local shells lose the moment
+            scale crosses hosts. jq would shine if you needed structural
+            reshaping of individual events, and grep remains king for one-off
+            checks, but neither competes with server-side group-bys here.
+        - type: prose
+          markdown: >
+            Whatever the tool, keep outputs honest: save the exact query with
+            the results it produced, note the time range in UTC, and record
+            row counts alongside summaries so a reviewer can rerun the math.
+            Those habits, applied to the formats this module taught, make the
+            playbooks in the next module feel natural, and they are exactly
+            the muscles the packet-diary room exercises against real capture
+            artifacts.
+  cheat_sheet: |
+    # Log sources and formats
+
+    Source map:
+        linux:  auth.log/secure, journald, cron, sudo, access logs
+        win:    Security (4624/4625/4688/7045/4740/1102), Sysmon
+        net:    fw sessions, dns resolver, vpn auth
+        app:    framework-specific, often JSON
+
+    Syslog PRI = facility*8 + severity
+        facilities: kern0 mail2 auth4 daemon3 local0-7(16-23)
+        severities: emerg0 alert1 crit2 err3 warning4 notice5 info6 debug7
+
+    Structured:
+        jq '.field' file.json       project fields
+        CEF header: CEF:Version|Vendor|Product|DevVer|SigID|Name|Sev|
+        extension keys: src dst suser request cs1...
+
+    Timestamps:
+        ISO8601 Z == UTC; +02:00 == Budapest summer
+        epoch s vs ms: digit-count check first
+        date -u -d @SECS '+%Y-%m-%dT%H:%M:%SZ'
+
+    Skew rule:
+        measure per-source offset once, annotate timelines,
+        never rewrite raw timestamps silently

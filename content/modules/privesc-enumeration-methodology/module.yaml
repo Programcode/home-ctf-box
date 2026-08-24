@@ -1,0 +1,309 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: privesc-enumeration-methodology
+  title: 'Privilege escalation enumeration methodology'
+  version: 0.1.0
+  difficulty: medium
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - linux
+    - privesc
+    - enumeration
+    - methodology
+spec:
+  track: linux-networking
+  summary: >-
+    Most failed privilege escalations are not failures of skill. They are
+    failures of method. This module gives you a repeatable enumeration pass
+    for a Linux box: system basics first, then users and processes, then the
+    classic quick-win checks, and only then deep dives. You learn to separate
+    promising findings from dead ends before you sink an hour into either,
+    how to run automation such as linpeas without trusting it blindly, and how
+    to turn raw output into a prioritized action list you would defend in a
+    report.
+  objectives:
+    - Run a structured local enumeration pass and record evidence in priority order.
+    - Classify findings as quick wins or long shots before spending time on them.
+    - Read kernel version, distro release, and package lists to shortlist known issues safely.
+    - Enumerate users, groups, processes, and scheduled work with low-noise commands.
+    - Use linpeas-style automation while hand-verifying every claim it makes.
+    - Convert raw enumeration output into a prioritized action list.
+  sections:
+    - id: why-method-beats-luck
+      title: 'Why method beats luck'
+      blocks:
+        - type: prose
+          markdown: |
+            Watch ten beginners land their first shell on a Linux target and you
+            will see the same ritual: they type `sudo -l`, poke at /etc/passwd,
+            maybe run one downloaded script, and then stall when nothing screams
+            root-me-now. The problem is rarely missing knowledge. It is missing
+            order. Enumeration done well is a sweep of the same ground every
+            time, in the same priority order, with notes that tell you what you
+            already ruled out. Done badly it is a random walk through commands
+            you half remember from writeups.
+
+            Method matters for three reasons. First, boxes reward coverage: the
+            misconfiguration that yields root is often boring, like a writable
+            cron script hiding between interesting-looking files. Second,
+            method produces evidence as a side effect, which is exactly what
+            your final report needs. Third, a fixed sequence is faster under
+            pressure because you stop deciding what to check next and start
+            executing a checklist you have already rehearsed.
+        - type: code
+          language: bash
+          code: |
+            $ id && uname -a
+            uid=1000(dev) gid=1000(dev) groups=1000(dev),27(sudo)
+            Linux web01 6.8.0-45-generic #45-Ubuntu SMP x86_64 GNU/Linux
+        - type: prose
+          markdown: |
+            That two-command opener already earned its keep. The `id` line says
+            our user sits in the sudo group, so sudo checks jump the queue. The
+            kernel line gives distribution family, kernel release, and
+            architecture, which is the minimum any later research will ask
+            for. Notice how each output feeds the next decision. Enumeration
+            is not a pile of commands; it is a conversation with the machine
+            where every answer narrows the next question.
+        - type: callout
+          tone: tip
+          markdown: |
+            Start every session by pasting `date -u` above your notes. When you
+            later read a finding and wonder whether it came from this box or
+            last week's practice machine, the timestamp answers for free.
+    - id: system-basics-first
+      title: 'System basics first'
+      blocks:
+        - type: prose
+          markdown: |
+            Begin with identity questions about the machine itself. Which
+            distribution is this? Which kernel? Which architecture? The answers
+            decide which public exploit databases are even relevant and which
+            paths exist on disk. An Ubuntu 24.04 box and a CentOS 7 box share
+            almost no package versions, and an ARM device rules out half of the
+            compiled exploits you might otherwise try. Thirty seconds here
+            prevents hours of confusion later.
+        - type: code
+          language: bash
+          code: |
+            $ cat /etc/os-release | head -2
+            PRETTY_NAME="Ubuntu 24.04.1 LTS"
+            NAME="Ubuntu"
+
+            $ dpkg -l | grep -i sudo
+            ii  sudo  1.9.15p5-3ubuntu5  amd64  provide limited super user privileges
+
+            $ ls -la /etc/cron*
+            -rw-r--r-- 1 root root  722 Aug 12 09:14 /etc/crontab
+
+            /etc/cron.d:
+            total 16
+            drwxr-xr-x 2 root root 4096 Aug 12 09:14 .
+            -rw-r--r-- 1 root root   61 Aug 12 09:14 backup-job
+        - type: prose
+          markdown: |
+            Read that block like an investigator rather than a tourist. The
+            os-release file pins the distro and point release. The dpkg query
+            shows sudo 1.9.15p5, recent enough that ancient sudo bugs are off
+            the table, which saves you from chasing them. The cron listing is
+            quiet except for one custom file, backup-job, owned by root. A
+            single custom scheduled task is worth more attention than fifty
+            stock ones, precisely because someone wrote it locally and local
+            authors make local mistakes.
+        - type: prose
+          markdown: |
+            Keep the pass cheap: these commands read files and list state, so
+            they generate no suspicious network traffic and crash nothing.
+            Expensive or loud actions belong later, after the free wins are
+            inventoried. If a checklist item requires installing something,
+            compiling something, or rebooting something, it is not part of the
+            basic pass; schedule it deliberately instead of letting it interrupt
+            the sweep.
+    - id: users-groups-and-processes
+      title: 'Users, groups, and processes'
+      blocks:
+        - type: prose
+          markdown: |
+            Next, learn who lives on the box and what runs without anyone
+            logged in. Human accounts matter because password reuse and stale
+            SSH keys travel between them. Service accounts matter because
+            processes running as them own files you may be able to influence.
+            Groups matter most of all: membership in docker, lxd, disk, adm, or
+            video can be equivalent to root all by itself, and attackers who
+            skip group checks routinely miss that gift.
+        - type: code
+          language: bash
+          code: |
+            $ grep -E 'sh$' /etc/passwd
+            root:x:0:0:root:/root:/bin/bash
+            dev:x:1000:1000:Dev User:/home/dev:/bin/bash
+            svc-backup:x:1001:1001::/srv/backups:/bin/bash
+
+            $ ps aux --sort=start_time | tail -4
+            root       742  0.0  0.1  9876  5128 ?        Ss 09:00 0:00 /usr/sbin/cron -f
+            root       803  0.0  0.4 145212 22044 ?       Ssl 09:00 0:00 /usr/bin/python3 /opt/app/server.py
+            svc-backup 911  0.0  0.1  8872  4996 ?        S   09:15 0:00 /bin/bash /usr/local/bin/rotate-logs.sh
+            dev       1301  0.0  0.0  7032  3812 pts/0    R+  10:02 0:00 ps aux --sort=start_time
+        - type: prose
+          markdown: |
+            Three details stand out. There is a second human-style account,
+            svc-backup, whose home directory sits under /srv, hinting at backup
+            duties. A Python service runs as root out of /opt/app, and if that
+            application ever loads a writable file we control, root follows.
+            Finally a shell script runs periodically as svc-backup, which pairs
+            naturally with the backup-job cron entry we saw earlier. None of
+            this proves anything yet. Correlation across outputs is where
+            method starts paying rent.
+        - type: prose
+          markdown: |
+            Prefer quiet commands throughout. Reading /etc/passwd, listing
+            processes, and checking group membership touch nothing outside the
+            box and leave audit trails indistinguishable from an administrator
+            logging in. Reserve port scans, aggressive scripts, and anything
+            that touches authentication limits for the moment you have a
+            specific reason, because a careless `hydra` run can lock accounts
+            and turn a quiet engagement into an incident call.
+    - id: quick-wins-versus-long-shots
+      title: 'Quick wins versus long shots'
+      blocks:
+        - type: prose
+          markdown: |
+            Not all findings deserve equal effort. A quick win is a
+            misconfiguration whose exploitation takes minutes and whose outcome
+            is predictable: a NOPASSWD sudo entry pointing at a binary with a
+            documented escape, a world-writable script executed by root's cron,
+            an SUID binary nobody should have made special. A long shot is a
+            path that might work after real effort, like a kernel exploit with
+            version requirements that do not quite match, or an application bug
+            you would need to reverse engineer. Professionals burn quick wins
+            first and treat long shots as scheduled projects, not impulses.
+        - type: quiz
+          question_id: pem-quickwin-or-longshot
+          question: 'You find a kernel listed as affected by a public privilege escalation bug, but uname shows a patch level newer than the advisory tested against. Meanwhile sudo -l reveals a harmless-looking NOPASSWD entry for a text editor. Which do you pursue first and why?'
+          options:
+            - id: a
+              text: 'The kernel exploit, because kernel bugs feel more impressive in reports.'
+            - id: b
+              text: 'The sudo editor entry, because GTFOBins-class escapes are fast, reliable, and reversible.'
+            - id: c
+              text: 'Neither; both categories require approval from the platform owner.'
+            - id: d
+              text: 'Run both simultaneously to save time during the session.'
+          answer_ids: [b]
+          explanation: >
+            Reliability comes first. A documented sudo escape on a binary you
+            can test safely beats a kernel exploit whose preconditions are
+            unverified, especially since a failed kernel attempt can panic the
+            machine and destroy your session. Note the kernel lead in your
+            action list and revisit it only if the quick win dries up.
+        - type: prose
+          markdown: |
+            Build the habit with a two-column note: candidate on the left,
+            cost-and-confidence estimate on the right. "Editor under NOPASSWD
+            sudo, minutes, near certain" outranks "kernel 6.8 vs advisory for
+            6.5, unknown, risky". Writing the comparison down keeps you honest,
+            because memory quietly inflates whatever you found most recently.
+    - id: automate-then-verify
+      title: 'Automate, then verify everything'
+      blocks:
+        - type: prose
+          markdown: |
+            Automation tools such as linpeas sweep hundreds of checks in
+            seconds and color-code likely wins. Running one early is standard
+            professional practice, not cheating. The trap is treating its
+            output as truth. Scripts encode assumptions about distributions and
+            versions, they miss site-specific logic entirely, and they have
+            flagged false positives in every large environment where they were
+            trusted without review. The correct pattern is automation for
+            coverage and humans for judgment.
+        - type: code
+          language: text
+          code: |
+            ./linpeas.sh
+            ...snipped...
+            [+] Checking sudo rules
+            User dev may run the following commands on web01:
+                (ALL) NOPASSWD: /usr/bin/less
+            [+] Checking writable cron scripts
+            -rw-rw-r-- 1 root dev 214 /usr/local/bin/rotate-logs.sh
+            ...snipped...
+        - type: prose
+          markdown: |
+            Two lines in that excerpt deserve manual follow-up, and neither
+            should be believed until you reproduce the underlying facts
+            yourself. Re-run `sudo -l` and read the policy with your own eyes.
+            Stat the rotate-logs.sh file and confirm group dev really has write
+            access, because if the tool hallucinated that bit, your next hour
+            evaporates. Verification costs one command per claim and converts
+            an anonymous script's opinion into evidence you can put in a
+            report with your name on it.
+        - type: callout
+          tone: warning
+          markdown: |
+            Never pipe untrusted target files into your own shell, and never
+            run downloaded enumeration scripts on machines outside an approved
+            range. Automation belongs inside scope, and its output deserves the
+            same skepticism as any other user-controlled data.
+    - id: from-output-to-action-list
+      title: 'From output to action list'
+      blocks:
+        - type: prose
+          markdown: |
+            Enumeration ends with a document, not a scrollback buffer. For each
+            surviving candidate record four fields: what you found, the exact
+            command proving it, your cost-and-confidence rating, and the next
+            concrete step. This is the action list you execute against, and it
+            doubles as the skeleton of your eventual report. When a reviewer
+            asks why you tried the cron script before the kernel bug, the list
+            answers for you.
+        - type: quiz
+          question_id: pem-action-list-fields
+          question: 'Which entry best follows the action-list format from this section?'
+          options:
+            - id: a
+              text: '"Something weird with cron, look into it later."'
+            - id: b
+              text: '"Found: /usr/local/bin/rotate-logs.sh is root-run and group-writable (ls -l output saved). Cost low, confidence high. Next: append reverse shell payload in lab, restore original after."'
+            - id: c
+              text: '"Cron is vulnerable, exploited successfully, flag captured."'
+            - id: d
+              text: '"linpeas said cron scripts are writable so this must be the intended path."'
+          answer_ids: [b]
+          explanation: >
+            Option B names the artifact, carries proof, rates cost and
+            confidence, and states a bounded next step. Option A lacks detail,
+            option C skips the reasoning trail reviewers need, and option D
+            outsources judgment to a script, which is exactly the habit this
+            module trains away.
+        - type: prose
+          markdown: |
+            With the list built, execution becomes calm: work top down,
+            re-rating after each attempt, stopping the moment root lands or
+            evidence contradicts a rating. On this platform the natural place
+            to exercise the whole loop end to end is the suid-story room, where
+            one overlooked binary rewards exactly this discipline. Bring the
+            notebook habits with you; the room is small, but the method scales
+            unchanged to networks with thousands of hosts.
+  cheat_sheet: |
+    # Privilege escalation enumeration
+
+    Order of operations:
+    1. Identity: id, uname -a, cat /etc/os-release
+    2. Packages and patches: dpkg -l / rpm -qa
+    3. Accounts: id USER, grep sh$ /etc/passwd, groups, getent group
+    4. Processes: ps aux --sort=start_time
+    5. Quick wins: sudo -l, ls -la /etc/cron*, find / -perm -4000 2>/dev/null
+    6. Automation: linpeas, then verify every claim manually
+    7. Action list: finding, proof, cost/confidence, next step
+
+    Group memberships that can mean root:
+        docker, lxd, disk, adm, video, sudo/wheel
+
+    Rating rule:
+        quick win = minutes + predictable outcome
+        long shot = hours + uncertain preconditions
+
+    Evidence habit:
+        date -u >> notes.md before every session
