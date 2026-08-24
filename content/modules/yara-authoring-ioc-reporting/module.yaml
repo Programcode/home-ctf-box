@@ -1,0 +1,387 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: yara-authoring-ioc-reporting
+  title: 'YARA rule writing and IOC reporting'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - yara
+    - detection
+    - ioc
+    - reporting
+    - threat-intel
+spec:
+  track: crypto-binary
+  summary: >-
+    Analysis that stays in your notebook protects one network; detections and
+    indicators protect everyone who reads them. This module turns reversing
+    observations into shareable artifacts. You learn what YARA is for and how
+    its rules are built from strings and conditions, write and run your first
+    rules against a local corpus with real command output, then tune them
+    against false positives until they survive contact with ordinary files.
+    The second half covers indicators of compromise as a quality discipline:
+    which indicator types age well, how confidence ratings work, and how to
+    structure a report so a tired responder at three in the morning can act on
+    it without calling you.
+  objectives:
+    - Explain where YARA fits among detection and classification tools.
+    - Write YARA rules combining strings, conditions, and metadata correctly.
+    - Run rules locally and interpret matches, near misses, and syntax errors.
+    - Tune rules against benign corpora to control false positive rates.
+    - Select IOC types and confidence levels appropriate to their lifespan.
+    - Produce a structured IOC report a third party can act on unaided.
+  sections:
+    - id: what-yara-is-for
+      title: 'What YARA is for'
+      blocks:
+        - type: prose
+          markdown: |
+            YARA answers a deceptively simple question: which files in this
+            pile look like the thing I care about? It is a pattern matching
+            engine tuned for malware work, describing families and traits as
+            text rules that scan bytes, decoded buffers, and process memory.
+            Unlike antivirus signatures you cannot read, YARA rules are plain
+            text an analyst can review, argue about, and improve, which is why
+            incident responders, threat intel teams, and researchers all speak
+            it. A good rule encodes judgment: not merely that a file contains
+            a suspicious string, but that several specific traits co-occur.
+
+            Where does it fit? Antivirus blocks known bad at machine speed.
+            Sandbox systems observe behavior dynamically. YARA sits between,
+            classifying collections of files or memory snapshots against
+            human-written descriptions. During an incident it sweeps file
+            servers for kin of a discovered sample; during research it finds
+            new family members across archives; after this course it will be
+            the tool you reach for when someone says we found another one of
+            those USB worms. Classification, not magic, and very learnable in
+            an afternoon.
+        - type: code
+          language: bash
+          code: |
+            $ yara --version
+            4.5.2
+
+            $ echo 'rule hello { condition: true }' > hello.yar
+            $ yara hello.yar sample.bin && echo "match exit=$?"
+            hello sample.bin
+            match exit=0
+
+            $ yara hello.yar other.bin; echo "no-match exit=$?"
+            no-match exit=1
+        - type: callout
+          tone: tip
+          markdown: |
+            Exit codes carry meaning: zero means at least one match, one means
+            no match, two signals an error such as a broken rule. Scripts rely
+            on those codes, so keep them straight from day one.
+    - id: anatomy-of-a-rule
+      title: 'Anatomy of a rule'
+      blocks:
+        - type: prose
+          markdown: |
+            Rules have four parts, and naming them precisely prevents most
+            beginner errors. Metadata carries analyst-facing notes such as
+            author, date, reference, and family; it never affects matching but
+            makes rules maintainable. Strings declares the byte patterns worth
+            searching: text strings, hex byte sequences, or regular
+            expressions, each addressable by a tag like $a1. The condition is
+            Boolean logic over those tags plus file properties, and it alone
+            decides the verdict. Everything lives inside braces following the
+            rule name.
+
+            The craft hides in string selection. Stable traits make good
+            patterns: distinctive error messages, embedded configuration
+            markers, unique mutex names, protocol constants. Volatile traits
+            make terrible ones: timestamps, compile paths, single common
+            words. When several independent weak signals together imply
+            strong evidence, conditions express that arithmetic plainly, for
+            example requiring any two of three candidate strings rather than
+            betting everything on one brittle pattern.
+        - type: code
+          language: yara
+          code: |
+            rule sim_note_dropper
+            {
+                meta:
+                    author = "course-demo"
+                    date = "2026-08-22"
+                    family = "sim-note"
+                    confidence = "medium"
+                strings:
+                    $msg  = "hello from sim" ascii
+                    $cfg  = { 53 49 4D 5F 43 46 47 }   // "SIM_CFG"
+                    $ext  = ".simnote" nocase ascii
+                condition:
+                    uint16(0) == 0x5A4D and 2 of ($msg, $cfg, $ext)
+            }
+        - type: prose
+          markdown: |
+            Read the condition aloud: the file must begin with the DOS
+            executable marker MZ, hexadecimal 0x5A4D on little-endian x86, and
+            at least two of the three declared traits must appear. That shape,
+            structural anchor plus trait voting, is the single most reusable
+            pattern in practical rule writing. Note also the hex comment style
+            documenting what raw bytes spell; future readers, including you in
+            eight months, will thank present you for the annotation.
+        - type: quiz
+          question_id: revyara-condition-owner
+          question: 'Which part of a YARA rule actually decides whether a file matches?'
+          options:
+            - id: a
+              text: 'The metadata block.'
+            - id: b
+              text: 'The condition expression.'
+            - id: c
+              text: 'The first declared string.'
+            - id: d
+              text: 'The rule name.'
+          answer_ids: [b]
+          explanation: >
+            Strings describe available evidence; the condition is the only
+            decision maker. Metadata documents context for humans. A rule can
+            declare ten strings yet match on none of them if its condition
+            references different logic.
+    - id: first-rules-with-real-output
+      title: 'First rules with real output'
+      blocks:
+        - type: prose
+          markdown: |
+            Tool fluency starts with tiny experiments whose outcomes you can
+            predict. Build a miniature corpus: one file containing the target
+            marker, one innocent file, one empty file. Then run rules against
+            all three and watch every exit code and line of output until the
+            behavior feels boring. Boring is the goal; surprise belongs in
+            production, not in your understanding of the scanner.
+        - type: code
+          language: bash
+          code: |
+            $ printf 'SIM_CFG hello from sim v7' > t/match.bin
+            $ printf 'quarterly report draft'     > t/clean.txt
+            $ : > t/empty.bin
+
+            $ yara -r sim_note.yar t/
+            sim_note_dropper t/match.bin
+
+            $ yara -s sim_note.yar t/match.bin
+            sim_note_dropper t/match.bin
+            0x9:$msg: hello from sim
+            0x0:$cfg: 53 49 4D 5F 43 46 47
+
+            $ yara sim_note.yar t/clean.txt; echo "exit=$?"
+            exit=1
+        - type: prose
+          markdown: |
+            Three runs, three lessons. The recursive flag swept the directory
+            and matched exactly the expected file. The strings flag printed
+            offsets alongside hits, showing the config marker sitting at file
+            offset zero and the message deeper in, which is how you debug why
+            a condition voted the way it did. The clean file produced exit
+            code one and silence, confirming the negative case works. Add one
+            more experiment while the corpus is small: break a rule on
+            purpose, say an unclosed brace, and read the parser error.
+            Errors encountered calmly in training get fixed quickly in
+            incidents.
+
+            One habit separates professionals early: version-control rules
+            from their first day. A repository with commit messages explaining
+            each change becomes the audit trail reviewers ask for, and rolling
+            back an overzealous edit becomes seconds instead of archaeology.
+    - id: testing-against-false-positives
+      title: 'Testing and tuning against false positives'
+      blocks:
+        - type: prose
+          markdown: |
+            A rule that fires on malware and on half the office shared drive
+            is worse than no rule, because alert fatigue buries real cases.
+            Tuning therefore means measuring both sides: sensitivity on known
+            family samples, and specificity on a benign corpus representative
+            of wherever scanning will run. Build the corpus deliberately,
+            installers, documents, scripts, binaries in the languages your
+            estate uses, because a rule tested only against empty directories
+            has learned nothing about the world it will judge.
+        - type: code
+          language: text
+          code: |
+            tuning log (excerpt)
+
+            v3  condition: $eic and $mutex
+                family corpus: 12/12 match   benign corpus: 0/4000
+                -> ship candidate
+
+            v4  added $pdb = "C:\\\\build\\\\agent" ascii
+                family corpus: 12/12   benign: 0/4000
+                reviewer note: pdb path likely rebuild-specific;
+                risk of missing recompiled variants -> rejected
+
+            v5  widened ext to .simnote / .snote (nocase)
+                family corpus: 14/14   benign: 1/4000 (false pos on
+                "notes.snote.bak") -> require $msg or $cfg too -> shipped
+        - type: quiz
+          question_id: revyara-tuning-tradeoff
+          question: 'Version 4 raised coverage to twelve out of twelve yet a reviewer rejected it. What reasoning supports that call?'
+          options:
+            - id: a
+              text: 'Rules should never exceed ten strings regardless of results.'
+            - id: b
+              text: 'A build-machine path is fragile; future recompiles would silently evade detection.'
+            - id: c
+              text: 'PDB strings always cause false positives.'
+            - id: d
+              text: 'Reviewers must reject any rule touching file paths.'
+          answer_ids: [b]
+          explanation: >
+            Detection quality includes resilience over time, not just today
+            hit rate. A compiler-generated absolute path changes with build
+            environment, so the next variant evades quietly. Rejection here is
+            robustness thinking, not bureaucracy.
+        - type: prose
+          markdown: |
+            Record tuning like the log above: what changed, both corpora
+            numbers, and why the verdict went the way it did. Numbers turn
+            arguments into arithmetic during review, and the log becomes proof
+            of diligence when someone later asks whether the rule was ever
+            tested. When you need practice material, simulated artifact sets
+            such as the persistence files staged in quiet-persistence give
+            realistic-looking targets whose ground truth you already know,
+            which makes scoring your own rules honest.
+    - id: ioc-types-and-quality
+      title: 'IOC types and indicator quality'
+      blocks:
+        - type: prose
+          markdown: |
+            Indicators of compromise compress findings into facts machines and
+            humans can hunt. Each type trades precision against lifespan.
+            Cryptographic hashes identify one exact file: perfectly precise,
+            dead the moment anything recompiles. Network indicators such as
+            domains, IPs, and URLs live longer but rot faster than expected
+            through hosting churn and sinkholes. Behavioral and host traits,
+            mutex names, registry keys, scheduled task names, service paths,
+            often survive infrastructure turnover entirely, making them the
+            long-life backbone of hunts. File paths and account names sit
+            between, aging slowly but generalizing poorly.
+
+            Quality discipline means pairing every indicator with context:
+            type, value, first seen, confidence, and what action a hit should
+            trigger. Confidence deserves honesty. A hash observed directly on
+            an affected host earns high confidence. A domain inferred from one
+            sandbox run might deserve medium. A pattern guessed from similarity
+            to another family starts at low until corroboration arrives.
+            Publishing stale or inflated indicators burns trust that takes
+            months to rebuild, so expiry dates belong on time-bound values
+            like IPs from rental infrastructure.
+        - type: code
+          language: json
+          code: |
+            {
+              "indicators": [
+                {"type": "sha256",   "value": "9f86d081884c...00a08",
+                 "confidence": "high",   "first_seen": "2026-08-20"},
+                {"type": "domain",   "value": "update.example-sim.local",
+                 "confidence": "medium", "expires": "2026-11-30"},
+                {"type": "mutex",    "value": "Global\\SIM_NOTE_V7_MUTEX",
+                 "confidence": "high",   "note": "stable across variants"}
+              ]
+            }
+        - type: prose
+          markdown: |
+            Notice the mutex entry carrying high confidence despite being a
+            behavioral indicator; stability across observed variants justifies
+            it, and the note explains why so future analysts can re-evaluate.
+            Context fields cost seconds to write and decide whether your
+            indicators get used or ignored downstream.
+    - id: writing-the-ioc-report
+      title: 'Writing the report others can act on'
+      blocks:
+        - type: prose
+          markdown: |
+            Reports succeed when a stranger can act without asking questions.
+            Structure beats eloquence: an executive paragraph saying what
+            happened and what readers should do; a technical section walking
+            evidence from initial artifact through verdict; the indicator
+            table itself; and detection content, meaning YARA rules and hunt
+            queries ready to paste. Every claim links to its evidence, hashes
+            tie samples to observations, and uncertainty appears in print
+            rather than in footnotes of the authorial mind.
+        - type: code
+          language: text
+          code: |
+            report skeleton
+
+            SUMMARY
+              Simulated dropper family "sim-note" identified in lab corpus;
+              no customer impact. Actions: sweep file shares with rule below.
+
+            EVIDENCE TRAIL
+              sample 9f86d081...00a08 (sha256) -> static triage notes SIM-81
+              -> dynamic session SIM-2026-081 timeline
+              -> dropped artifact hash logged alongside
+
+            INDICATORS
+              see ioc.json (machine readable, same values as table)
+
+            DETECTION
+              sim_note_dropper.yara attached; tuning log v3..v5 included
+        - type: prose
+          markdown: |
+            Filing discipline completes the skill. Evidence bundles, capture
+            files, and reports belong together in case storage with consistent
+            naming, exactly the habit the packet-diary room rehearses when you
+            attach the recovered password and annotated capture to its case
+            page. Machine-readable indicator exchange formats exist so your
+            table can travel to other tools without retyping; producing JSON
+            beside prose costs minutes now and saves partners hours later.
+        - type: quiz
+          question_id: revyara-report-audience
+          question: 'An IOC report omits confidence levels and expiry dates. Who is harmed first?'
+          options:
+            - id: a
+              text: 'Nobody; scanners do not read those fields.'
+            - id: b
+              text: 'Downstream hunters, who cannot weigh alerts or prune stale indicators.'
+            - id: c
+              text: 'Only the original author, via reputation.'
+            - id: d
+              text: 'The malware authors, since their campaign ages faster.'
+          answer_ids: [b]
+          explanation: >
+            Consumers act on confidence and retire on expiry. Without them
+            every alert weighs the same and stale values accumulate forever,
+            which is how indicator feeds become noise generators. Author
+            reputation follows soon after, but hunters absorb the damage
+            first.
+        - type: callout
+          tone: tip
+          markdown: |
+            Close every report with a review-by date and your contact for
+            corrections. Indicators decay; reports that admit decay get
+            trusted longer than reports pretending permanence.
+  cheat_sheet: |
+    # YARA authoring and IOC reporting
+
+    Rule anatomy:
+        meta (context) / strings ($tags) / condition (decides)
+        reliable shape: structural anchor + N-of-M trait vote
+        stable traits win; timestamps and build paths lose
+
+    Local workflow:
+        yara -r rules.yar corpus/       # sweep
+        yara -s rule.yar file           # show offsets
+        exit 0 match, 1 none, 2 error
+
+    Tuning ledger:
+        record version, both corpus scores, decision reason
+        sensitivity: family samples caught
+        specificity: benign corpus clean
+
+    IOC lifespans:
+        short: sha256/md5 (one exact file)
+        medium: domain/ip/url (churn + sinkholes)
+        long: mutex, regkey, task/service names
+        pair every value: type, confidence, first_seen, expiry
+
+    Report order:
+        summary -> evidence trail -> indicator table (+json)
+        -> ready-to-run detections -> review-by date

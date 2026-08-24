@@ -1,0 +1,392 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: rsa-signatures-and-downgrades
+  title: 'RSA essentials, signature nonces, and downgrade thinking'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - rsa
+    - signatures
+    - ecdsa
+    - nonces
+    - downgrade
+spec:
+  track: crypto-binary
+  summary: >-
+    Asymmetric cryptography intimidates people into treating it as magic, and
+    magic never gets reviewed. This module demystifies RSA by building a toy
+    version from five small numbers you can compute by hand, then scaling the
+    intuition to explain why real key sizes are what they are. Signature
+    nonces follow as the field's most repeated self-inflicted wound: reuse one
+    random value twice and private keys fall out of public arithmetic, a
+    result demonstrated with tiny illustrative numbers rather than tooling.
+    The closing sections develop downgrade thinking, reading protocol
+    negotiation for the fallbacks attackers steer everyone toward, plus a
+    configuration review checklist that converts the whole path into
+    actionable review habits.
+  objectives:
+    - Build toy RSA from primes and describe each parameter's role.
+    - Relate key size to factoring effort without invoking mysticism.
+    - Explain signature schemes and the nonce reuse catastrophe.
+    - Recognize RNG-driven signature failures and their deterministic fix.
+    - Analyze protocol negotiation for downgrade weaknesses.
+    - Review TLS and crypto configurations against a repeatable checklist.
+  sections:
+    - id: rsa-in-five-numbers
+      title: 'RSA in five numbers'
+      blocks:
+        - type: prose
+          markdown: |
+            RSA rests on one asymmetry: multiplying two large primes is easy,
+            while recovering them from the product appears computationally
+            hopeless at scale. Key generation picks primes p and q, publishes
+            their product n alongside a public exponent e, and keeps the
+            private exponent d, which exists because it undoes e modulo the
+            product of p minus one and q minus one. Encryption raises a
+            message to the power e modulo n; decryption raises ciphertext to
+            the power d. Signatures run the same arithmetic in reverse order,
+            signing with d and verifying with e.
+
+            Every parameter now has a role instead of an aura. The modulus n
+            sets the playground size; e is conventionally 65537 for speed;
+            d is the secret twin of e under modular arithmetic nobody can
+            compute without p and q. Textbook RSA on tiny numbers is
+            completely insecure, padding-free, deterministic, trivially
+            forgeable, so the exercise below exists purely to make mechanics
+            tangible before meeting the padded, randomized constructions real
+            protocols use.
+        - type: code
+          language: python
+          code: |
+            # TOY RSA, numbers small enough to verify by hand. Never ship.
+            p, q = 61, 53
+            n = p * q                      # 3233
+            phi = (p - 1) * (q - 1)        # 3120
+            e = 17                          # gcd(e, phi) == 1
+
+            d = pow(e, -1, phi)             # 2753
+            print(n, phi, d)                # 3233 3120 2753
+
+            m = 65                          # message as a number < n
+            c = pow(m, e, n)                # encrypt/sign-verify side
+            print(c)                        # 2790
+            print(pow(c, d, n))             # 65 -> round trip works
+
+            # knowing only n=3233 and e=17, factoring recovers p,q=61,53,
+            # then d follows instantly: small n means no security at all
+        - type: callout
+          tone: tip
+          markdown: |
+            Rebuild this example with your own prime pairs until each line
+            feels obvious. Everything later, key sizes, hybrid encryption,
+            certificate verification, is this arithmetic wearing armor.
+    - id: why-key-size-matters
+      title: 'Why key size matters'
+      blocks:
+        - type: prose
+          markdown: |
+            Factoring difficulty grows roughly exponentially in modulus bit
+            length, which is why the same algorithm spans toy demos and
+            national infrastructure purely through parameter choice. A
+            330-bit modulus fell to distributed hobbyist effort decades ago;
+            768-bit yielded to serious academic computation years back;
+            2048-bit remains beyond public reach though guidance treats it as
+            the floor, and 3072 or 4096 buy margin for long-lived secrets.
+            Symmetric keys need far fewer bits because brute force is their
+            best attack, hence 128-bit AES standing shoulder to shoulder
+            with 3072-bit RSA in security estimates.
+
+            Practical reviews care about three size conversations. Migration
+            deadlines matter because long-lived signatures outlive algorithms;
+            documents signed today must survive tomorrow's hardware. Minimum
+            floors appear in configuration baselines and should be enforced
+            mechanically rather than aspirationally. And quantum horizon
+            discussions, post-quantum migration planning, increasingly show up
+            in architecture reviews as inventory questions: where do RSA and
+            elliptic curves live, what breaks if they weaken, what is the
+            replacement timeline?
+        - type: code
+          language: text
+          code: |
+            $ openssl genrsa 512 2>/dev/null | openssl rsa -noout -text \
+                2>/dev/null | head -3
+            Private-Key: (512 bit, 2 primes)
+            modulus: 0x00c29d...   <- demonstrably breakable class
+
+            $ openssl s_client -connect lab.example:443 </dev/null 2>/dev/null \
+                | openssl x509 -noout -text | grep 'Public-Key'
+            Public-Key: (2048 bit)   <- current floor for RSA certificates
+
+            review rule: anything below the floor is a finding regardless
+            of whether an exploit exists today
+        - type: quiz
+          question_id: cryrsa-size-floor
+          question: 'A legacy internal service presents a 1024-bit RSA certificate. What is the sound assessment?'
+          options:
+            - id: a
+              text: 'Fine internally, since attackers lack access to factor it.'
+            - id: b
+              text: 'Below current floors; schedule replacement even without a live public attack.'
+            - id: c
+              text: 'Acceptable until someone demonstrates a full break publicly.'
+            - id: d
+              text: 'Equivalent security to 256-bit AES.'
+          answer_ids: [b]
+          explanation: >
+            Baselines exist ahead of public breaks because migrations take
+            years and long-lived artifacts age badly. 1024-bit sits inside
+            demonstrated capability range for well-funded actors, and internal
+            boundaries fail constantly anyway.
+    - id: signatures-and-nonce-arithmetic
+      title: 'Signatures and nonce arithmetic'
+      blocks:
+        - type: prose
+          markdown: |
+            Signatures bind identity to messages, and modern schemes mix in
+            per-signature randomness called a nonce. ECDSA, the workhorse of
+            TLS certificates and code signing across countless systems, asks
+            the signer to draw a fresh secret k for every single signature.
+            That request is not decoration. Each signature emits two values r
+            and s, where r depends only on k while s mixes k with the message
+            hash and the private key. Two signatures sharing k share r,
+            advertising the reuse loudly, and then elementary algebra extracts
+            the private key from the pair of s values directly on paper.
+
+            The consequence shaped an entire subfield of engineering. Any
+            pathway to repeated k values, biased randomness, forked virtual
+            machines replaying entropy states, embedded devices booting with
+            identical seeds, becomes a private-key disclosure event. Wallet
+            drains and infrastructure compromises have traced back to exactly
+            this arithmetic repeatedly, which is why reviewers treat nonce
+            sourcing as a first-class question rather than an implementation
+            detail.
+        - type: code
+          language: text
+          code: |
+            toy field arithmetic (mod 101), structure not strength
+
+            k reused twice, messages m1 != m2, hash h(x) = x mod 101
+            sig1: r=7, s1=(k^-1(h1 + d*r)) mod 101
+            sig2: r=7, s2=(k^-1(h2 + d*r)) mod 101
+
+            subtract:  s1-s2 = k^-1(h1-h2)         ->  k = (h1-h2)/(s1-s2)
+            substitute: d = (k*s1 - h1)/r
+
+            worked: h1=20 h2=11, s1=63 s2=90
+                    k = (20-11)/(63-90) = 9/-27 = -3 = 98 (mod 101)
+                    d = (98*63 - 20)/7 = 6154/7 = 879 = 71 (mod 101)
+            private key recovered from two signatures + zero secrets
+        - type: prose
+          markdown: |
+            Walk the subtraction slowly once and the lesson lands forever:
+            reuse collapses the scheme's secrecy into school algebra. No
+            quantum computer, no factoring breakthrough, just division in a
+            finite field. Deterministic construction removes the gamble
+            entirely, which is exactly where the next section goes.
+        - type: quiz
+          question_id: cryrsa-nonce-reuse-tell
+          question: 'Two ECDSA signatures over different messages arrive with identical r values. What does that reveal?'
+          options:
+            - id: a
+              text: 'The signer used two different private keys.'
+            - id: b
+              text: 'The nonce k repeated, enabling private-key recovery via algebra on the s values.'
+            - id: c
+              text: 'The messages were signed in the wrong order.'
+            - id: d
+              text: 'Nothing unusual; r collisions happen by chance routinely.'
+          answer_ids: [b]
+          explanation: >
+            Identical r means identical k, since r derives solely from it.
+            With k shared, simple subtraction isolates k and then the private
+            key. Probability of accidental collision is negligible, making
+            repetition a loud alarm rather than noise.
+    - id: rng-failures-and-determinism
+      title: 'RNG failures and the deterministic fix'
+      blocks:
+        - type: prose
+          markdown: |
+            History supplies the case studies that make nonce discipline feel
+            less theoretical. Early Android wallet users lost funds when
+            system entropy weakened and k values collided across transactions.
+            Research scanning millions of SSH host keys found thousands
+            generated by under-seeded embedded devices, identical keys
+            repeating worldwide. Debian's famous packaging bug gutted entropy
+            pool diversity process-wide for years. None involved breaking
+            elliptic curves; every one involved feeding good arithmetic bad
+            randomness, and detection often came only after someone audited
+            public outputs.
+
+            Standards answered with RFC 6979, deterministic nonce derivation:
+            compute k from the private key and message hash through a keyed
+            hash construction, eliminating fresh randomness per signature
+            while remaining safe because distinct messages yield distinct
+            k values. Ed25519 bakes determinism into its design from day one.
+            Reviews therefore ask whether signature paths use deterministic
+            schemes or genuinely strong entropy sources, and treat hand-rolled
+            k generation as an automatic escalation.
+        - type: code
+          language: text
+          code: |
+            review decision table (signature nonces)
+
+            scheme / source                     verdict
+            Ed25519                             preferred default
+            ECDSA + RFC 6979 k                  acceptable, standard
+            ECDSA + OS CSPRNG reads             acceptable w/ tests
+            ECDSA + custom PRNG / timestamp k   finding, block merge
+            DSA (any)                           migrate away
+
+            audit trick: scan public signature logs for repeated r
+            values; repeats = immediate rotation + incident review
+        - type: callout
+          tone: warning
+          markdown: |
+            Entropy failures repeat silently. If your platform signs things,
+            schedule periodic r-collision scans over issued signatures; they
+            catch weak entropy early enough to rotate instead of mourn.
+    - id: downgrade-thinking
+      title: 'Downgrade thinking'
+      blocks:
+        - type: prose
+          markdown: |
+            Protocols negotiate capabilities, offering cipher suites,
+            versions, extensions, parameters, and negotiation logic itself
+            becomes an attack surface. Downgrade attacks steer parties toward
+            weaker mutually-supported choices, ideally ones only the attacker
+            knows remain enabled. History offers sobering cases: flaws letting
+            traffic step down from TLS to plaintext, renegotiation abuses,
+            cross-protocol confusions where one service's responses impersonate
+            another's, and export-grade cipher leftovers resurfacing decades
+            later as active attacks. The recurring root cause is state about
+            negotiation living somewhere adversaries can edit, or fallback
+            logic trusting whatever the connection claims.
+
+            Defenses converge on binding and minimizing. Protocol versions
+            now bake negotiation transcripts into handshake computations, so
+            mid-flight tampering breaks cryptography visibly. Operators
+            minimize by disabling legacy versions and suites outright,
+            because any residual support quietly becomes the ceiling everyone
+            gets dragged toward. Applications pin expectations where feasible
+            and alert on negotiated outcomes below policy. Testers working
+            authorized engagements probe negotiation honestly: connect with
+            degraded clients, observe what servers accept, and report gaps as
+            policy violations rather than staging exploits.
+        - type: code
+          language: bash
+          code: |
+            $ nmap --script ssl-enum-ciphers -p 443 lab.example | sed -n '/TLSv/p;/least/p'
+            | TLSv1.2:
+            |   ciphers suitably configured, no TLSv1.0/1.1 offered
+            |_  least strength: all offered ciphers rated strong
+
+            $ curl -sI --tlsv1.1 https://lab.example 2>&1 | head -1
+            curl: (35) protocol version unsupported
+            # refusal is the desired outcome: weak attempts die loudly
+
+            reviewer note: document accepted floors in config-as-code and
+            alert whenever a listener disagrees with baseline
+        - type: prose
+          markdown: |
+            The curl refusal deserves appreciation: servers communicating
+            clearly that old protocols simply do not exist remove whole
+            decision trees from attacker playbooks. Ambiguity, not weakness
+            alone, is what downgrade hunting feeds on.
+        - type: quiz
+          question_id: cryrsa-downgrade-root
+          question: 'What structural condition most enables downgrade attacks against a protocol?'
+          options:
+            - id: a
+              text: 'Negotiation outcomes not cryptographically bound to the session.'
+            - id: b
+              text: 'Using AES instead of ChaCha20.'
+            - id: c
+              text: 'Publishing cipher lists publicly.'
+            - id: d
+              text: 'Requiring certificates from known authorities.'
+          answer_ids: [a]
+          explanation: >
+            When neither party can detect tampering with the negotiation
+            itself, an intermediary rewrites offers freely and both sides
+            believe they agreed voluntarily. Transcript binding closes that
+            door; suite choice details matter comparatively little.
+    - id: reviewing-crypto-configurations
+      title: 'Reviewing crypto configurations'
+      blocks:
+        - type: prose
+          markdown: |
+            Configuration review turns this entire path into scheduled
+            hygiene. Endpoints get inventoried for protocol versions, suite
+            strengths, key sizes, and certificate chains; application code
+            gets scanned for primitive choices, mode decisions, nonce
+            strategies, and comparison timing; operational posture gets
+            checked for rotation schedules, expiry monitoring, and alerting on
+            policy drift. Findings cite the baseline being violated, because
+            arguing from taste loses to arguing from published floors, and
+            remediations propose concrete replacements rather than vague
+            upgrades.
+        - type: code
+          language: text
+          code: |
+            config review checklist (condensed)
+
+            TLS endpoints
+              [ ] min version TLSv1.2+, legacy refused loudly
+              [ ] suites AEAD-only; no export/NULL/anon remnants
+              [ ] cert chain complete; keys >= 2048 RSA / P-256
+              [ ] OCSP stapling or short-lived certs documented
+            Application crypto
+              [ ] AEAD modes only; nonce strategy restart-safe
+              [ ] signatures Ed25519 or RFC6979-style ECDSA
+              [ ] constant-time comparisons wherever secrets meet data
+              [ ] no homegrown primitives anywhere, grep proves it
+            Operations
+              [ ] rotation calendar + expiry alerts wired
+              [ ] config-as-code diff reviewed like code
+              [ ] drift alerts fire on manual console edits
+        - type: callout
+          tone: tip
+          markdown: |
+            Automate the checklist wherever possible: tls-scanning jobs in
+            CI against staging endpoints catch regressions weeks before
+            humans would notice, and the scan history doubles as evidence
+            during audits.
+        - type: prose
+          markdown: |
+            The path ends where professional crypto work usually does: not
+            breaking mathematics but refusing bad compositions politely and
+            persistently. Toy RSA taught the five numbers, nonce algebra showed
+            how randomness failures become key disclosures, and downgrade
+            thinking turned negotiation logs into readable risk. Keep the
+            checklist close; it ages well.
+  cheat_sheet: |
+    # RSA essentials, nonces, downgrades
+
+    RSA roles:
+        n = pq (playground)   e = 65537 typically (public)
+        d = e^-1 mod (p-1)(q-1) (private twin)
+        toy insecure by design; real use = padding + big n
+
+    Key sizes:
+        1024 broken-ish -> replace on sight
+        2048 floor, 3072+ comfort; long-lived sigs plan ahead
+
+    Nonce catastrophe:
+        ECDSA r depends only on k; equal r => k reused
+        k = (h1-h2)/(s1-s2); d = (k*s1 - h1)/r   -> game over
+        fixes: Ed25519 default, RFC 6979 for ECDSA
+        audits: scan issued sigs for repeated r values
+
+    Downgrade lens:
+        ask who verifies the negotiation transcript
+        defenses: transcript binding, disable legacy loudly,
+        alert on sub-policy agreements
+        tester voice: probe with degraded clients, report gaps
+
+    Review checklist memory hooks:
+        endpoints: versions, AEAD-only suites, key floors
+        app code: modes, nonces, constant time, no homebrew
+        ops: rotation, expiry alerts, drift alarms

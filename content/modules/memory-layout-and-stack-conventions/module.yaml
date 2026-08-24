@@ -1,0 +1,362 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: memory-layout-and-stack-conventions
+  title: 'Process memory layout and stack conventions'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - memory
+    - stack
+    - assembly
+    - calling-conventions
+    - binary
+spec:
+  track: crypto-binary
+  summary: >-
+    Every binary exploitation conversation assumes a map of process memory
+    that most people were never handed. This module hands it over. You learn
+    where text, data, heap, and stack live and why each region has the
+    permissions it has, how virtual addresses create the illusion every
+    program owns its memory, and how stack frames grow and shrink as
+    functions call each other. Calling conventions turn register soup into
+    readable argument passing. The module finishes with a professional habit:
+    reading crash addresses and mapping them back to regions, then building
+    toy C programs inside your own lab so every concept stays something you
+    can poke with a debugger rather than a paragraph you memorized.
+  objectives:
+    - Draw the standard process memory map and justify each region's permissions.
+    - Explain what virtual addresses are and why identical addresses coexist.
+    - Walk through function prologues, epilogues, and frame bookkeeping.
+    - Trace argument passing under a register-based calling convention.
+    - Map a faulting address to its memory region from crash output alone.
+    - Build tiny lab programs that make memory concepts observable safely.
+  sections:
+    - id: the-process-memory-map
+      title: 'The process memory map'
+      blocks:
+        - type: prose
+          markdown: |
+            A running program sees memory divided into regions, each with a
+            job and a permission set. The text segment holds machine code and
+            is executable but read-only, because self-modifying programs would
+            be both a bug farm and a cache disaster. The data segment holds
+            initialized globals and string constants, writable or not
+            depending on which part they landed in. The heap grows on demand
+            for allocations whose size the programmer did not know at compile
+            time, managed by an allocator library. The stack grows downward
+            from high addresses, holding function frames: locals, saved
+            registers, return addresses. Between heap top and stack bottom
+            stretches unmapped space the kernel doles out when asked.
+
+            Permissions explain the security story before any attack appears.
+            Data regions being non-executable stops injected bytes from simply
+            running, an idea the next module formalizes as NX. Read-only text
+            stops tampering with code in place. The layout is therefore not
+            arbitrary plumbing; it is the first layer of defense, and analysts
+            who understand why each region got its permissions find mitigation
+            discussions later almost predictable.
+        - type: code
+          language: bash
+          code: |
+            $ cat /proc/self/maps | head -6
+            5541a2b3f000-5541a2b40000 r--p ... /usr/bin/cat
+            5541a2b40000-5541a2b44000 r-xp ... /usr/bin/cat
+            5541a2b44000-5541a2b46000 r--p ... /usr/bin/cat
+            5541a2b47000-5541a2b48000 rw-p ... (heap)
+            7ffd9e5a9000-7ffd9e5ca000 rw-p ... [stack]
+            7ffd9e5f1000-7ffd9e5f5000 r--p ... [vvar]
+        - type: prose
+          markdown: |
+            The kernel exposes exactly this map per process. Read the columns
+            slowly: address range, read-write-execute bits, backing file. The
+            same file appears three times with different permissions because
+            the loader maps segments separately, mirroring the region logic
+            above. Heap and stack carry no file backing, marked by their names,
+            and both sit far apart in address space so each can grow toward
+            the middle without colliding soon.
+    - id: virtual-memory-and-shared-addresses
+      title: 'Virtual memory and shared addresses'
+      blocks:
+        - type: prose
+          markdown: |
+            Beginners often panic on discovering two processes both reference
+            address 0x5541a2b3f000 while clearly holding different contents.
+            Virtual memory resolves the confusion: every process receives its
+            own private translation table, and the CPU's memory management
+            unit rewrites each virtual address into a physical one using that
+            table. Identical virtual numbers across processes point nowhere
+            near each other physically. The abstraction buys safety, since
+            processes cannot name each other's memory by accident, and
+            convenience, letting the loader place code at consistent
+            addresses regardless of physical RAM state.
+
+            The same machinery enables the randomization behind ASLR, covered
+            properly in the next module. Because translations flow through a
+            per-process table, the kernel may choose different base addresses
+            on every run, shuffling where regions land while the program
+            remains oblivious. For analysis work the lesson is practical:
+            addresses printed by tools belong to one specific run, and
+            comparing them across runs only makes sense once you know whether
+            randomization was active during both.
+        - type: quiz
+          question_id: pwnmem-virtual-duplicate
+          question: 'Two running programs both access virtual address 0x400000. Why is there no conflict?'
+          options:
+            - id: a
+              text: 'The second program silently shares the first program page.'
+            - id: b
+              text: 'Each process has its own page tables translating virtual to physical addresses.'
+            - id: c
+              text: 'Address 0x400000 is reserved and duplicated by firmware.'
+            - id: d
+              text: 'One of the two must actually be running in 32-bit mode.'
+          answer_ids: [b]
+          explanation: >
+            Per-process page tables make virtual addresses private names. The
+            MMU performs translation on every access, so identical virtual
+            numbers map to unrelated physical pages. Sharing happens only via
+            explicit shared memory, never by numeric coincidence.
+    - id: stack-frames-step-by-step
+      title: 'Stack frames step by step'
+      blocks:
+        - type: prose
+          markdown: |
+            The stack earns its name from discipline: pushes and pops happen
+            only at the top, and functions build temporary structures called
+            frames there. When a function starts, call has already pushed the
+            return address, the place execution resumes when the function
+            ends. A conventional prologue follows: push the caller's frame
+            pointer, copy the stack pointer into it, then subtract to reserve
+            room for locals. From this moment the frame pointer anchors
+            stable references to arguments and locals even while pushes and
+            pops move the true top around. The epilogue mirrors everything in
+            reverse and ret consumes the saved return address.
+
+            Reading that sequence once slowly is worth more than reading ten
+            explanations quickly, because nearly all stack-related bugs live
+            in the gap between reserved local space and written data. When a
+            program writes past the locals it reserved, whatever sits beyond
+            gets overwritten, and the layout guarantees the saved return
+            address eventually lies in the blast radius. That single sentence
+            summarizes decades of vulnerability classes, and you now have the
+            vocabulary to reason about why later mitigations guard precisely
+            those bytes.
+        - type: code
+          language: asm
+          code: |
+            ; classic prologue / body / epilogue shape
+            push rbp            ; save caller's frame pointer
+            mov  rbp, rsp       ; anchor new frame
+            sub  rsp, 0x20      ; reserve 32 bytes for locals
+
+            mov  dword [rbp-0xc], 7   ; local var := 7
+            ; ... body ...
+
+            leave               ; mov rsp,rbp ; pop rbp
+            ret                 ; pop return address, jump there
+        - type: callout
+          tone: tip
+          markdown: |
+            In a debugger, printing rbp twice inside nested calls shows two
+            frames chained by saved pointers. Following that chain upward is
+            called stack unwinding, and it powers every backtrace you will
+            ever read.
+    - id: calling-conventions-in-practice
+      title: 'Calling conventions in practice'
+      blocks:
+        - type: prose
+          markdown: |
+            A calling convention is a contract about where callers leave
+            arguments and where callees leave results, plus who saves which
+            registers. On Linux x86-64 the System V convention places the
+            first integer arguments in rdi, rsi, rdx, rcx, r8, r9, spills the
+            rest onto the stack, and expects return values in rax. Caller
+            saved registers may be clobbered by any call, callee-saved ones
+            must survive. Windows picks a different arrangement, rcx, rdx,
+            r8, r9, plus reserved shadow space, which is why cross-platform
+            disassembly always begins by asking which convention applies.
+
+            The contract turns register soup into dialogue. Seeing edi loaded
+            immediately before a call tells you the first argument; matching
+            the callee's use of those values against source-level intent
+            becomes mechanical. Convention knowledge also explains crashes
+            that look nonsensical: calling a function through the wrong
+            convention leaves arguments in unexpected places, so the callee
+            happily dereferences garbage with total confidence.
+        - type: code
+          language: c
+          code: |
+            /* illustrative snippet; toy for your own lab box */
+            int add3(int a, int b, int c) {
+                return a + b + c;
+            }
+
+            int main(void) {
+                return add3(10, 20, 30);   /* edi=10, esi=20, edx=30 */
+            }
+
+            /* expected disassembly sketch (System V x86-64):
+                 mov edi, 0xa
+                 mov esi, 0x14
+                 mov edx, 0x1e
+                 call add3
+                 ; eax = 60 on return
+            */
+        - type: quiz
+          question_id: pwnmem-arg-register
+          question: 'Under System V AMD64 convention, which register carries the first integer argument?'
+          options:
+            - id: a
+              text: 'rax'
+            - id: b
+              text: 'rdi'
+            - id: c
+              text: 'rcx'
+            - id: d
+              text: 'rdx'
+          answer_ids: [b]
+          explanation: >
+            Order runs rdi, rsi, rdx, rcx, r8, r9 for the first six integers;
+            rax carries returns instead. rcx taking the fourth slot trips up
+            anyone arriving from Windows, where it leads.
+        - type: prose
+          markdown: |
+            Variadic functions bend contracts slightly, floating-point
+            arguments travel in xmm registers, and structure passing varies by
+            size, so treat the summary here as the load-bearing ninety percent.
+            The durable skill is reflexive: identify convention first, then
+            read arguments, then judge behavior. Analysts who skip step one
+            misread everything after it.
+    - id: mapping-crash-addresses
+      title: 'Mapping a crash address back home'
+      blocks:
+        - type: prose
+          markdown: |
+            Debuggers report faults as addresses, and the fastest diagnostic
+            question is always which region did that address belong to. High
+            addresses near the stack pointer suggest stack trouble: smashed
+            locals, corrupted saved pointers, exhausted stack. Mid-range
+            addresses inside heap territory implicate dynamic allocations:
+            use after free, overflow into allocator metadata. Tiny addresses,
+            especially anything below a few kilobytes, mean null or near-null
+            dereferences, usually uninitialized or failed lookups rather than
+            deliberate corruption. Jump targets that fall outside mapped
+            ranges altogether indicate corrupted control flow.
+
+            Building the reflex costs one habit: on every fault, print the
+            memory map and locate the address before theorizing. Region
+            placement prunes hypothesis space dramatically, turning infinite
+            speculation into two or three concrete questions. It also feeds
+            clean language into reports, since saying the faulting target fell
+            within freed heap bounds communicates more than adjectives ever
+            will.
+        - type: code
+          language: text
+          code: |
+            $ gdb -q ./toycore -ex run -ex 'info proc mappings' -batch \
+                < crash_input.bin 2>&1 | tail -8
+            Program received signal SIGSEGV, Segmentation fault.
+            0x0000558d3c24119c in handle_record (...)
+            Start Addr           End Addr       Size     Offset objfile
+                0x558d3c240000     0x558d3c242000    0x2000  0x0   ./toycore
+                0x558d3f5a0000     0x558d3f5c1000  0x21000  0x0   [heap]
+
+            reading: fault site sits inside ./toycode text, i.e. the crash
+            occurred executing valid code, so suspicion moves to the data it
+            touched, not to hijacked control flow
+        - type: callout
+          tone: warning
+          markdown: |
+            Crash triage belongs on samples and programs you are authorized
+            to debug. Reproducing crashes of software outside scope crosses
+            lines this course treats as hard boundaries.
+    - id: toy-binaries-as-laboratory
+      title: 'Toy binaries as your laboratory'
+      blocks:
+        - type: prose
+          markdown: |
+            Memory concepts stick when a debugger makes them visible, and the
+            safe way to get that visibility is writing your own tiny programs
+            inside your own lab. Nothing in this course requires attacking
+            someone else's binary; a twenty-line C file you compiled yourself
+            demonstrates every idea here. Write a function with known locals,
+            print their addresses, run it repeatedly, and watch ASLR shuffle
+            bases between executions. Step through the prologue instruction by
+            instruction until push rbp and friends feel like sentences you
+            can recite.
+        - type: code
+          language: c
+          code: |
+            /* lab_toy.c: compile in YOUR lab only; teaching aid */
+            #include <stdio.h>
+
+            void frame_demo(int seed) {
+                int local_a = seed;
+                int local_b = seed * 2;
+                printf("frame %p %p\\n", (void *)&local_a, (void *)&local_b);
+            }
+
+            int main(void) {
+                frame_demo(21);
+                return 0;
+            }
+            /* expected style output (addresses vary per run):
+                 frame 0x7ffc31d2a4 0x7ffc31d2a8
+            */
+        - type: quiz
+          question_id: pwnmem-lab-purpose
+          question: 'Why does this course center exercises on toy binaries you compile yourself?'
+          options:
+            - id: a
+              text: 'Self-written toys remove licensing fees from training.'
+            - id: b
+              text: 'They make concepts observable while keeping practice inside authorized, harmless territory.'
+            - id: c
+              text: 'Compilers refuse to optimize small files, keeping debugging honest.'
+            - id: d
+              text: 'Real software contains no useful learning examples.'
+          answer_ids: [b]
+          explanation: >
+            Ownership plus harmlessness defines the sandbox ethos: you gain
+            full visibility into something you control, practicing skills
+            transferable later only inside proper authorization. Convenience
+            and licensing are side notes at best.
+        - type: prose
+          markdown: |
+            With the map internalized, conventions fluent, and a laboratory
+            humming, you hold every prerequisite for the next module, where
+            overflows meet the mitigations engineered to catch them. Keep the
+            toy project open; the next module asks it to demonstrate what
+            happens when a write ignores the frame boundary.
+  cheat_sheet: |
+    # Process memory layout and stack conventions
+
+    Regions:
+        text  r-x  code
+        data  rw-/r-- globals, constants
+        heap  rw-  malloc'd, grows up
+        stack rw-  frames, grows down
+
+    Virtual memory:
+        per-process page tables -> same VA, different RAM
+        ASLR shuffles bases per run; compare only like runs
+
+    Frame lifecycle:
+        call pushes return addr
+        push rbp; mov rbp,rsp; sub rsp,N   (prologue)
+        leave == mov rsp,rbp; pop rbp      (epilogue)
+        ret pops return addr and jumps
+
+    SysV x86-64 args: rdi rsi rdx rcx r8 r9 -> ret in rax
+    Win x64 args:     rcx rdx r8 r9 (+shadow space)
+
+    Crash triage order:
+        1. note faulting address 2. dump mappings
+        3. classify: low=null-ish, mid=heap, high=stack
+        4. prune hypotheses before theorizing
+
+    Lab rule:
+        learn on binaries YOU compiled, in YOUR sandbox

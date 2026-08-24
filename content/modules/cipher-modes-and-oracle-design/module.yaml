@@ -1,0 +1,369 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: cipher-modes-and-oracle-design
+  title: 'Block cipher modes and the oracle design lesson'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - ciphers
+    - modes
+    - ecb
+    - cbc
+    - padding-oracle
+    - aead
+spec:
+  track: crypto-binary
+  summary: >-
+    A strong block cipher used through the wrong mode leaks like a screen
+    door. This module teaches the modes as engineering choices with visible
+    consequences. You learn what ECB betrays through structure alone, how CBC
+    chains blocks and why flipping ciphertext bits moves plaintext bits in
+    predictable places, and then meet the padding oracle as the field's most
+    instructive design failure: a server whose error messages answer yes or no
+    about decrypted bytes until entire secrets fall out. Everything stays at
+    concept level against toy lab services, because the durable skill is
+    recognizing oracle-shaped designs during review, and the fix is concrete:
+    authenticated encryption with GCM-style tags verified before any further
+    processing.
+  objectives:
+    - Explain what a mode of operation adds to a raw block cipher.
+    - Predict ECB's structural leakage from data patterns alone.
+    - Trace CBC chaining and describe bit-flip consequences conceptually.
+    - Explain the padding oracle mechanism as an error-handling failure.
+    - Specify AEAD usage including tag verification ordering.
+    - Recognize oracle-prone patterns in designs and code reviews.
+  sections:
+    - id: modes-give-ciphers-memory
+      title: 'Modes give ciphers memory'
+      blocks:
+        - type: prose
+          markdown: |
+            A block cipher transforms exactly one fixed-size chunk, sixteen
+            bytes for AES, deterministically under its key. Real messages
+            exceed one chunk, so modes of operation define how chunks relate.
+            The naive arrangement encrypts each block independently, which is
+            ECB, electronic codebook, and it inherits a fatal property from
+            determinism: equal plaintext blocks yield equal ciphertext blocks,
+            always, anywhere in the message. Every other mainstream mode
+            introduces state, an initialization vector plus chaining or a
+            counter, so repetition stops being visible and positions stop
+            being interchangeable.
+
+            Choosing a mode therefore means deciding what patterns your
+            protocol can afford to reveal and what guarantees decryption
+            should enforce. IVs deserve their own sentence in every design
+            doc: they must be unpredictable where chaining modes are involved
+            and never repeat under the same key in counter-based modes.
+            Reviews that check only algorithm names miss this layer entirely,
+            yet history shows the mode decision breaks systems far more often
+            than the cipher beneath it.
+        - type: code
+          language: text
+          code: |
+            same 32-byte message, two modes (toy illustration)
+
+            plaintext blocks:  [AAAA....][AAAA....][BBBB....]
+            ECB ciphertext:    [X7f2....][X7f2....][9c04....]
+                                ^^^^^^^^  identical -> structure leaked
+
+            CBC (random IV) :  [51ab....][e09d....][77b3....]
+                                all distinct -> block equality hidden
+        - type: callout
+          tone: tip
+          markdown: |
+            Interview-grade summary: ECB stands for each-block-for-itself.
+            If someone cannot say what their IV policy is, the design has not
+            chosen a mode yet; it has inherited whichever one its library
+            defaulted to years ago.
+    - id: ecb-pattern-leakage
+      title: 'ECB and pattern leakage'
+      blocks:
+        - type: prose
+          markdown: |
+            The famous demonstration encrypts a bitmap under ECB and the
+            image remains recognizable in the output, because identical pixel
+            rows produce identical ciphertext rows regardless of content
+            secrecy. Structure survives even when values hide, and structure
+            carries information: record boundaries, repeated fields, template
+            layouts. Protocol analysts exploit this without touching keys,
+            correlating repeated ciphertext regions across messages to infer
+            session state or command repetition.
+
+            Realistic impact appears wherever input contains predictable
+            internal structure: serialized objects, fixed-width records,
+            images. Even random-looking binary benefits leak equality facts,
+            and equality across long time spans enables traffic analysis that
+            metadata defenses assumed was impossible. Modern guidance treats
+            ECB as acceptable only for single-block primitives such as key
+            wrapping steps defined by standards, never for messages.
+        - type: quiz
+          question_id: cryorc-ecb-tell
+          question: 'A colleague shares two ciphertext blocks from one ECB-encrypted file that match exactly. What fact follows?'
+          options:
+            - id: a
+              text: 'The underlying plaintext blocks were identical.'
+            - id: b
+              text: 'The file is corrupted in those positions.'
+            - id: c
+              text: 'Two different keys encrypted adjacent regions.'
+            - id: d
+              text: 'Nothing; ECB output repeats randomly.'
+          answer_ids: [a]
+          explanation: >
+            Determinism makes equality pass straight through ECB: same block
+            in, same block out, independent of position. That transparency is
+            precisely the property messages need to avoid.
+        - type: code
+          language: python
+          code: |
+            # toy ECB on 8-byte blocks, no real cipher involved
+            def toy_ecb(block: bytes) -> bytes:
+                # pretend permutation P keyed by K; deterministic!
+                return bytes(sorted(block))
+
+            p1 = b"AAAAAAAA"
+            p2 = b"AAAAAAAA"
+            print(toy_ecb(p1) == toy_ecb(p2))   # True every time
+            # real ECB behaves identically: equality in, equality out
+        - type: prose
+          markdown: |
+            Keep the toy honest: sorting is obviously lossy, but the equality
+            property it illustrates matches real ECB exactly. When reviewing
+            configurations, searching for mode strings like ecb in crypto
+            setup code finds survivors constantly, usually behind comments
+            claiming legacy compatibility.
+    - id: cbc-chaining-and-bit-flips
+      title: 'CBC chaining and bit-flip intuition'
+      blocks:
+        - type: prose
+          markdown: |
+            Cipher block chaining links blocks by feeding each previous
+            ciphertext block into the next encryption step, and decryption
+            mirrors it: recover the block, then XOR with the prior ciphertext
+            block to yield plaintext. That final XOR creates the mode's
+            signature vulnerability shape. An attacker who flips bit j inside
+            ciphertext block i corrupts block i entirely upon decryption,
+            randomness masquerading as noise, while deterministically toggling
+            bit j within block i plus one's plaintext. Controlled corruption
+            of chosen plaintext bits, without knowing any key, purely from
+            understanding the chain arithmetic.
+
+            The classic consequence targets protocols carrying parsed fields
+            inside encrypted blobs: flip bits governing an authorization flag
+            and the parser sees privilege it never granted, provided
+            corrupted neighbors survive validation. Whether that works depends
+            entirely on what integrity checks wrap the blob, which previews
+            the oracle section nicely. The defensive takeaway lands early:
+            confidentiality modes protect secrecy, not fidelity, and parsers
+            trusting decrypt-then-obey inherit whatever malleability the mode
+            permits.
+        - type: code
+          language: text
+          code: |
+            toy numbers only, 4-bit world
+
+            C_prev = 0b1010        P_next = D(C_next) xor C_prev
+            attacker flips last bit: 0b1010 -> 0b1011
+            result: D(C_next) unchanged, but
+                    P_next' = D(C_next) xor 0b1011 = P_next xor 0b0001
+
+            net effect: next block's matching bit flips predictably;
+            current block garbles into pseudorandom bytes
+        - type: prose
+          markdown: |
+            Reading the toy slowly beats memorizing formulas. Decryption XORs
+            recovered values with the previous ciphertext block verbatim, so
+            edits to that block edit the output equally verbatim. No secret
+            knowledge participated, just addition. Anywhere reviewers see
+            CBC plus parseable plaintext plus no authentication tag, this
+            arithmetic becomes an open question rather than a hypothetical.
+    - id: the-padding-oracle-design-failure
+      title: 'The padding oracle as a design failure'
+      blocks:
+        - type: prose
+          markdown: |
+            Block modes need full final blocks, so padding schemes mark where
+            data ends, PKCS#7 appending N bytes each valued N. Decryption
+            must validate that padding, and here the design fork decides
+            everything. One path rejects bad padding with a distinct error,
+            distinct timing, or distinct latency, becoming an oracle that
+            answers whether guessed trailing bytes happen to validate. The
+            other path folds every failure into one uniform response,
+            destroying the signal. Given a distinguishable oracle, classical
+            attacks reconstruct plaintexts byte by byte purely by submitting
+            crafted ciphertexts and watching verdicts, no key recovery ever
+            required.
+
+            This course teaches the mechanism and its lesson, never the
+            attack loop against real systems. The lesson generalizes far past
+            padding: any endpoint answering questions about decrypted content
+            through observable differences becomes an oracle, whether the
+            tell is status codes, timing jitter, cache behavior, or log
+            volume. Uniform failure paths, generic error responses, and
+            constant-time comparisons exist precisely to starve oracles of
+            signal.
+        - type: code
+          language: text
+          code: |
+            oracle-shaped vs hardened responses (lab service spec)
+
+            ORACLE SHAPE                          HARDENED SHAPE
+            400 "bad padding"                     400 "decryption failed"
+            403 "mac mismatch"                    400 "decryption failed"
+            200 after 3ms / 500 after 30ms        constant-time verify,
+                                                  uniform latency profile
+            stack traces w/ crypto internals      generic error + audit log
+
+            reviewer rule: if responses let anyone classify *why*
+            decryption failed, redesign before shipping
+        - type: callout
+          tone: danger
+          markdown: |
+            Scope boundary: probing oracle behavior belongs exclusively to
+            lab services built for coursework or systems under written
+            authorization. Submitting crafted ciphertexts at production
+            endpoints outside engagement rules violates platform policy and
+            real law alike.
+        - type: quiz
+          question_id: cryorc-oracle-signal
+          question: 'Which response design starves a padding oracle of signal?'
+          options:
+            - id: a
+              text: 'Distinct error codes for padding versus MAC failures.'
+            - id: b
+              text: 'One uniform failure response with constant-time verification throughout.'
+            - id: c
+              text: 'Detailed exception messages aiding legitimate debugging.'
+            - id: d
+              text: 'Faster rejection of invalid padding to reduce load.'
+          answer_ids: [b]
+          explanation: >
+            Oracles live on distinguishability. Uniform responses plus
+            constant-time paths remove the side channel attackers read.
+            Distinct codes, verbose exceptions, and timing shortcuts each
+            broadcast classification signals instead.
+    - id: authenticated-encryption-fixes
+      title: 'Authenticated encryption as the default'
+      blocks:
+        - type: prose
+          markdown: |
+            The entire previous section collapses under one design change:
+            authenticate ciphertext before treating it as meaningful.
+            Authenticated encryption modes, AEAD, produce an authentication
+            tag alongside ciphertext, computed over the encrypted bytes plus
+            associated data such as headers that must stay unencrypted but
+            bound. Decryption verifies the tag first and refuses everything
+            on mismatch, so bit-flip games and padding probes hit a wall
+            before parsers run. AES-GCM dominates current practice, ChaCha20
+            -Poly1305 thrives where hardware AES lacks, and both share the
+            operational contract: nonces never repeat per key, ever.
+
+            Nonce discipline deserves vigilance because GCM fails
+            catastrophically, not gracefully, when the contract breaks;
+            repeated nonces under one key expose keystream relations and
+            ultimately authentication keys themselves. Random ninety-six-bit
+            nonces suit low-volume keys, counters suit high-volume streams
+            with careful persistence, and designs must survive crashes
+            without rewinding counters. Reviews ask where nonces come from
+            and what happens across restarts, because answers there decide
+            whether the AEAD guarantee actually exists.
+        - type: code
+          language: python
+          code: |
+            # AEAD shape with cryptography-style API (illustrative)
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+            key = AESGCM.generate_key(bit_length=256)
+            aes = AESGCM(key)
+
+            nonce = b"unique-per-msg-96bits"[:12]     # NEVER reuse per key
+            ct = aes.encrypt(nonce, b"transfer 100", associated_data=b"acct=7")
+            print(aes.decrypt(nonce, ct, associated_data=b"acct=7"))
+            # b'transfer 100'
+
+            tampered = ct[:-1] + bytes([ct[-1] ^ 1])
+            try:
+                aes.decrypt(nonce, tampered, associated_data=b"acct=7")
+            except Exception:
+                print("rejected before parsing")       # uniform failure
+        - type: prose
+          markdown: |
+            Note associated data binding the account header into the tag:
+            swapping ciphertext between accounts now fails verification even
+            though neither blob was modified internally. That binding trick,
+            authenticating context alongside payload, resolves whole bug
+            classes in multi-tenant designs and costs one parameter.
+    - id: spotting-oracle-prone-designs
+      title: 'Spotting oracle-prone designs in review'
+      blocks:
+        - type: prose
+          markdown: |
+            Review fluency comes from naming shapes rather than remembering
+            incidents. Shape one: decryption followed immediately by
+            differentiated handling of its failure causes, padding versus
+            MAC versus format, each potentially observable. Shape two: error
+            paths leaking crypto internals through messages, stack traces,
+            or timing. Shape three: tokens or cookies decrypted then trusted
+            without tags, inheriting mode malleability into authorization
+            decisions. Shape four: nonce generation reading like an
+            afterthought, timestamps, zeroed buffers, counters reset by
+            redeploys.
+
+            Findings write themselves once shapes get named: propose AEAD
+            with explicit nonce strategy, demand uniform failure surfaces,
+            bind context via associated data, add tests asserting
+            indistinguishable error behavior. None require breaking anything;
+            they require reading designs the way adversaries do, asking what
+            each observable difference teaches.
+        - type: code
+          language: text
+          code: |
+            review checklist excerpt (crypto handling)
+
+            [ ] AEAD selected (GCM/ChaCha20-Poly1305), no bare CBC/ECB
+            [ ] nonce source documented + restart-safe
+            [ ] tag verified BEFORE json/xml/padding parsing
+            [ ] single generic error for every crypto failure
+            [ ] associated data covers tenant/context fields
+            [ ] tests assert indistinguishable failure timing/codes
+        - type: callout
+          tone: tip
+          markdown: |
+            Borrow the tester's question during reviews: what would I learn
+            by sending this endpoint ten thousand slightly-wrong inputs?
+            Designs with good answers are oracle-resistant almost by
+            construction.
+        - type: prose
+          markdown: |
+            Modes and oracles close the symmetric chapter with a clear moral:
+            primitives rarely fail, compositions do. Next the path turns
+            asymmetric, meeting RSA through five small numbers, signatures
+            through their fragile nonces, and protocols through the downgrade
+            mistakes that let everyone agree on less security than any party
+            intended.
+  cheat_sheet: |
+    # Cipher modes and oracle design
+
+    Mode map:
+        ECB   blocks independent -> equality leaks (avoid)
+        CBC   chain via prev CT; bit flips move predictably; needs tags
+        CTR   counter keystream; nonce reuse fatal; parallel friendly
+        GCM   CTR + auth tag (AEAD); nonce uniqueness mandatory
+
+    Padding oracle essence:
+        padding validity became observable -> byte-by-byte recovery
+        starvation: uniform errors, constant time, tag-first order
+
+    AEAD contract:
+        verify tag BEFORE parsing anything
+        nonces: unique per key forever; restart-safe counters
+        associated data binds context headers into the tag
+
+    Review shapes:
+        decrypt-then-differentiate failures  -> oracle risk
+        errors revealing crypto stage        -> signal leak
+        untagged decrypt-then-trust tokens   -> malleability
+        casual nonce sources                 -> silent catastrophic fail

@@ -1,0 +1,416 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: encodings-and-hash-failures
+  title: 'Encodings versus encryption and hash usage failures'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - encoding
+    - base64
+    - hashing
+    - password-storage
+    - integrity
+spec:
+  track: crypto-binary
+  summary: >-
+    A remarkable share of real-world crypto incidents begin with someone
+    confusing transformation for protection. This module installs the
+    distinctions that prevent it. You learn exactly what encoding does and
+    does not promise by running base64 yourself and reading the result, then
+    meet hashes through the three properties they are actually relied upon
+    for, and watch those properties fail when passwords meet fast unsalted
+    digests or when checksum algorithms get asked to guarantee authenticity.
+    Cleartext protocol lessons close the loop between theory and wire traffic,
+    and a code-review checklist turns everything into habits you can apply to
+    any codebase during authorized work tomorrow morning.
+  objectives:
+    - Distinguish encoding, hashing, and encryption by what each guarantees.
+    - Decode and encode data confidently and recognize common formats on sight.
+    - Explain hash properties plainly and spot integrity designs anchored wrongly.
+    - Identify unsafe password storage and specify the modern replacement.
+    - Recognize credential exposure on cleartext protocol hops during review.
+    - Audit hash and encoding usage in code using a repeatable checklist.
+  sections:
+    - id: three-transformations-three-promises
+      title: 'Three transformations, three promises'
+      blocks:
+        - type: prose
+          markdown: |
+            Encoding repackages bytes for transport or display while keeping
+            them public; anyone can undo it with no key at all. Hashing maps
+            arbitrary input to fixed-size fingerprints, one-way by design, so
+            you can verify equality without recovering the original.
+            Encryption protects confidentiality using a key, and only key
+            holders may reverse it. Each answers a different question:
+            encoding asks will this survive the channel, hashing asks is this
+            the same data as before, encryption asks can anyone else read it.
+
+            Incidents happen when one gets used to answer another's question.
+            Base64-encoded credentials in configuration files protect nobody,
+            because decoding is free. Hashing a document proves it was not
+            altered but says nothing about who holds a copy. Encrypted data
+            with sloppy handling leaks through metadata regardless of cipher
+            strength. The professional reflex is naming which guarantee a
+            requirement actually needs before choosing any tool, and this
+            module drills that reflex until it fires automatically.
+        - type: code
+          language: bash
+          code: |
+            $ printf 'password123' | base64
+            cGFzc3dvcmQxMjM=
+
+            $ printf 'cGFzc3dvcmQxMjM=' | base64 -d; echo
+            password123
+
+            $ printf 'password123' | sha256sum
+            ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f  -
+        - type: callout
+          tone: tip
+          markdown: |
+            Spotting encoded secrets in the wild: base64 output uses A to Z,
+            a to z, digits, plus and slash, padded with equals signs. Hex
+            strings double the length using 0-9a-f. Neither hides anything;
+            both just change costumes.
+    - id: reading-encodings-on-sight
+      title: 'Reading encodings on sight'
+      blocks:
+        - type: prose
+          markdown: |
+            Analysts meet encodings constantly, and fluency means recognizing
+            formats and knowing their quirks rather than memorizing bit math.
+            Base64 groups three bytes into four characters, so length grows by
+            roughly a third and padding appears when input length is not a
+            multiple of three. URL-safe variants swap slash and plus for
+            hyphen and underscore, which matters when tokens travel in links.
+            Hex doubles length and stays human-parsable. JWTs concatenate
+            base64url segments with dots, so every token you decoded in earlier
+            coursework was an encoding lesson wearing a lanyard.
+
+            Quirks become findings in review. Padding differences break naive
+            string comparisons across libraries. Whitespace tolerance varies,
+            so pasted tokens fail mysteriously. Some systems accept both
+            alphabets while others reject silently, producing bugs that look
+            like flaky authentication but are really alphabet disagreements.
+            When a report says tokens failed intermittently, checking which
+            decoder met which encoder is often faster than reading any
+            middleware.
+        - type: code
+          language: python
+          code: |
+            import base64
+
+            token = "cGFzc3dvcmQxMjM="
+            print(base64.b64decode(token))            # b'password123'
+            print(len(token), len(base64.b64decode(token)))
+            # 16 11   <- ~4/3 growth rule, visible here
+
+            urlsafe = base64.urlsafe_b64encode(b"??").decode()
+            print(urlsafe)                            # 'Pz8=' style output
+        - type: quiz
+          question_id: cryenc-base64-guarantee
+          question: 'A teammate proposes storing API keys base64-encoded in source control. What is the correct objection?'
+          options:
+            - id: a
+              text: 'Base64 corrupts long keys, breaking authentication.'
+            - id: b
+              text: 'Encoding provides no secrecy; anyone can decode without a key.'
+            - id: c
+              text: 'Source control cannot store base64 safely due to line endings.'
+            - id: d
+              text: 'None; base64 counts as encryption for short values.'
+          answer_ids: [b]
+          explanation: >
+            Encoding changes representation only. Decoding needs no secret,
+            so repository readers inherit full credential access. Secret
+            managers or at minimum secret-scanning-excluded vault files are
+            the actual answers.
+    - id: hash-properties-and-integrity-failures
+      title: 'Hash properties and the integrity checks that lied'
+      blocks:
+        - type: prose
+          markdown: |
+            Three properties carry all practical hash reasoning.
+            Preimage resistance means given a digest, finding any input
+            producing it should be computationally hopeless. Second preimage
+            resistance means given a specific input, finding a different
+            input sharing its digest should be equally hopeless. Collision
+            resistance means finding any two inputs sharing a digest should
+            be hopeless. They strengthen in that order of difficulty, which
+            explains why broken digests lose collision resistance first while
+            preimage attacks remain theoretical.
+
+            Designs fail when they lean on a property the algorithm no longer
+            has, or never had. Legacy checksum functions like CRC32 were built
+            to catch transmission noise, not adversaries, and crafting
+            collisions there is trivial. MD5 lost collision resistance publicly
+            over fifteen years ago yet still guards download pages and legacy
+            deduplication logic. SHA-1 followed under funded attack. Modern
+            guidance centers on the SHA-2 family and SHA-3, with BLAKE3 earning
+            a seat in high-throughput tooling. Choosing among them is less
+            about raw speed than about matching the property your design
+            actually depends upon.
+        - type: code
+          language: bash
+          code: |
+            $ printf 'invoice total: 40' | sha256sum
+            6a1d...  (digest A)
+            $ printf 'invoice total: 400' | sha256sum
+            9c02...  (digest B)
+
+            # different inputs -> different digests; tampering with the
+            # amount is detectable *only if* digest A was recorded earlier
+            # by someone trustworthy, i.e. integrity = hash + trusted anchor
+        - type: prose
+          markdown: |
+            That comment deserves emphasis because it completes the model. A
+            hash alone anchors nothing; integrity emerges from comparing
+            against a digest obtained through some channel the adversary
+            cannot rewrite. Signed manifests, TLS-protected update feeds, and
+            printed manuals have all played the trusted-anchor role. Reviewers
+            who see hashes compared against attacker-reachable locations name
+            the flaw immediately: the anchor moved inside the blast radius.
+        - type: prose
+          markdown: |
+            Digests guard pipelines everywhere: package downloads, firmware
+            updates, document workflows. Failures share one template, a
+            trust path drawn through something attackers can edit. Consider a
+            software page serving both binaries and their MD5 checksums over
+            plain HTTP; whoever controls the network replaces both artifacts
+            and recalculates the checksum, and every downstream verifier nods
+            along. The digest math worked perfectly throughout, which is the
+            lesson: integrity failures are usually architecture failures, not
+            arithmetic ones.
+
+            Deliberate collisions add a sharper variant. Given MD5's broken
+            collision resistance, two chosen files can share a digest, so an
+            innocent file submitted for approval later swaps for its malicious
+            twin without detection by the recorded hash. Defenses follow the
+            property loss: prefer collision-resistant families for anything
+            adversarial, anchor digests through authenticated channels or
+            signatures, and treat legacy checksum fields in old protocols as
+            decoration until proven otherwise.
+        - type: code
+          language: text
+          code: |
+            pipeline review sketch
+
+            build -> artifact.tar -> md5 artifact.md5   <-- both land on
+                                     |                    same HTTP origin
+                                     v
+            consumer fetches both, md5sum matches -> "verified"
+
+            failure: origin compromise rewrites both lines coherently
+            fix: sign manifest at build (key offline), verify signature
+                 first, then compare strong digest inside signed payload
+        - type: prose
+          markdown: |
+            The corrected flow relocates trust to a signing key that never
+            touches the distribution host. Notice how little changed
+            mechanically, one signature wrapping the manifest, yet the
+            attack surface collapses from network-path adversaries to
+            key-holders only. Most integrity remediations read like this:
+            not new mathematics, better anchoring.
+        - type: quiz
+          question_id: cryenc-integrity-anchor
+          question: 'A download page serves binaries and their MD5 checksums over plain HTTP. Why does verifying the checksum fail to protect users?'
+          options:
+            - id: a
+              text: 'MD5 digests are too short to match large files.'
+            - id: b
+              text: 'An attacker controlling the network rewrites artifact and checksum together, keeping them consistent.'
+            - id: c
+              text: 'Browsers refuse to run checksum verification automatically.'
+            - id: d
+              text: 'Checksums only work over HTTPS connections.'
+          answer_ids: [b]
+          explanation: >
+            Integrity requires an anchor the adversary cannot rewrite. A
+            co-located checksum over an unauthenticated channel moves inside
+            the blast radius, so substitution stays self-consistent. Signed
+            manifests through authenticated channels restore the guarantee.
+    - id: password-storage-failures
+      title: 'Password storage done wrong, then right'
+      blocks:
+        - type: prose
+          markdown: |
+            Password verification wants a strange property: the stored value
+            must let you confirm guesses without letting anyone invert it.
+            Plain hashing technically satisfies inversion resistance, yet fails
+            operationally because general digests run billions of guesses per
+            second on commodity GPUs. Unsalted hashing adds rainbow tables,
+            precomputed dictionaries keyed by digest, turning identical
+            passwords everywhere into identical rows. Breach dumps from sites
+            that made these mistakes read like leaked plaintext with extra
+            steps, and user reuse spreads the damage far past the original
+            breach.
+
+            The fix pairs memory-hardness with per-user randomness. Slow,
+            memory-stretching KDFs such as Argon2id, scrypt, bcrypt, or
+            modern PBKDF2 configurations burn attacker hardware deliberately,
+            and embedded salts ensure equal passwords hash unequally across
+            accounts. Parameters belong in review scope too, since yesterday's
+            safe cost settings quietly become today's weak ones as hardware
+            improves. Verification code re-derives and compares in constant
+            time; anything faster than a blink during login suggests the
+            wrong primitive sits underneath.
+        - type: code
+          language: text
+          code: |
+            $ # illustrative cost comparison, toy numbers
+            $ python3 - <<'EOF'
+            import time, hashlib
+            pw = b"correct horse"
+            t0 = time.perf_counter()
+            hashlib.sha256(pw).digest()
+            print(f"sha256     : {(time.perf_counter()-t0)*1e6:.1f} us")
+            import hashlib as h
+            t0 = time.perf_counter()
+            h.pbkdf2_hmac("sha256", pw, salt=b"per-user", iterations=600_000)
+            print(f"pbkdf2 600k: {(time.perf_counter()-t0)*1000:.0f} ms")
+            EOF
+            sha256     : 1.2 us
+            pbkdf2 600k: 210 ms
+            # ~175000x slowdown per guess is the entire point
+        - type: quiz
+          question_id: cryenc-password-kdf-choice
+          question: 'Which storage choice best resists offline cracking after a database leak?'
+          options:
+            - id: a
+              text: 'SHA-256 of the password, hex encoded.'
+            - id: b
+              text: 'Argon2id with per-user random salt and current cost parameters.'
+            - id: c
+              text: 'MD5 with a global app-wide pepper baked into source.'
+            - id: d
+              text: 'AES encryption of passwords with a config-file key.'
+          answer_ids: [b]
+          explanation: >
+            Memory-hard KDF plus unique salt targets exactly the offline
+            guessing scenario. Fast digests invite GPU farms, MD5 adds
+            collision baggage, and encrypting passwords means the app holds a
+            decryption key, so the leak becomes plaintext the moment config
+            and database travel together, which they do.
+        - type: callout
+          tone: warning
+          markdown: |
+            Peppers are not salts. A global secret mixed into every hash adds
+            value only when its storage truly separates from the database;
+            claiming it compensates for missing KDF work is a classic review
+            finding.
+    - id: cleartext-protocol-lessons
+      title: 'Cleartext protocol lessons'
+      blocks:
+        - type: prose
+          markdown: |
+            Encoding and hashing discussions end at machines, but credentials
+            travel wires, and protocols predating ubiquitous encryption still
+            send them naked. FTP authenticates in cleartext, telnet ships
+            whole sessions unencrypted, and assorted management protocols
+            broadcast more than operators remember. Reading such traffic needs
+            no exotic capability, only position and patience, which is why
+            capture-based evidence shows up constantly in introductory
+            investigations. The packet-diary room stages precisely this: one
+            capture file holding an FTP session whose control channel leaks a
+            login exchange byte by byte, and the exercise is reading it like
+            an analyst rather than a bystander.
+
+            The defensive translations generalize beyond any single protocol.
+            Prefer TLS-wrapped successors wherever they exist, disable legacy
+            listeners unless a documented dependency survives, and monitor for
+            services that downgrade themselves quietly after upgrades. During
+            authorized reviews, noting where credentials cross untrusted
+            segments produces findings even sophisticated teams keep
+            rediscovering, because convenience keeps reinstalling the same
+            mistakes.
+        - type: quiz
+          question_id: cryenc-cleartext-finding
+          question: 'A capture shows USER and PASS commands readable during an FTP login. What is the accurate severity framing?'
+          options:
+            - id: a
+              text: 'Informational only; FTP is obsolete and unreachable.'
+            - id: b
+              text: 'Credentials disclosed to anyone with network position; treat as exposed and rotate.'
+            - id: c
+              text: 'High severity only if the password was weak.'
+            - id: d
+              text: 'Not a finding since encryption exists elsewhere in the stack.'
+          answer_ids: [b]
+          explanation: >
+            Cleartext credentials expose all users of that path regardless of
+            password strength, and exposure demands rotation assumptions.
+            Protocol age affects likelihood, not the nature of the disclosure,
+            and unrelated TLS elsewhere does not launder this hop.
+        - type: prose
+          markdown: |
+            Carry the habit forward: whenever a design diagram shows a hop,
+            ask what an observer on that segment receives. Answers drive both
+            findings and fixes, and they set up the mode-and-oracle
+            conversations arriving in the next module, where encryption
+            finally takes the stage properly.
+    - id: auditing-hash-usage-in-code
+      title: 'Auditing hash and encoding usage in code'
+      blocks:
+        - type: prose
+          markdown: |
+            Code review converts everything above into pull-request comments,
+            and a checklist beats inspiration. For every hash call site ask:
+            what property does this rely upon, is the algorithm still credited
+            for it, does the comparison use constant time where secrets meet
+            digests, and where does the anchor live? For every encoding call
+            site ask: is anything here assuming secrecy from representation,
+            do alphabets agree across boundaries, and does padding handling
+            survive empty or odd-length inputs?
+        - type: code
+          language: diff
+          code: |
+            # review excerpt (illustrative)
+            - digest = hashlib.md5(password.encode()).hexdigest()
+            - return hmac.compare_digest(stored, digest)   # ok timing...
+            + raise Unsupported("password hashing moved to argon2id")
+
+            # reviewer note: even with compare_digest, md5-for-passwords
+            # fails speed requirements; migration plan attached in ticket
+        - type: prose
+          markdown: |
+            The diff shows a reviewer rejecting a technically functioning
+            change because the property mismatch outweighs local correctness.
+            That judgment, caring about what code relies upon rather than
+            merely whether it runs, is the module's destination. Practice the
+            checklist against any codebase you legitimately maintain and the
+            patterns become recognizable within days.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep a personal list of deprecated primitives with one-line
+            reasons. Reviews move faster when objections arrive with receipts,
+            and the list ages well because deprecation happens slowly.
+  cheat_sheet: |
+    # Encodings vs encryption, hash failures
+
+    Guarantees:
+        encoding  = representation, zero secrecy
+        hash      = fingerprint, one-way, integrity w/ trusted anchor
+        encryption= confidentiality via key
+
+    Hash properties:
+        preimage > second-preimage > collision (hardest last)
+        broken first: MD5, then SHA-1; defaults now SHA-2/SHA-3
+
+    Password storage:
+        never: plain/fast/unsalted digests
+        yes: argon2id / scrypt / bcrypt / pbkdf2(current params)
+        salt = per-user random; pepper = separate secret store
+
+    Integrity pattern:
+        digest + anchor attacker cannot rewrite
+        weak link found by asking: who computes/stores/compares?
+
+    Cleartext hops:
+        ftp/telnet-style logins leak on the wire
+        finding voice: credentials exposed to network observers; rotate
+
+    Code audit questions:
+        property? algorithm credit? constant time? anchor location?
