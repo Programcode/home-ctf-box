@@ -1,0 +1,157 @@
+# Hungarian overrides for linux-shell-and-files.
+# Only prose/callout blocks are translated; code and quiz blocks stay
+# English-owned. Protected spans (inline code, flags, paths) must match
+# the source verbatim; validate_translation enforces this in CI.
+locale: hu
+sections:
+  - id: navigate-with-intent
+    title: 'Navigálás szándékkal'
+    blocks:
+      - type: prose
+        markdown: |
+          A kezdők egy-egy cd paranccsal lépkednek a fájlrendszerben; az operátorok
+          mintákkal mozognak. A shell a helyettesítést még azelőtt elvégzi, hogy a
+          parancs elindulna, ezért a `ls *.log` minden .log végű nevet elkér, a
+          `mv report?.txt` a report1.txt-hez nyúl, de a report10.txt-hez nem, a
+          `[a-c]*` pedig az a, b vagy c betűvel kezdődő neveket találja el. Mindezt
+          az idézés irányítja: a dupla idézőjelek között a változók
+          behelyettesítődnek, az aposztrófok között viszont minden szó szerint marad.
+
+          Két további szokás választja el a magabiztos mozgást a hektikástól. A
+          kapcsos zárójeles helyettesítés páros utakat ír olcsón, mint a
+          `mkdir -p lab/{raw,clean}`. A history-helyettesítés pedig nem csak a
+          felfelé nyíl: a Ctrl+R lenyomásával töredék alapján kereshetsz a régi
+          parancsok között, ami akkor számít, amikor a történeted már több száz
+          sort őriz, amit nem írnál újra.
+
+          Egy figyelmeztetés tartja biztonságban ezt a jártasságot. A helyettesítés
+          a parancs futása előtt történik, így a `rm *` rossz könyvtárban kérdezés
+          nélkül töröl mindent, amit lát. Az operátorok destruktív glob előtt
+          pillantást vetnek a `pwd` kimenetére; ez a két másodperces ellenőrzés
+          több karriert mentett meg, mint bármely mentési politika.
+      - type: callout
+        tone: tip
+        markdown: |
+          Ha egy helyettesítés fájlnevekben lévő szóközök miatt nem talál semmit,
+          tedd az egész mintát idézőjelbe, vagy használj tab-kiegészítést. A
+          tab-kiegészítés a szóközöket mindig helyesen escape-eli.
+  - id: read-search-and-redirect
+    title: 'Olvasás, keresés, átirányítás'
+    blocks:
+      - type: prose
+        markdown: |
+          A Linuxon a szöveg az egyetemes interfész, és négy ige vezérli. Rövid
+          kimenethez cat-tal nézd meg a fájlt, hosszúhoz less-szel lapozd. Keresni
+          grep-pel érdemes: az `-i` nem különbözteti meg a kis- és nagybetűt, az
+          `-n` sorszámozza a sorokat, az `-r` rekurzívan megy a könyvtárakba, a
+          `-v` pedig megfordítja a találatot. Számolni a wc-vel tudsz, annak sor-,
+          szó- és karakterszámláló kapcsolóival.
+
+          Az átirányítás dönti el, hová mennek a stream-ek. Minden parancs standard
+          kimenete az 1-es leírón fut, standard hibája a 2-esen. A `command > out`
+          az stdoutot fájlba gyűjti, a `>>` csonkolás helyett hozzáfűz, a `2>`
+          egyedül a hibákat menti, a `2>&1` pedig összevonja őket. A pipe-ok olyan
+          programokat láncolnak, amelyek mindegyike egy dolgot csinál jól: a sort
+          táplálja a uniq-et, a grep a wc-t, és három kicsi eszköz lánca sokszor
+          egész szkripteket vált ki.
+      - type: prose
+        markdown: |
+          Az utolsó pipeline megér egy második ránézést. A find a /etc
+          fájlrendszerében jár .conf fájlokat keresve, az engedélypanaszokat a
+          2>/dev/null vezeti le a semmibe, a wc -l pedig megszámolja, ami átéli az
+          utat. A pipeline-ok balról jobbra, mondatként való olvasása az az
+          alapképesség, amelyet ez a modul épít, és minden későbbi modul feltételezi,
+          hogy megvan.
+  - id: permissions-are-the-lock-system
+    title: 'Az engedélyek zárrendszere'
+    blocks:
+      - type: prose
+        markdown: |
+          Minden fájlhoz tartozik tulajdonos, csoport és egy kilenc karakteres
+          módsztring, például rwxr-x---. Olvasd három hármasra bontva: tulajdonos,
+          csoport, többiek. Minden hármas olvasási, írási és futtatási jogot ad. A
+          könyvtárak ugyanezeket a betűket eltolódott jelentéssel használják: a
+          futtatás belépést jelent, az olvasás a nevek listázását. Ennek a
+          sztringnek az ismerete nem opcionális; a legtöbb sikertelen hozzáférés a
+          Linuxon rosszul olvasott engedélyekre vezethető vissza.
+
+          A módokat szimbolikusan úgy változtatod, hogy megmondod, ki és mit, mint
+          a `chmod u+x deploy.sh` esetén, vagy numerikusan három oktális jeggyel,
+          ahol az olvasás 4, az írás 2, a futtatás 1. A 640 tehát a tulajdonosnak
+          olvasást és írást ad, a csoportnak csak olvasást, mindenki másnak semmit.
+          A `chown user:group FILE` átruházza a tulajdonlást, és általában sudo
+          kell hozzá.
+      - type: callout
+        tone: warning
+        markdown: |
+          A könyvtárról hiányzó futtatási bit mindent elrejt, ami benne van, akkor
+          is, ha az olvasási jog megmaradt. Ha a listázás működik, de egyik elem
+          megnyitása sem megy Permission denied hibával, pontosan erre az esetre
+          gyanakodj.
+  - id: find-and-archive
+    title: 'Keresés és biztonságos archiválás'
+    blocks:
+      - type: prose
+        markdown: |
+          A find az élő fájlrendszert majdnem bármilyen tulajdonság szerint
+          átkutatja. Név szerint így: `-name '*.log'`, méret szerint így:
+          `-size +100M`, kor szerint így: `-mtime -7` az elmúlt hétre, mód szerint
+          pedig így: `-perm`. Találatain közvetlenül is cselekszik: a
+          `-exec COMMAND {} \;` minden találatra egy parancsot futtat, amiből a
+          find kötegelt feldolgozó lesz, nem pusztán kereső. A `-type f`, illetve
+          a `-type d` fájlokra és könyvtárakra szűkít, rendszerszintű könyvtárak
+          átvágásakor pedig a 2>/dev/null némítja el a zajt.
+
+          Az archiválás a tar-t gzip-pel párosítja. Létrehozás:
+          `tar czf out.tar.gz DIR`, kicsomagolás: `tar xzf out.tar.gz`, a tartalom
+          veszélytelen listázása: `tar tzf`. A z gzip tömörítést jelent, a c
+          létrehozza, az x kicsomagolja, a t listázza, az f pedig megnevezi az
+          archívumfájlt. Olyan könyvtárba bontsd ki, amely a tiéd, ne rendszerutak
+          fölé, mert az archívumok abszolútnak tűnő relatív útvonalakat is
+          hordozhatnak, amelyek olyan dolgokat írnak felül, amiket nem
+          szándékoztál elveszíteni. Egy gyors hash az archívumról, mielőtt útra
+          kelne, lehetővé teszi a fogadó félnek, hogy ellenőrizze: a másolat
+          sértetlenül ért célba; ezzel egyenesen az alapozó modul
+          bizonyíték-kezelési szokásaihoz kapcsolódsz vissza.
+  - id: practice-mini-lab
+    title: 'Gyakorlat: a bizonyíték ledobása'
+    blocks:
+      - type: prose
+        markdown: |
+          Végigcsinálhatod most ezt a sorozatot a saját terminálodban, vak
+          másolás nélkül. Építs kis fát, helyezz el szándékosan beállított
+          engedélyekkel egy fájlt, majd igazold a munkádat ellenőrző parancsokkal.
+          Nem az eredmény a lényeg, hanem a hurok: cselekszel, ellenőrzöl,
+          feljegyzed. Az operátorok semmiben nem bíznak, amit nem íratott ki épp
+          most a képernyőre.
+
+          Az első lépés felépíti a színhelyt. A második elültet egy fájlt, amely
+          hitelesítő adatokat tettet, és a tulajdonosára van zárva. A harmadik és
+          negyedik lépés auditálja az állapotot, hogy a jegyzetfüzet-bejegyzésed
+          bizonyítékot tartalmazzon, ne emléket. Mérd az idődet; két perc alatt
+          teljesíteni már folyékonyság.
+
+          Aztán törd meg szándékosan, és figyelj. Vedd le a futtatási bitet a
+          case01 könyvtárról, és próbáld meg újra listázni a tartalmát. Az
+          általad kiváltott hiba őszintébben tanít az engedélymodellre, mint még
+          egy oldalnyi olvasmány, és a bit visszaállítása utána egyetlen parancs.
+          A szándékos törés a saját labdban ingyen tanít; ugyanaz a hiba egy
+          megbízás alatt incidensjelentés.
+      - type: callout
+        tone: tip
+        markdown: |
+          Figyeld meg, hogyan hasheli az utolsó parancs a case könyvtár alatti
+          összes fájlt egyetlen sorban. Egy bizonyíték-ujjlenyomat passzt építettél
+          csupán a find és az exec segítségével; pontosan az etika modulból ismert
+          szokás ez, munkaruhába öltözve.
+  - id: checkpoint-shell-fluency
+    title: 'Ellenőrzőpont: shell-jártasság'
+    blocks:
+      - type: prose
+        markdown: |
+          Mielőtt a felhasználókhoz és szolgáltatásokhoz lépnél tovább, győződj
+          meg róla, hogy a teherhordó gondolatok túlélték a találkozást a
+          gyakorlattal. Ezek a kérdések pontosan azokat a hibamódokat célozzák,
+          amelyekkel a kezdők a következő modulba érkeznek: félreolvasott
+          módsztringek, elveszett stream-diszciplína és ellenőrizetlen
+          archívumokba vetett bizalom.
