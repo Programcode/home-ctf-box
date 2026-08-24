@@ -1,0 +1,19 @@
+# Build context slimming for docker/Dockerfile.api (context = repo root).
+.git
+.github
+.devcontainer
+.hermes
+backups
+content
+docs
+licenses
+node_modules
+platform
+rooms
+scripts
+security
+tests
+**/.next
+**/__pycache__
+**/*.pyc
+**/.venv

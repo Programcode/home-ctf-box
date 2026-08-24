@@ -1,0 +1,29 @@
+# OpenRange production edge proxy.
+#
+# OPENRANGE_DOMAIN unset/empty (compose default ":80"): plain HTTP for any
+# host on :80, right for loopback trials or an upstream proxy of your own.
+# OPENRANGE_DOMAIN=range.example.com: Caddy obtains and renews a public
+# Let's Encrypt certificate automatically for that site address.
+
+{$OPENRANGE_DOMAIN::80} {
+	encode zstd gzip
+
+	# Browser API calls ride the same-origin Next.js proxy route.
+	handle /api/or/* {
+		reverse_proxy web:3100
+	}
+
+	# FastAPI control plane (health, metrics, setup wizard, REST API).
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	# Lab gateway HTTP proxy + browser terminal websocket, namespaced.
+	handle_path /gateway/* {
+		reverse_proxy gateway:8772
+	}
+
+	handle {
+		reverse_proxy web:3100
+	}
+}
