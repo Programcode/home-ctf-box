@@ -1,0 +1,378 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: memory-disk-artifact-basics
+  title: 'Memory and disk artifacts: evidence that decays'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 80
+  tags:
+    - soc
+    - dfir
+    - memory-forensics
+    - timelines
+spec:
+  track: defense-cloud
+  summary: >-
+    Some evidence dies in minutes and some outlives the machine. This module
+    teaches you to respect that difference. You learn acquisition order and
+    why memory goes first, practice a first pass over a raw memory image
+    using strings before reaching for heavier frameworks, tour the disk
+    artifacts that reliably reveal execution, persistence, and access on
+    Linux and Windows, and confront timestamps including the tricks attackers
+    use to bend them. The module closes by merging heterogeneous logs into a
+    single UTC timeline and writing incident narratives that separate what
+    you observed from what you believe.
+  objectives:
+    - Order acquisition steps so volatile evidence survives longer than convenient evidence.
+    - Triage a raw memory image with strings and structure before adopting heavyweight tooling.
+    - Locate disk artifacts on Linux and Windows that reveal execution, persistence, and access history.
+    - Interpret file timestamps, recognize timestomping tells, and normalize clock skew to UTC.
+    - Merge heterogeneous log sources into one sorted UTC timeline with documented provenance.
+    - Write an incident timeline that labels every entry as observed fact or inference with confidence.
+  sections:
+    - id: order-of-volatility
+      title: 'Order of volatility'
+      blocks:
+        - type: prose
+          markdown: |
+            Every response decision competes with decay. Running processes,
+            network connections, injected code, and encryption keys exist
+            only while power flows; pull the plug and they vanish, keep it
+            running and the attacker keeps working. The classic resolution
+            is the order of volatility, a checklist that captures the most
+            perishable state first. Registers and RAM come before network
+            state, network state before running processes where not already
+            captured, processes before disk, disk before removable media and
+            backups. Rebooting to "stop the bleeding" destroys the richest
+            evidence source on the machine, which is why professionals treat
+            power as an evidence control rather than an IT convenience.
+
+            Discipline shows up in bookkeeping more than heroics. Record who
+            collected what, when, with which tool version, and hash every
+            image immediately so any later copy can prove continuity. A
+            perfect memory capture without those notes is nearly as weak as
+            no capture at all, because opposing counsel, auditors, and your
+            own team in three weeks all need reasons to trust the bytes.
+        - type: code
+          language: text
+          code: |
+            Acquisition ledger (keep beside every image)
+              case        INC-2026-0142
+              host        fin-wks-11, acquired on-site
+              utc         2026-08-21 02:41:07Z
+              collector   winpmem v4.0rc3, stdout -> usb drive
+              sha256      7f3c...e91b
+              notes       system uptime 6d; user "mara" logged in;
+                          no reboot since alert fired
+
+            $ sha256sum memdump-fin-wks-11.raw | tee acquisition.sha
+            7f3c9a2f...e91b  memdump-fin-wks-11.raw
+        - type: callout
+          tone: danger
+          markdown: |
+            Capture to external media, never onto the disk under
+            investigation. Writing gigabytes of image onto the evidence
+            overwrites exactly the slack and free space you may need later.
+        - type: quiz
+          question_id: mda-acquisition-order
+          question: 'You reach a live, compromised workstation. Which sequence respects volatility?'
+          options:
+            - id: a
+              text: 'Power off, image the drive, then analyze offline.'
+            - id: b
+              text: 'Capture RAM, record connections and process list, then image the disk while the system stays up.'
+            - id: c
+              text: 'Delete the malicious process with taskkill, then snapshot the disk.'
+            - id: d
+              text: 'Email yourself screenshots of Task Manager.'
+          answer_ids: [b]
+          explanation: >
+            Memory dies with power, so it moves first; disk survives shutdown
+            but imaging while live avoids the reboot gap. Killing the process
+            destroys its memory footprint, and screenshots are context, not
+            evidence.
+    - id: memory-triage-first-pass
+      title: 'Memory triage first pass'
+      blocks:
+        - type: prose
+          markdown: |
+            Full frameworks such as Volatility reconstruct process tables,
+            network sockets, and injected regions from raw images, and real
+            teams lean on them. Before any framework runs, though, a plain
+            strings pass pays for itself. Malicious payloads must contain
+            their own configuration somewhere: command-and-control addresses,
+            embedded scripts, mutex names, base64 blobs. Those fragments
+            survive in physical memory even when listing structures are
+            scrubbed, because strings reads every printable run regardless of
+            who owns the page. Ten minutes of grepping frequently hands you
+            domains, user agents, and file paths that later direct the deep
+            analysis instead of wandering through it.
+
+            Treat hits as leads requiring corroboration. A URL in memory
+            proves presence of the string, nothing about who used it or when,
+            so each lead graduates only after a second source agrees, usually
+            a proxy log or the disk image itself. Wide-character encodings
+            hide from default settings, hence the -el flag on Windows-side
+            dumps; minimum length flags cut noise; sorting and deduplicating
+            turn megabytes of output into a page worth reading.
+        - type: code
+          language: bash
+          code: |
+            $ strings -a -n 8 memdump.raw \
+                | grep -E '^https?://|[a-z0-9]{8,}\.(exe|dll|ps1|tmp)' \
+                | sort -u | head -5
+            http://203.0.113.66/ps/i.ps1
+            msmpeng.exe
+            svhost32.exe.tmp
+            winlogon.sdb
+            C:\Users\mara\AppData\Local\Temp\svhost32.exe.tmp
+
+            $ strings -el memdump.raw | grep -iE 'mutex|Global\\' | sort -u | head -3
+            Global\{3F5A-2026-CLEAN}
+            Local\Zone.Identifier
+        - type: prose
+          markdown: |
+            The excerpt above tells a compact story already: a fake svchost
+            spelling (svhost), a dropped executable in Temp, a staging script
+            fetched over HTTP, all corroborated by paths rather than guesses.
+            That narrative now steers the disk phase toward specific files and
+            registry locations instead of full-image wandering, saving hours.
+            Note the discipline in the output: bounded patterns, head limits,
+            sorted uniqueness. Memory triage rewards analysts who can narrow
+            questions until tools answer them cheaply.
+    - id: disk-artifacts-that-matter
+      title: 'Disk artifacts that matter'
+      blocks:
+        - type: prose
+          markdown: |
+            Disks remember almost everything if you know where to look. On
+            Linux the high-yield set is short. Cron directories and systemd
+            unit files reveal persistence. Shell histories and profile
+            scripts show operator habits and startup tricks. authorized_keys
+            files expose backdoor access paths. /var/log holds authentication
+            and service journals, while /tmp and world-writable spool
+            directories catch dropped tools. On Windows, add execution
+            traces: Prefetch entries record program runs, AmCache and
+            Shimcache remember binaries and install order, and the registry's
+            autostart locations mirror the persistence channels covered in
+            the telemetry module. None of these sources is individually
+            decisive; together they cross-check beautifully.
+
+            Hunt the artifact set systematically rather than trusting
+            directory listings, because malware hides from ls but rarely from
+            find with explicit criteria. Timestamps from stat feed straight
+            into the timeline work coming next section.
+        - type: code
+          language: bash
+          code: |
+            # recently written executables and scripts outside package dirs
+            $ sudo find / -xdev \( -path /usr/lib -o -path /var/lib \) -prune \
+                -o -type f \( -name '*.sh' -o -perm -u+x \) \
+                -newermt '2026-08-18' -printf '%TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null \
+                | sort | head -4
+            2026-08-19 02:57 /etc/cron.d/storage-sweeper
+            2026-08-19 02:58 /usr/local/bin/update-check
+            2026-08-20 03:00 /home/analyst/.config/systemd/user/graph-upd.service
+
+            # who holds persistent shell access?
+            $ sudo grep -l . /home/*/.ssh/authorized_keys /root/.ssh/authorized_keys 2>/dev/null
+            /home/analyst/.ssh/authorized_keys
+            /root/.ssh/authorized_keys
+        - type: prose
+          markdown: |
+            Two minutes of find produced the same trio the quiet-persistence
+            room plants for its capstone: a cron dropper, a phoning-home
+            binary, and a suspicious user-level service, plus one finding
+            nobody enjoys, an authorized_keys line in root's home. This is
+            the practical meaning of artifact literacy: knowing which dozen
+            files convert a mystery box into a narrative, then reading them
+            with commands any reviewer can rerun.
+        - type: quiz
+          question_id: mda-artifact-choice
+          question: 'You must prove whether a specific Windows binary ever executed, not merely whether it exists. Which artifact speaks most directly?'
+          options:
+            - id: a
+              text: 'The file size recorded in the MFT.'
+            - id: b
+              text: 'Prefetch entries, which record program executions with run counts and loaded files.'
+            - id: c
+              text: 'The recycle bin contents.'
+            - id: d
+              text: 'Desktop.ini metadata.'
+          answer_ids: [b]
+          explanation: >
+            Existence lives in filesystem structures; execution lives in
+            Prefetch, AmCache, and similar traces. Presence never proves a
+            run, which is exactly the distinction the question draws.
+    - id: timestamps-and-tricks
+      title: 'Timestamps and tricks'
+      blocks:
+        - type: prose
+          markdown: |
+            Timestamps anchor every timeline, and every timestamp carries
+            traps. Filesystems track several flavors with different rules:
+            modification time changes when content changes, access time
+            changes on reads where the mount does not disable it, and change
+            time tracks inode metadata moves that content edits do not
+            explain. Reading them together exposes manipulation. A binary
+            whose modification predates the operating system install invites
+            suspicion, as does a dropper whose change time lags its
+            modification by months.
+
+            Attackers know this and forge ahead anyway, which produces the
+            classic timestomping tell on NTFS: the standard information
+            attribute and the file name attribute store four timestamps
+            independently, and tools that set only one leave the pair
+            disagreeing. Legitimate software never disagrees with itself.
+            Clock skew across hosts adds quieter confusion, five minutes of
+            drift reordering your story invisibly, so normalization to UTC
+            with per-source offsets recorded happens before any sequencing
+            claims are made. Keep the applied offsets beside the timeline
+            itself, letting reviewers recompute rather than trust.
+        - type: code
+          language: bash
+          code: |
+            $ stat -c '%n | mtime=%y | ctime=%z' /usr/local/bin/update-check
+            update-check | mtime=2019-03-02 04:11:09.000000000 +0000 | ctime=2026-08-19 02:58:11.441 +0000
+
+            $ date -u -r /etc/cron.d/storage-sweeper
+            Wed Aug 19 02:57:40 UTC 2026
+
+            Read the pair: claimed birth in 2019, inode touched minutes
+            before the cron file appeared. Files do not travel back in time;
+            somebody set that clock by hand.
+        - type: quiz
+          question_id: mda-timestomping-tell
+          question: 'On NTFS, the standard information creation time says 2016 while the file name attribute creation time says yesterday. What is the defensible conclusion?'
+          options:
+            - id: a
+              text: 'The file was copied by backup software in 2016.'
+            - id: b
+              text: 'At least one attribute was manipulated, since legitimate writes update both consistently.'
+            - id: c
+              text: 'NTFS stores creation time only once.'
+            - id: d
+              text: 'The discrepancy proves the file is malicious.'
+          answer_ids: [b]
+          explanation: >
+            Divergence between the two timestamp sets indicates deliberate
+            editing, commonly via API calls that touch only standard
+            information. It proves tampering occurred; malice still needs
+            context around the file.
+    - id: building-the-timeline
+      title: 'Building the timeline'
+      blocks:
+        - type: prose
+          markdown: |
+            Individual artifacts answer questions; sequences answer cases.
+            Timeline construction merges sources into one chronology so
+            relationships surface: the script downloaded ninety seconds
+            before a new service appeared, the VPN login preceding lateral
+            movement. Professional pipelines such as Plaso parse dozens of
+            formats into a shared bodyfile shape, but the underlying idea
+            fits in one sentence: normalize every event to ISO 8601 UTC,
+            tag each line with its source, concatenate, sort. Hand-built
+            timelines remain entirely respectable for focused cases and
+            teach the format conventions the big tools assume.
+
+            Provenance travels with every line. A merged timeline must let a
+            reviewer trace any row back to the original file, tool version,
+            and extraction date, because untraceable rows poison trust in
+            the whole document. Keep the raw extractions immutable and build
+            derived views on copies, so corrections regenerate views instead
+            of editing history.
+        - type: code
+          language: bash
+          code: |
+            # each extractor emits: iso-utc | source | summary
+            $ cat auth.norm cron.stat proc.norm fs.norm | LC_ALL=C sort | head -6
+            2026-08-19T02:57:40Z|fs|cron.d/storage-sweeper written (mtime)
+            2026-08-19T02:58:11Z|fs|update-check created (ctime)
+            2026-08-20T03:14:01Z|cron|update-check spawned by CRON (root)
+            2026-08-20T03:14:09Z|proc|curl -> 203.0.113.66:443 (auditd)
+            2026-08-20T03:15:02Z|auth|accept ssh mara@10.0.4.31 key fp SHA256:kV3...
+            2026-08-20T03:16:44Z|proc|/bin/sh -c base64 -d x.b64 | sh (auditd)
+
+            $ cat auth.norm cron.stat proc.norm fs.norm | LC_ALL=C sort | wc -l
+            147
+        - type: prose
+          markdown: |
+            Six rows already narrate the intrusion arc: staging, scheduled
+            execution, outbound call, remote access, escalation attempt.
+            Notice what the merge exposed that single sources hid, namely the
+            SSH login landing between two host-side events, tying an account
+            to the activity window. That connection, not any individual line,
+            is the timeline's product, and reviewers pay attention when you
+            present sequences with sources attached rather than conclusions
+            naked.
+    - id: telling-the-story
+      title: 'Telling the story'
+      blocks:
+        - type: prose
+          markdown: |
+            An incident timeline is an argument built from evidence, so write
+            it like one. Every entry takes a label separating observation
+            from inference: "at 03:14:01Z cron executed update-check" is an
+            observation your logs support verbatim; "initial access likely
+            occurred between 02:50Z and 02:57Z" is an inference resting on
+            file creation times plus absent earlier telemetry, and it should
+            say so, including what would revise it. Confidence belongs on the
+            page too. Reviewers act faster on honest ranges than on confident
+            guesses that collapse under questioning.
+
+            Gaps get reported, not smoothed. If the endpoint agent paused for
+            forty minutes overnight, the timeline shows a hole and the note
+            explains collection failure rather than inventing innocence.
+            Executives read the first paragraph, engineers read the middle,
+            auditors check the sourcing, and the same document serves all
+            three only when observations,             inferences, confidence, and gaps stay visibly distinct throughout.
+
+            When evidence conflicts, show both readings instead of picking
+            quietly, because contradictions resolved in footnotes survive
+            review far better than contradictions discovered by it.
+        - type: code
+          language: markdown
+          code: |
+            ## INC-2026-0142 timeline (all times UTC)
+
+            OBS 08-19 02:57Z storage-sweeper cron file written [fs mtime]
+            OBS 08-19 02:58Z /usr/local/bin/update-check created [fs ctime]
+            INF initial access before 02:57Z; vector unknown; no telemetry
+                covers 02:30-02:55Z (agent pause) - LOW confidence on bound
+            OBS 08-20 03:14Z cron ran update-check; curl to 203.0.113.66 [proc]
+            OBS 08-20 03:15Z ssh session opened for mara from 10.0.4.31 [auth]
+            INF credential reuse from staging host suspected - MEDIUM
+            GAP 08-20 03:22-04:05Z endpoint agent offline (recovered 04:05Z)
+        - type: callout
+          tone: tip
+          markdown: |
+            Read your draft once deleting every adjective. Words like clearly
+            and obviously mark the exact sentences still missing evidence.
+  cheat_sheet: |
+    # Memory, disk, and timeline quick reference
+
+    Acquisition order (capture, hash, ledger):
+        registers/RAM -> network state -> processes -> disk -> media/backups
+        sha256sum image | tee acquisition.sha ; never image onto itself
+
+    Memory first pass:
+        strings -a -n 8 dump.raw | grep -E '^https?://|\.(exe|ps1|tmp)'
+        strings -el dump.raw                 # wide chars, Windows side
+        leads need a second source before graduating
+
+    High-yield disk artifacts:
+        linux   cron.d+spool, systemd units/timers, .bash* , authorized_keys,
+                /var/log/auth*, /tmp
+        windows prefetch (execution), amcache/shimcache (install/run),
+                registry Run keys, $MFT + USN journal
+
+    Timestamps:
+        mtime content, ctime inode, atime reads; NTFS SI vs FN pairs
+        stomping tell = attributes disagreeing with each other
+        normalize everything to ISO 8601 UTC; record skew offsets
+
+    Timeline grammar:
+        ISO-UTC | source | summary   (sort -m merges pre-sorted streams)
+        label every entry OBS / INF / GAP + confidence

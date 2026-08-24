@@ -1,0 +1,340 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: supply-chain-scanning-response
+  title: 'Scanning strategy and supply-chain response'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 70
+  tags:
+    - devsecops
+    - sast
+    - sca
+    - incident-response
+spec:
+  track: defense-cloud
+  summary: >-
+    Scanners are smoke detectors, not fire departments, and pretending
+    otherwise produces either alert fatigue or false comfort. This module
+    matches scanner families to the defect classes each genuinely catches,
+    places them through the development lifecycle with speed-versus-depth
+    tradeoffs made explicit, and drills triage judgment including suppression
+    hygiene that resists rot. You then face what scanners cannot see, from
+    novel logic flaws to compromised maintainers, and learn the first-hour
+    playbook for a malicious dependency release: freeze, identify affected
+    builds from your inventory, rotate everything reachable, purge, rebuild
+    clean, and close with a postmortem that upgrades controls.
+  objectives:
+    - Match scanner families to the defect classes each one actually catches.
+    - Place scans across the lifecycle balancing speed against depth.
+    - Triage findings with severity judgment and suppressions that carry owners and expiry.
+    - Acknowledge scanner blind spots and layer compensating controls accordingly.
+    - Execute the first hour of a malicious dependency incident in defensible order.
+    - Close incidents with verified clean rebuilds and postmortems that upgrade controls.
+  sections:
+    - id: know-your-layers
+      title: 'Know your layers'
+      blocks:
+        - type: prose
+          markdown: |
+            Every scanner answers a different question, and confusion about
+            questions produces disappointment about answers. Static analysis
+            reads source for patterns and dataflow bugs, fast and language
+            aware, chatty about anything touching user input. Dynamic analysis
+            attacks a running application the way a stranger would, catching
+            runtime truths static tools miss while knowing nothing about code
+            structure. Software composition analysis matches dependency trees
+            against advisory feeds and license policies; it knows nothing your
+            lockfile does not. Secrets scanning hunts credentials by pattern
+            and entropy, ideally checking whether candidates still work.
+            Infrastructure-as-code review reads deployment templates for
+            misconfigurations before they become infrastructure.
+
+            None subsumes another. SCA cannot see your business logic; SAST
+            cannot see the patched library you just shipped; DAST cannot see
+            the hardcoded key in an untested branch. Coverage comes from the
+            portfolio, chosen deliberately against the defect classes your
+            risk assessment actually worries about.
+
+            Revisit the portfolio whenever architecture changes, because new
+            runtimes quietly introduce defect classes no current row covers.
+        - type: code
+          language: text
+          code: |
+            Layer   question answered         blind spot
+            SAST    is our source buggy?     runtime/config truth
+            DAST    does the app resist me?  code-level root cause
+            SCA     are deps vulnerable?     first-party logic
+            secrets did we leak keys?        novel key formats
+            IaC     is deploy config sane?   running-state drift
+
+            Portfolio design = pick rows matching your threat model,
+            then place each where it fires earliest without lying.
+        - type: quiz
+          question_id: sci-layer-fit
+          question: 'Leadership demands assurance that no AWS keys sit in any repository branch. Which layer fits best?'
+          options:
+            - id: a
+              text: 'DAST crawling production endpoints.'
+            - id: b
+              text: 'Secrets scanning across full repository history, with validity checks on candidates.'
+            - id: c
+              text: 'SCA against the lockfile.'
+            - id: d
+              text: 'SAST rules for SQL injection.'
+          answer_ids: [b]
+          explanation: >
+            The question targets credential material across history,
+            which is exactly the secrets-scanning contract. Other layers
+            inspect behavior or dependencies, never stray keys in old
+            commits.
+    - id: placement-tradeoffs
+      title: 'Placement tradeoffs'
+      blocks:
+        - type: prose
+          markdown: |
+            Where a scan runs decides how developers experience it. Local
+            hooks run in seconds and catch the cheapest mistakes before a
+            commit exists. Pull-request gates get minutes of budget, so they
+            earn their place by scanning only what changed plus the
+            dependency manifest, returning findings inline where authors fix
+            them immediately. Scheduled deep scans own the night: full-code
+            SAST passes, container image pulls, license audits, long-running
+            DAST sessions against staging. Release gates verify signatures
+            and provenance rather than re-linting the world.
+
+            Two principles keep the arrangement honest. Feedback latency
+            must match finding severity: a leaked production key cannot wait
+            for tonight's queue, so secret checks belong on every push with
+            immediate revocation workflows attached. And every gate needs a
+            documented bypass path with logging, because emergency fixes die
+            waiting for scanners otherwise; unlogged bypasses merely teach
+            people to work around controls silently. Name each gate's budget
+            in the workflow file itself so latency regressions surface as
+            failures instead of feelings.
+        - type: callout
+          tone: tip
+          markdown: |
+            Budget rule of thumb: pre-commit under ten seconds, PR gate
+            under ten minutes, nightly unbounded. Gates exceeding budgets
+            train engineers to route around them, which costs more than any
+            vulnerability the extra minutes would have caught.
+    - id: triage-without-tears
+      title: 'Triage without tears'
+      blocks:
+        - type: prose
+          markdown: |
+            Scanner output is a lead generator, not a verdict machine.
+            Triage asks three questions per finding in order. Is it real:
+            does the flagged pattern actually execute, does the vulnerable
+            version actually ship? Is it dangerous here: attacker-reachable,
+            sensitive-adjacent, exploitable given surrounding controls?
+            Is now the moment: does exploitability evidence justify breaking
+            sprint plans this week? Findings surviving all three graduate to
+            tickets with evidence links;             others receive reasoned closures,
+            because dismissing without recording guarantees re-litigation
+            next scan. Pair juniors with seniors on triage rosters too,
+            since judgment calibrates fastest against explained
+            disagreements rather than documentation alone.
+
+            Suppressions make triage sustainable or rotten depending on
+            discipline. Every silence carries a reason string, an owner, and
+            an expiry date, reviewed like code because that is exactly what
+            suppressions are: security decisions embedded as comments. Rules
+            themselves need periodic calibration too, tracking false positive
+            rates per rule and retiring noisy patterns whose signal never
+            materialized, which keeps trust in the remaining alerts high.
+        - type: code
+          language: yaml
+          code: |
+            # suppression done right (inline, reviewable)
+            - match: "sql-injection-taint, orm/raw.py:41"
+              reason: >
+                parameterized via sqlalchemy text() bindparams;
+                taint engine misses binding API. verified w/ poc attempt.
+              owner: m.okafor
+              expires: 2027-01-15   # revisit if ORM usage changes
+
+            # weekly triage metrics worth printing
+            $ ./triage-stats.py --week
+            new=34 real=6 fixed<48h=5 suppressed-with-reason=21
+            top-noisy-rule=taint/reflective-xss fp_rate=0.91 -> retire candidate
+        - type: quiz
+          question_id: sci-suppression-hygiene
+          question: 'Which suppression practice most prevents silent security decay?'
+          options:
+            - id: a
+              text: 'Suppressing broadly at rule level so dashboards stay green.'
+            - id: b
+              text: 'Narrow matches carrying reason, owner, and expiry, reviewed on schedule like code.'
+            - id: c
+              text: 'Deleting findings instead of suppressing them.'
+            - id: d
+              text: 'Rotating who writes suppressions weekly.'
+          answer_ids: [b]
+          explanation: >
+            Suppressions are persistent security claims; reason, ownership,
+            and expiry convert them from hiding spots into auditable
+            decisions. Broad silences and deleted findings only relocate
+            risk into darkness.
+    - id: limits-and-layering
+      title: 'Limits and layering'
+      blocks:
+        - type: prose
+          markdown: |
+            Scanners pattern-match history; adversaries ship novelty. Logic
+            flaws unique to your business, malicious behavior hidden inside
+            legitimate-looking updates, and compromised maintainer accounts
+            pushing poisoned versions all sail past signature engines, which
+            is precisely how historic supply-chain incidents kept succeeding
+            against organizations running excellent tooling. Saying this
+            aloud matters for two audiences: leadership calibrates confidence
+            in green dashboards, and engineers justify the layered controls
+            that cover what signatures miss.
+
+            Layering follows from named gaps. Egress restrictions from build
+            environments blunt post-install callbacks regardless of payload
+            creativity. Provenance verification catches artifacts nobody's
+            pipeline signed. Behavioral monitoring in production notices a
+            dependency suddenly resolving unfamiliar domains. Lockstep update
+            delay windows let someone else's weekend find the poisoned
+            release first. Each layer degrades gracefully alone; together
+            they buy the hours that response requires.
+        - type: prose
+          markdown: |
+            Budget attention like money, since attention is scarcer. Full
+            paranoia applied everywhere exhausts teams before quarter end;
+            graded scrutiny applies heavy verification to crown-jewel build
+            paths while standard services ride normal gates. Documenting the
+            grading turns an implicit gamble into policy, and policy survives
+            personnel changes, budget seasons, and the next scary headline.
+    - id: first-hour-playbook
+      title: 'First hour playbook'
+      blocks:
+        - type: prose
+          markdown: |
+            A malicious dependency announcement starts clocks. The first
+            actions decide whether you narrate events or star in them.
+            Freeze first: block the affected versions at registry mirrors
+            and CI resolution so new builds stop ingesting poison mid-response.
+            Identify second: query inventories, SBOMs and lockfiles across
+            every service, for the package and version range, listing builds
+            and deployments that consumed them. Characterize third: detonate
+            samples in sandboxes, extract indicators such as callback domains,
+            IPs, and file hashes, and read the diff between last good and
+            first bad release.
+
+            Rotation fourth, assuming compromise of whatever reachable
+            credentials the builds held: pipeline tokens, cloud roles,
+            signing keys, database passwords, everything within reach of
+            affected environments, rotated before attackers pivot. Purge
+            fifth: caches, artifact stores, mirrors, developer machines.
+            Rebuild sixth, from known-good pins with provenance intact, then
+            watch indicators rather than assuming cleanliness. Order matters
+            because identification feeds rotation scope and freezing stops
+            the bleed that makes everything else moot.
+        - type: code
+          language: bash
+          code: |
+            # minute 0-10: inventory sweep across services
+            $ for sbom in artifacts/*/sbom.cdx.json; do
+                jq -r --arg p "left-pad" \
+                  'select(.components[].name==$p) | input_filename' "$sbom"
+              done
+            artifacts/billing/sbom.cdx.json
+            artifacts/webhooks/sbom.cdx.json
+
+            # minute 10-20: freeze resolution at the mirror
+            $ curl -XPOST mirror.internal/api/quarantine \
+                -d '{"package":"left-pad","versions":[">=1.3.16"]}'
+
+            # minute 20+: rotate creds reachable from billing+webhooks CI
+            $ ./rotate-all.py --scope ci-billing,ci-webhooks --confirm
+        - type: quiz
+          question_id: sci-first-move
+          question: 'Advisory drops naming a compromised package version. Builds are currently resolving it fleet-wide. What comes literally first?'
+          options:
+            - id: a
+              text: 'Draft the customer communication email.'
+            - id: b
+              text: 'Quarantine the versions at resolution time so ongoing builds stop consuming them, then inventory exposure.'
+            - id: c
+              text: 'Delete the repository.'
+            - id: d
+              text: 'Wait for the vendor patch before acting at all.'
+          answer_ids: [b]
+          explanation: >
+            Stopping ingestion caps damage growth while facts assemble.
+            Communication, patching, and rotation follow evidence produced
+            by the freeze-and-inventory sequence, not before it.
+    - id: rebuild-and-postmortem
+      title: 'Rebuild and postmortem'
+      blocks:
+        - type: prose
+          markdown: |
+            Recovery ends when proof replaces hope. Clean rebuilds happen
+            from pinned, quarantined-free sources with fresh integrity values
+            recorded, and downstream consumers get notified with hashes so
+            they can verify what they ingest next. Monitoring keeps watching
+            extracted indicators for weeks, since callbacks often persist
+            after cleanup crews move on. Only after rebuilds verify and
+            telemetry quiets does anyone declare the incident contained, a
+            claim written with dates and evidence rather than relief.
+
+            The postmortem converts pain into architecture. Blameless format,
+            timeline from announcement to closure, root cause traced past
+            individuals to system properties, and action items each carrying
+            an owner and date. Supply-chain reviews should upgrade controls
+            concretely: egress rules added where callbacks succeeded,
+            provenance gates where unsigned artifacts deployed, inventory
+            queries automated where spreadsheets slowed the first hour.
+            Revisit those items quarterly, because unfinished postmortem
+            actions are how the same incident books a sequel. Share sanitized
+            versions across teams, because another product's near-miss is the
+            cheapest lesson your incident response will ever receive.
+        - type: code
+          language: markdown
+          code: |
+            ## SC-2026-07 postmortem skeleton (blameless)
+
+            summary    poisoned release consumed by 2/14 services
+            timeline   T+0 advisory | T+22m quarantine done |
+                       T+51m inventory verdicts | T+4h rotations complete |
+                       T+9h clean rebuilds live | T+2w indicator watch closed
+            causes     mirror allowed unpinned resolution; SBOMs existed
+                       but no auto-query wired into response
+            actions    [ ] enforce pin ranges at mirror (owner: platform, due Oct)
+                       [ ] wire advisory->SBOM query into oncall runbook (sec, Nov)
+                       [ ] egress allowlist for build runners (infra, Dec)
+        - type: callout
+          tone: info
+          markdown: |
+            Run this playbook as a tabletop twice a year using a fictional
+            package. First teams fumble ordering; second teams finish early
+            and start arguing about prevention, which is exactly progress.
+  cheat_sheet: |
+    # Scanning + response quick reference
+
+    Scanner contracts:
+        SAST source bugs | DAST runtime resistance | SCA dep advisories
+        secrets leaked keys (+validity) | IaC deploy misconfigs
+
+    Placement budgets:
+        hooks <10s | PR gate <10m (diff + manifests) | nightly deep |
+        release verifies signature/provenance; logged bypasses exist
+
+    Triage ladder:
+        real? -> dangerous HERE? -> now? ; closures recorded w/ reasons
+        suppression = reason + owner + expiry, reviewed like code
+        track fp rate; retire noisy rules deliberately
+
+    Blind-spot layers:
+        egress limits from builds, provenance gates, prod behavior
+        monitoring, staged update delays; grade scrutiny by asset value
+
+    Malicious dep first hour:
+        1 quarantine versions  2 inventory via SBOM/lockfiles
+        3 characterize IOCs    4 rotate reachable creds
+        5 purge caches/mirrors 6 rebuild clean + watch indicators
+        close: blameless postmortem, dated action items, quarterly check

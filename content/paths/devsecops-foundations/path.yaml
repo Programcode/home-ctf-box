@@ -1,0 +1,31 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: devsecops-foundations
+  title: 'DevSecOps Foundations'
+  version: 0.1.0
+  difficulty: medium
+  points: 450
+  estimated_minutes: 200
+  tags:
+    - devsecops
+    - ci-cd
+    - secrets
+    - sbom
+    - supply-chain
+spec:
+  track: defense-cloud
+  summary: >-
+    The build system is production, and this path treats it that way. You
+    learn to model threats against pipelines stage by stage, handle secrets
+    so nothing long-lived exists to steal, read dependency risk through
+    lockfiles and software bills of materials, and demand provenance before
+    trusting artifacts. Scanner strategy gets matched to defect classes with
+    triage discipline to keep signal alive, and the path closes on supply
+    chain incident response: freeze, inventory, rotate, purge, rebuild,
+    postmortem. Every module ends in commands you can run against your own
+    repositories today.
+  modules:
+    - slug: pipeline-threat-model
+    - slug: dependency-risk-sbom
+    - slug: supply-chain-scanning-response

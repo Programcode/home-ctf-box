@@ -1,0 +1,376 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: cloud-storage-audit-logs
+  title: 'Storage exposure and audit-log analysis'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - cloud
+    - storage
+    - audit-logs
+    - exfiltration
+spec:
+  track: defense-cloud
+  summary: >-
+    Buckets leak because classes of exposure exist and nobody named them.
+    This module gives the classes names, teaches verification through
+    configuration reads instead of touching data you do not own, and then
+    moves to the other half of cloud evidence: audit logs. You learn which
+    fields answer who, what, when, and from where, practice a question-first
+    analysis method that bounds time, principal, and resource before any
+    query runs, and study the log signatures that separate enumeration from
+    exfiltration. It closes with preventive and detective controls that keep
+    doors shut after the case closes.
+  objectives:
+    - Classify storage exposure into named classes with distinct risk profiles.
+    - Verify suspected exposure by reading configuration rather than accessing foreign data.
+    - Map audit event fields that answer who, what, when, and from where.
+    - Apply a question-first method bounding time, principal, and resource before querying.
+    - Recognize log patterns indicating enumeration and exfiltration attempts.
+    - Propose preventive and detective controls that close exposure classes permanently.
+  sections:
+    - id: exposure-classes
+      title: 'Exposure classes'
+      blocks:
+        - type: prose
+          markdown: |
+            "The bucket was public" hides more than it says, so professionals
+            speak in classes. Private means anonymous requests fail, the only
+            acceptable steady state for data with any sensitivity. Public read
+            exposes objects to anyone holding URLs, which leaks content but
+            not inventory. Public listing is worse in a specific way: anyone
+            can enumerate every key name even when objects themselves deny
+            reads, and file names are frequently half the secret, think
+            backups-2026-q3-eu-customers.zip. Authenticated-any-user grants
+            access to any account on the provider, including strangers,
+            mistaking login for authorization. Finally, signed links delegate
+            time-boxed access; overlong expiry turns a sharing convenience
+            into standing public read.
+
+            Classes matter because remediation differs per class and because
+            severity conversations need vocabulary. Telling an executive "we
+            had public listing enabled, so key names were enumerable but
+            object contents stayed denied" communicates risk bounds precisely;
+            "the bucket leaked" communicates panic.
+
+            Classes also map cleanly onto tooling. Each one corresponds to
+            specific configuration fields, which means drift-detection
+            scripts can name the class automatically the moment settings
+            change, feeding precise alerts instead of vague ones.
+        - type: quiz
+          question_id: sto-exposure-classification
+          question: 'Anonymous users cannot download objects, but they can list all keys inside the prefix reports/2026/. Which class fits and why does it hurt?'
+          options:
+            - id: a
+              text: 'Private, since downloads fail.'
+            - id: b
+              text: 'Public listing: inventory leaks, and key names often reveal sensitive structure such as client or period names.'
+            - id: c
+              text: 'Signed link exposure.'
+            - id: d
+              text: 'Authenticated-any-user exposure.'
+          answer_ids: [b]
+          explanation: >
+            Listing without reading still discloses naming patterns, project
+            scopes, and dates. Attackers use inventories to aim later stages,
+            and compliance teams treat metadata leakage as reportable in many
+            regimes.
+    - id: verifying-without-touching
+      title: 'Verifying without touching'
+      blocks:
+        - type: prose
+          markdown: |
+            Suspected exposure creates an ethical fork within seconds.
+            Configuration reads answer the question cleanly: fetch the public
+            access block settings, the bucket policy, and the ACL, and the
+            documents state exactly what anonymous callers may do. Trying
+            sample downloads against buckets you do not own crosses into
+            unauthorized access in most jurisdictions even when the front
+            door stands open, and downloading actual customer data for proof
+            converts a good-faith finding into an incident about you.
+
+            Inside your own estate, or inside a lab built for practice, the
+            same configuration reads plus harmless existence checks are fair
+            game. The professional deliverable is a screenshot of the policy
+            document alongside one sentence explaining which class it
+            implements, never a folder of somebody else's files. Evidence
+            gathered this way survives legal review precisely because nobody
+            can allege you read anything you were not entitled to read, and
+            that cleanliness is worth more than any dramatic proof.
+        - type: code
+          language: bash
+          code: |
+            $ aws s3api get-public-access-block --bucket reports-bucket \
+                --query 'PublicAccessBlockConfiguration'
+            {
+                "BlockPublicAcls": true,
+                "BlockPublicPolicy": true,
+                "IgnorePublicAcls": true,
+                "RestrictPublicBuckets": true
+            }
+
+            $ aws s3api get-bucket-policy --bucket reports-bucket \
+                | jq -r '.Policy' | jq '.Statement[0]'
+            {
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::reports-bucket/*"
+            }
+
+            The policy contradicts the block settings: this exact tug-of-war
+            between account guardrails and resource policy is where real
+            findings live.
+        - type: callout
+          tone: danger
+          markdown: |
+            Found a stranger's open bucket? Do not download, do not probe
+            deeper, do not post screenshots with identifying keys. Report
+            through the provider's abuse channel or the owner's security
+            contact with timestamps, then move on with clean hands.
+            Timestamp your verification reads as well, because exposure
+            findings age quickly once owners begin fixing, and a stale
+            screenshot arguing against a repaired policy wastes every later
+            reviewer's afternoon.
+    - id: audit-event-anatomy
+      title: 'Audit event anatomy'
+      blocks:
+        - type: prose
+          markdown: |
+            Audit logs answer interrogatives if you know where each answer
+            lives. Who resolves through userIdentity, carrying principal
+            identifiers, session context, and whether MFA accompanied the
+            call. What resolves through eventName plus requestParameters,
+            the verb and its arguments. When arrives as standardized UTC
+            timestamps. From where appears as source address and user agent,
+            which together fingerprint tooling: console clicks, SDK calls,
+            and curl scripts look different. Outcome fields record success,
+            error codes, and response elements, letting you distinguish
+            attempts from accomplishments without guessing.
+
+            One structural trap catches everyone once: management events
+            versus data events. Control plane calls, bucket policy edits,
+            user creation, log by default. Object-level operations, the gets
+            and puts touching actual data, frequently require explicit
+            opt-in per trail. Investigations discovering that object reads
+            were never recorded must document absence honestly, adjusting
+            conclusions to match visibility instead of filling gaps with
+            imagination. Confirm which event categories your trail actually
+            collects early in every investigation, since assumptions made
+            here silently bound every conclusion drawn later.
+        - type: code
+          language: json
+          code: |
+            {
+              "eventTime": "2026-08-21T02:14:09Z",
+              "eventName": "GetObject",
+              "eventSource": "s3.amazonaws.com",
+              "userIdentity": {
+                "type": "IAMUser",
+                "principalId": "AIDAEXAMPLE",
+                "userName": "svc-reports",
+                "sessionContext": {"mfaAuthenticated": "false"}
+              },
+              "sourceIPAddress": "203.0.113.66",
+              "userAgent": "[python-requests/2.31]",
+              "requestParameters": {"bucketName": "reports-bucket",
+                                    "key": "weekly/eu-q3.zip"},
+              "errorCode": null,
+              "responseElements": null
+            }
+        - type: quiz
+          question_id: sto-data-events-gap
+          question: 'Your investigation needs object-level read history, yet the audit trail shows policy changes but zero GetObject entries. What is the defensible reading?'
+          options:
+            - id: a
+              text: 'Nobody ever read any object.'
+            - id: b
+              text: 'Data events were likely never enabled, so object reads are unrecorded; state the blind spot rather than infer innocence.'
+            - id: c
+              text: 'GetObject calls are logged under management events automatically.'
+            - id: d
+              text: 'The logs must have been deleted by an attacker.'
+          answer_ids: [b]
+          explanation: >
+            Object-level operations need explicit enablement on most
+            providers. Absence of records with present control-plane logging
+            points at collection gaps first, and conclusions must shrink to
+            match what telemetry could actually see.
+    - id: question-first-analysis
+      title: 'Question-first analysis'
+      blocks:
+        - type: prose
+          markdown: |
+            Drowning in audit logs starts with opening them without a
+            question. The working method inverts that: write the question,
+            bound it, then query. A bound question names three fences, a
+            time window no wider than needed, a principal set small enough
+            to review by hand, and a resource scope matching the worry.
+            "What did svc-reports touch between August 20 and 22?" parses
+            into filters directly; "check the logs for anything weird"
+            generates hours of scrolling and zero defensible conclusions.
+
+            Sequence reconstruction comes next. Sort filtered events by
+            time and read them as behavior: enumeration followed by targeted
+            reads tells one story, immediate bulk download from a fresh
+            credential tells another. Corroborate across sources wherever
+            possible, joining audit events with storage access logs or
+            network flow records, because single-source narratives inherit
+            single-source blind spots. Write conclusions citing event IDs,
+            keeping the chain from claim back to raw line intact for whoever
+            reviews next.
+        - type: code
+          language: bash
+          code: |
+            # fence: one principal, three days, storage verbs
+            $ jq -r 'select(.userIdentity.userName=="svc-reports")
+                     | select(.eventSource=="s3.amazonaws.com")
+                     | [.eventTime,.eventName,.requestParameters.key] | @tsv' \
+                trail.jsonl | sort | awk '{print}' | uniq -c | head -5
+              12 2026-08-21T01:58:02Z ListObjects (null)
+               1 2026-08-21T01:59:10Z GetObject weekly/index.html
+               1 2026-08-21T02:00:44Z GetObject weekly/eu-q3.zip
+             47 2026-08-21T02:14:09Z GetObject archive/
+               2 2026-08-21T02:31:55Z PutObject weekly/notes.txt
+
+            Twelve lists then forty-seven targeted gets: enumeration
+            followed by harvest, all inside forty minutes.
+        - type: prose
+          markdown: |
+            Note how the excerpt's shape alone nearly closes the case: verbs
+            ordered like reconnaissance then collection, volumes inconsistent
+            with the principal's job description, timing outside business
+            windows. None of those observations required advanced tooling,
+            only bounded questions and sorted output, which is the quiet
+            superpower this module keeps repeating.
+    - id: exfiltration-signatures
+      title: 'Exfiltration signatures'
+      blocks:
+        - type: prose
+          markdown: |
+            Exfiltration leaves statistical fingerprints even when individual
+            events look ordinary. Volume spikes stand out first: bytes or
+            object counts per principal per day jumping orders above their
+            own baseline. Newness compounds suspicion, credentials calling
+            from autonomous systems they have never touched, especially at
+            hours misaligned with the owner's timezone. Enumeration bursts,
+            long runs of List calls preceding selective Gets, mark someone
+            mapping before grabbing. Failed-permission storms deserve equal
+            attention, dozens of AccessDenied answers tracing an intruder
+            discovering boundaries right before a different principal
+            succeeds where they probed.
+
+            Each signature becomes a scheduled detection with thresholds
+            tuned from your own baselines, and each detection cites the hunt
+            or incident that justified it. Analytics without provenance rot
+            into unattended dashboards within a quarter.
+
+            Baseline each signature per principal rather than against
+            fleet-wide averages, because a busy data team's normal Tuesday
+            dwarfs another department's worst anomaly, and flat thresholds
+            either drown you in noise or hide the one call that matters.
+        - type: code
+          language: bash
+          code: |
+            # bytes per source IP per day, top offenders
+            $ jq -r 'select(.eventName=="GetObject")
+                     | [.eventTime[0:10], .sourceIPAddress] | @tsv' trail.jsonl \
+                | sort | uniq -c | sort -rn | head -4
+             812 2026-08-21 203.0.113.66
+              34 2026-08-21 10.0.4.19
+              28 2026-08-21 10.0.4.31
+               9 2026-08-20 10.0.4.19
+
+            An internet address out-downloading the entire office by 24x,
+            on the same day the office downloaded anything at all: escalate
+            before finishing the coffee.
+        - type: quiz
+          question_id: sto-exfil-pattern
+          question: 'Which sequence most strongly suggests staged exfiltration rather than routine backup activity?'
+          options:
+            - id: a
+              text: 'Nightly Gets from the backup service principal, consistent volume, static internal IP.'
+            - id: b
+              text: 'List burst from a rarely used admin role from a new external ASN, followed by selective large Gets to unfamiliar destinations.'
+            - id: c
+              text: 'Developers fetching documentation objects during work hours.'
+            - id: d
+              text: 'Lifecycle policies transitioning objects to cold storage.'
+          answer_ids: [b]
+          explanation: >
+            Reconnaissance then selection from unexpected identities,
+            networks, and hours is the staging pattern. Routine automation
+            earns trust through consistency of principal, source, and
+            volume, exactly what option b violates.
+    - id: closing-the-door
+      title: 'Closing the door'
+      blocks:
+        - type: prose
+          markdown: |
+            Findings recur when fixes target symptoms. Permanent closure
+            pairs prevention with detection. Prevention leans on account and
+            organization level guards: block public access everywhere by
+            default, require explicit exception tickets to lower any shield,
+            deny insecure transport and unencrypted uploads through policy,
+            and gate lifecycle rules that could auto-expire retention-bound
+            data. Detection watches for regression: alarms on policy changes
+            granting public principals, on disabling of access logging, and
+            on the exfiltration signatures from earlier sections, routed to
+            humans who answer.
+
+            Logging itself belongs on the prevention list. Enable data
+            events deliberately for sensitive prefixes, ship access logs to
+            a dedicated account, and set retention to satisfy whatever
+            regulation governs the data, because an unreadable-in-six-months
+            log setup fails audits and investigations equally.
+        - type: code
+          language: bash
+          code: |
+            # prevention: raise every shield account-wide, verify after
+            $ aws s3control put-public-access-block \
+                --account-id 441299887710 \
+                --public-access-block-configuration \
+                BlockPublicAcls=true,BlockPublicPolicy=true,IgnorePublicAcls=true,RestrictPublicBuckets=true
+            $ aws s3control get-public-access-block --account-id 441299887710 \
+                --query 'PublicAccessBlockConfiguration.BlockPublicPolicy'
+            true
+
+            # detection: alert when any policy mentions public principals
+            grep -n '"Principal": "\*"' audited-policies/*.json && echo REVIEW
+        - type: prose
+          markdown: |
+            Close every exposure ticket with three artifacts: the change that
+            fixed it, the alarm that will notice its return, and the date a
+            retest confirmed both. That trio, fix plus tripwire plus retest,
+            is the difference between incidents resolved and incidents
+            postponed with extra steps.
+  cheat_sheet: |
+    # Storage + audit quick reference
+
+    Exposure classes:
+        private            anonymous denied (goal state)
+        public-read        contents leak w/ URL
+        public-list        inventory leaks; names are secrets too
+        auth-any-user      any account on provider != authorization
+        signed links       expiry = lifetime of the decision
+
+    Verify exposure:
+        get-public-access-block / get-bucket-policy / get-bucket-acl
+        config reads prove class; never download stranger data
+
+    Event interrogatives:
+        who   userIdentity (+mfa flag)     what eventName+params
+        when  eventTime (UTC)              where src IP + user agent
+        outcome errorCode/responseElements
+        data events (object gets/puts) usually need explicit enablement
+
+    Method:
+        question -> fences(time, principal, resource) -> filter -> sort
+        corroborate second source; cite event ids in conclusions
+
+    Exfil signatures:
+        volume spike vs own baseline, new ASN/hours, List->Get runs,
+        AccessDenied storms preceding success elsewhere

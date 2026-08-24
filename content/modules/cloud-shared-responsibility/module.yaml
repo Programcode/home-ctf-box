@@ -1,0 +1,350 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: cloud-shared-responsibility
+  title: 'Shared responsibility and identity as the perimeter'
+  version: 0.1.0
+  difficulty: easy
+  points: 130
+  estimated_minutes: 55
+  tags:
+    - cloud
+    - iam
+    - least-privilege
+    - mfa
+spec:
+  track: defense-cloud
+  summary: >-
+    Cloud security begins with knowing whose problem each thing is. This
+    module draws the shared responsibility lines across infrastructure,
+    platform, and software service models, then explains why the collapse of
+    the network perimeter made identity the new castle wall. You learn which
+    credential patterns age badly, how wildcard policies and trusting role
+    chains quietly grant away the store, and how to interrogate your own
+    account with read-only commands before changing a single setting. The
+    module closes with a hardening baseline short enough to memorize and
+    strict enough to matter.
+  objectives:
+    - Divide security duties between provider and customer across IaaS, PaaS, and SaaS service models.
+    - Explain why identity replaced the network as the primary perimeter in cloud environments.
+    - Recognize static credential patterns that convert one leak into long-term compromise.
+    - Spot wildcard permissions and risky trust combinations inside policy documents.
+    - Interrogate an account's own configuration using read-only commands before making changes.
+    - Apply a hardening baseline covering MFA, key rotation, and least privilege.
+  sections:
+    - id: responsibility-lines
+      title: 'Responsibility lines'
+      blocks:
+        - type: prose
+          markdown: |
+            Providers love saying they handle security; contracts say who
+            handles which part. The dependable mental model splits every
+            layer between two parties. The provider owns security of the
+            cloud: facilities, hardware, hypervisors, managed runtime patching.
+            The customer owns security in the cloud: data classification,
+            access decisions, configuration, and everything stacked on top of
+            whatever abstraction was rented. Move up from infrastructure to
+            platform to software service and the provider's slice grows while
+            yours shrinks, but three items never transfer no matter the model:
+            who may access what, how data is protected, and whether settings
+            match policy.
+
+            Incident postmortems keep proving the point. Breached buckets
+            were public because a customer set them public. Compromised
+            consoles lacked MFA because enabling it stayed on a backlog. The
+            provider ran its part flawlessly; the boundary line sat exactly
+            where marketing promised and somebody assumed otherwise. Reading
+            the matrix below until it is boring is cheap insurance.
+        - type: code
+          language: text
+          code: |
+            Layer                IaaS       PaaS       SaaS
+            physical/facilities  provider   provider   provider
+            hardware/hypervisor  provider   provider   provider
+            OS + runtime         you        provider   provider
+            app + dependencies   you        you        provider
+            configuration        you        you        limited
+            identity/access      you        you        YOU
+            data                 YOU        YOU        YOU
+
+            Read bottom-up when worried: data and identity are always yours.
+        - type: quiz
+          question_id: csr-responsibility-boundary
+          question: 'A managed database service suffers a vulnerability in its unpatched query engine, and separately a customer left its audit logging disabled. Which assignment is correct?'
+          options:
+            - id: a
+              text: 'Both failures belong to the provider under SaaS terms.'
+            - id: b
+              text: 'The engine flaw is provider-side; disabled logging is customer-side configuration.'
+            - id: c
+              text: 'Both failures belong to the customer since data was exposed.'
+            - id: d
+              text: 'Responsibility applies only to IaaS deployments.'
+          answer_ids: [b]
+          explanation: >
+            Runtime patching of a managed engine sits above the customer's
+            reach, so it stays provider duty. Logging enablement is a
+            customer setting in every service model, which is where the
+            accountability lands.
+    - id: identity-perimeter
+      title: 'Identity as perimeter'
+      blocks:
+        - type: prose
+          markdown: |
+            On-premises thinking drew hard walls: trusted inside, hostile
+            outside, firewalls guarding the seam. Cloud estates dissolve that
+            geometry. Workloads span regions and providers, employees work
+            from anywhere, and the control plane itself is reachable from any
+            coffee shop with correct credentials. What remains constant is
+            the decision point: every API call arrives carrying a principal,
+            and the platform evaluates policies asking whether that principal
+            may perform this action on that resource. Identity plus
+            authorization is the perimeter now, which means identity hygiene
+            is not an HR nicety but border defense.
+
+            Practical consequences follow immediately. Network placement
+            grants almost nothing by itself; a server inside the private
+            subnet still needs explicit permission to read the bucket next
+            door. Conversely a stolen key works from anywhere, so possession
+            equals proximity. Defenders respond by treating principals like
+            hosts used to be treated: inventoried, least-privileged, monitored
+            for anomalous behavior, and revoked promptly when roles change.
+        - type: callout
+          tone: info
+          markdown: |
+            Rooms here simulate providers locally so experiments never touch
+            real cloud accounts. The command shapes you practice transfer
+            unchanged when you later sit down with authorized production
+            access.
+    - id: credentials-that-age-badly
+      title: 'Credentials that age badly'
+      blocks:
+        - type: prose
+          markdown: |
+            Long-lived secrets are liabilities accruing interest. Static
+            access keys pasted into CI variables or laptop dotfiles outlive
+            projects, teams, and sometimes employers, and one repository
+            push converts them into someone else's infrastructure budget.
+            The modern pattern replaces permanence with brevity: federated
+            identity lets workloads prove who they are and receive tokens
+            valid for minutes instead of years. Humans get consoles guarded
+            by MFA and short sessions; machines get role assumptions minted
+            per job. Where static keys must exist for legacy reasons, they
+            carry owners, rotation schedules, and alarms on use from unusual
+            networks.
+
+            Inventory precedes rotation, because unknown keys never rotate.
+            Listing keys with their last-used dates routinely surfaces pairs
+            untouched for years attached to departed staff, and deleting such
+            relics closes risk without touching anything live.
+        - type: code
+          language: bash
+          code: |
+            $ aws sts get-caller-identity
+            {
+                "Account": "441299887710",
+                "UserId": "AROAXG2Q3EXAMPLE:ci-deploy",
+                "Arn": "arn:aws:sts::441299887710:assumed-role/ci-deploy/ci-deploy"
+            }
+
+            $ aws iam list-access-keys --user-name svc-reports \
+              && aws iam generate-credential-report ...
+            {
+                "AccessKeyMetadata": [
+                    {"AccessKeyId": "AKIAI4EXAMPLE...", "Status": "Active",
+                     "CreateDate": "2021-02-14T09:12:03Z"}
+                ]
+            }
+
+            First command answers "who am I right now", which prevents
+            editing the wrong account entirely. Second output shows a key
+            alive since 2021: rotate or delete, then ask why it existed.
+        - type: prose
+          markdown: |
+            Session discipline completes the picture. Assume-role chains
+            should be shallow and purposeful, temporary credentials stored in
+            process environments rather than shell history, and administrative
+            sessions recorded like the powerful moments they are. When an
+            incident later asks what the deployment pipeline could reach last
+            March, answers built from these habits take minutes instead of
+            archaeology.
+    - id: policy-reading-discipline
+      title: 'Policy reading discipline'
+      blocks:
+        - type: prose
+          markdown: |
+            Policies are small documents with large consequences, and most
+            disasters hide behind two characters. Wildcard actions granted to
+            satisfy a quick integration become permanent god mode; wildcard
+            resources attached to write actions mean every current and future
+            object obeys the holder. Reading discipline means resolving each
+            statement into plain speech before approving it: this principal,
+            may perform exactly these verbs, on precisely these resources,
+            under these conditions. Conditions deserve special respect because
+            they are where least privilege lives, restricting by network
+            origin, encryption context, or tag presence.
+
+            Trust relationships form the second half of the document and the
+            more dangerous half. A role's trust policy names who may assume
+            it, and overbroad trust converts any compromised principal in
+            scope into the role's powers. Chaining amplifies further: pass
+            role onto a compute service combined with invoke rights lets an
+            attacker make the platform borrow whatever identity was passed,
+            a pattern worth recognizing on sight.
+        - type: code
+          language: json
+          code: |
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject"],
+              "Resource": "*"
+            }
+
+            Plain speech test fails twice: verbs include writes, resources
+            name everything. Compare:
+
+            {
+              "Effect": "Allow",
+              "Action": "s3:GetObject",
+              "Resource": "arn:aws:s3:::reports-bucket/weekly/*",
+              "Condition": {"IpAddress": {"aws:SourceIp": "10.0.0.0/16"}}
+            }
+        - type: quiz
+          question_id: csr-passrole-chain
+          question: 'A function holds iam:PassRole on any role plus lambda:InvokeFunction on all functions. Why do reviewers treat this combination as escalation-ready?'
+          options:
+            - id: a
+              text: 'Lambda functions cannot hold IAM permissions.'
+            - id: b
+              text: 'The holder can hand a privileged role to a function it invokes, inheriting those permissions without owning them directly.'
+            - id: c
+              text: 'InvokeFunction bypasses all logging.'
+            - id: d
+              text: 'PassRole only works for administrator roles.'
+          answer_ids: [b]
+          explanation: >
+            PassRole delegates identity attachment at invocation time. Pairing
+            broad PassRole with invoke rights lets the principal wear any
+            passable role indirectly, which is why scoping both halves matters.
+    - id: read-only-reconnaissance
+      title: 'Read-only reconnaissance'
+      blocks:
+        - type: prose
+          markdown: |
+            Change nothing until you understand something. Every provider
+            exposes read-only introspection, and building the habit costs one
+            afternoon: list who you are, enumerate principals, count keys and
+            their ages, dump policies attached to anything interesting, check
+            MFA state per user. The outputs sketch your actual attack surface
+            better than any architecture diagram, because diagrams describe
+            intentions while configurations describe truths.
+
+            Approach the exercise like the audits you will someday run for
+            pay. Script the collection so reruns diff cleanly, timestamp each
+            snapshot, and store outputs outside the account being examined.
+            Findings graduate into tickets with evidence attached rather than
+            hallway mentions, and the diff between snapshots becomes your
+            drift alarm long before formal tooling arrives.
+        - type: code
+          language: bash
+          code: |
+            $ aws iam get-account-summary --query 'SummaryMap.[Users,MFADevices,AccessKeysPerUserQuota]'
+            [
+              23,
+              9,
+              2
+            ]
+
+            Twenty-three users, nine MFA devices: fourteen humans or services
+            are one phishing message away from account takeover. That single
+            read-only call just wrote next quarter's top finding.
+        - type: prose
+          markdown: |
+            Keep the recon inventory honest by dating every export and noting
+            the principal used, since read paths differ subtly across roles
+            and missing permissions masquerade as missing resources. Note
+            denied calls too: they map the boundaries of your own visibility
+            and often reveal that the auditor role itself needs rounding out
+            before conclusions get drawn from absence.
+    - id: hardening-baseline
+      title: 'Hardening baseline'
+      blocks:
+        - type: prose
+          markdown: |
+            Baselines exist so judgment gets spent where it earns rent. The
+            identity starter set fits on an index card. Root-style break-glass
+            accounts stay sealed behind MFA and touch nothing daily. Every
+            console human carries MFA, enforced by policy rather than
+            politeness. Machines assume roles scoped per workload, receiving
+            credentials valid minutes rather than decades. Policies avoid
+            wildcards except documented exceptions reviewed quarterly, and
+            trust relationships name exact principals instead of friendly
+            asterisks. Access reviews happen on calendar, not after news.
+
+            None of this requires heroics; all of it requires enforcement
+            mechanisms. Guardrails beat reminders: org-level policies that
+            deny unencrypted object creation or region sprawl do not depend
+            on anyone remembering anything.
+
+            Revisit the card whenever architecture shifts. A baseline written
+            for an estate without service accounts or CI federation ages into
+            irrelevance within two reorgs, and stale controls mislead exactly
+            the newcomers who trust them most. Start with the card, encode
+            each line as a checkable rule, and let automation carry the
+            weight humans predictably drop.
+        - type: code
+          language: text
+          code: |
+            Baseline checklist v1 (verify monthly, script it)
+            [ ] break-glass accounts: MFA on, zero routine logins
+            [ ] every console user: MFA enabled, session <= 12h
+            [ ] no active access keys older than 90 days w/o ticket
+            [ ] no policy statement with Action:* AND Resource:*
+            [ ] trust policies name explicit principals only
+            [ ] admin-role assumption logs alert to the SOC channel
+            [ ] access review completed + signed off this month
+
+            Each unchecked box is a finding; each finding gets an owner.
+        - type: quiz
+          question_id: csr-baseline-enforcement
+          question: 'Which control survives employee forgetfulness best?'
+          options:
+            - id: a
+              text: 'A training slide reminding staff to enable MFA.'
+            - id: b
+              text: 'An organization policy that denies console access to principals lacking MFA.'
+            - id: c
+              text: 'Quarterly email audits asking users to self-certify.'
+            - id: d
+              text: 'Hoping attackers target competitors first.'
+          answer_ids: [b]
+          explanation: >
+            Guardrails enforced by the platform remove the human failure mode
+            entirely. Training and attestations help culture but cannot stop
+            a forgotten checkbox; deny-until-compliant policies can.
+  cheat_sheet: |
+    # Cloud identity quick reference
+
+    Responsibility split:
+        provider = security OF the cloud (facilities, hypervisor, runtime)
+        customer = security IN the cloud (config, identity, data)
+        always yours: who accesses what + how data is protected
+
+    Identity perimeter reflexes:
+        possession = proximity: a leaked key works from anywhere
+        network location grants ~nothing; policies decide everything
+
+    Credential hygiene:
+        prefer federation/short-lived tokens > static keys
+        list keys + last-used dates; delete relics; rotate survivors
+        aws sts get-caller-identity BEFORE editing anything
+
+    Policy reading:
+        resolve statements: principal -> verbs -> resources -> conditions
+        wildcards need written justification + review date
+        watch trust policies + PassRole+invoke chains for escalation
+
+    Baseline card:
+        MFA everywhere (enforced), sealed break-glass, scoped machine roles,
+        no Action+Resource double wildcards, dated access reviews,
+        guardrails > reminders

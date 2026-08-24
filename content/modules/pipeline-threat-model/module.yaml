@@ -1,0 +1,349 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: pipeline-threat-model
+  title: 'CI/CD pipelines: a working threat model'
+  version: 0.1.0
+  difficulty: medium
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - devsecops
+    - ci-cd
+    - secrets
+    - supply-chain
+spec:
+  track: defense-cloud
+  summary: >-
+    Your build system executes whatever lands in the repository, with more
+    credentials than most laptops ever hold. This module diagrams pipeline
+    stages and the trust boundaries between them, models threats stage by
+    stage from poisoned triggers to tampered artifacts, and dissects the two
+    classics that keep firing in the wild: untrusted input interpolated into
+    build scripts, and pull-request jobs that check out attacker-controlled
+    code while holding repository secrets. Secret strategy follows, trading
+    long-lived keys for short-lived federated tokens, then runner isolation
+    and a hardening checklist you can apply to a real workflow file today.
+  objectives:
+    - Diagram pipeline stages and name the trust boundary each crossing implies.
+    - Model threats systematically against triggers, runners, artifacts, and deploy targets.
+    - Block untrusted input from reaching build scripts through interpolation or checkout tricks.
+    - Choose secret strategies that shorten credential lifetimes and shrink blast radius.
+    - Isolate runners so one job cannot inherit another job's leftovers or credentials.
+    - Harden a workflow file with pinned actions, scoped tokens, and protected environments.
+  sections:
+    - id: stages-and-boundaries
+      title: 'Stages and boundaries'
+      blocks:
+        - type: prose
+          markdown: |
+            Every pipeline tells the same story with local dialect: something
+            triggers it, code gets checked out, dependencies install,
+            tests run, an artifact builds, and somewhere the artifact deploys.
+            The security question is not the stages but the seams. Who may
+            pull this trigger? Whose code does checkout trust? Where do
+            dependencies actually come from? What stands between the artifact
+            you built and the artifact you deploy? Each seam is a boundary
+            where control must live, because attackers pick whichever seam
+            answers nobody.
+
+            Credentials concentrate at these seams too, which explains the
+            attraction. Build systems hold deployment keys, registry push
+            tokens, cloud credentials, and signing identities all in one
+            automated place that humans rarely watch closely. A pipeline is
+            effectively a privileged robot following instructions written by
+            whoever can influence the repository, the trigger, or any step's
+            inputs. Threat modeling starts by accepting that sentence and
+            asking what each influence could make the robot do.
+        - type: code
+          language: text
+          code: |
+            trigger -> checkout -> deps -> test -> build -> publish -> deploy
+              |           |          |        |        |         |         |
+            who can    whose      which    whose    can the   who can   who
+            fire it?   code?      source?  tests?   artifact  push?     approves?
+                                            pin?             be swapped?
+
+            Seven questions, seven controls. Pipelines fail audits on the
+            ones nobody answered.
+        - type: prose
+          markdown: |
+            Map your own pipeline against those seven questions before
+            reading further. Most teams discover at least three unanswered,
+            commonly dependency origin, artifact integrity, and deploy
+            approval, and simply writing them down changes conversations with
+            platform teams forever after.
+    - id: threats-by-stage
+      title: 'Threats by stage'
+      blocks:
+        - type: prose
+          markdown: |
+            Walk the stages once as an adversary. At triggers you find
+            injection through anything user-controlled reaching scripts:
+            branch names, titles, commit messages. At checkout you find
+            confusion about which ref got pulled, fork heads masquerading as
+            reviewed branches. Dependencies introduce the entire supply-chain
+            surface, typosquats, hijacked packages, internal names claimed on
+            public registries. Tests run arbitrary code too, a fact forgotten
+            until someone notices test fixtures execute during CI on pull
+            requests. Build steps face artifact tampering and cache poisoning;
+            publish faces credential theft; deploy faces environments that
+            anyone with write access can commandeer.
+
+            The exercise generalizes with four lenses borrowed loosely from
+            STRIDE: spoofing (who really authored this commit or package),
+            tampering (was the artifact altered en route), repudiation (can
+            we prove who deployed what), and elevation (does one stage grant
+            powers another never needed). Applying four words per stage takes
+            minutes and produces a threat register engineers actually argue
+            with, rather than a compliance spreadsheet everyone ignores.
+        - type: quiz
+          question_id: ptm-stage-threat-fit
+          question: 'An attacker registers an internal-looking package name on a public registry, knowing your builds resolve missing versions outward. Which stage does this attack target?'
+          options:
+            - id: a
+              text: 'Deploy approval.'
+            - id: b
+              text: 'Dependency resolution, specifically source confusion between internal and public registries.'
+            - id: c
+              text: 'Trigger authorization.'
+            - id: d
+              text: 'Test parallelism.'
+          answer_ids: [b]
+          explanation: >
+            Dependency-confusion attacks live at resolution time. The fix is
+            source pinning and reserved namespaces, decided at the deps seam
+            of your model, not anywhere downstream.
+    - id: untrusted-input-into-builds
+      title: 'Untrusted input into builds'
+      blocks:
+        - type: prose
+          markdown: |
+            Workflow engines interpolate context into script text before any
+            shell exists, so a pull request titled with backticks becomes
+            executable syntax if you paste it into a run block. The bug class
+            is template injection, and it fires on every field an outsider
+            influences: PR titles and bodies, branch names, commit messages,
+            issue comments feeding automation bots. Interpolation happens
+            first, quoting never saves you, because the engine performs text
+            substitution before bash parses anything.
+
+            The structural fix routes untrusted values through environment
+            variables instead: pass them via an env mapping, then reference
+            shell variables inside the script. Environment assignment copies
+            bytes; interpolation rewrites program text. The same discipline
+            covers matrix values and generated file names. Alongside it sits
+            the second classic, workflows triggered on pull_request_target,
+            which grants write-context secrets while inviting forks to define
+            checkout content. Unless the job checks out the base ref and
+            treats the fork strictly as data, the combination hands strangers
+            your repository credentials; safer designs split privileged
+            posting into a separate workflow gated by labels or approvals.
+        - type: code
+          language: yaml
+          code: |
+            # vulnerable: title becomes part of the program
+            - run: echo "building ${{ github.event.pull_request.title }}"
+
+            # safe-ish: title stays data
+            - env:
+                PR_TITLE: ${{ github.event.pull_request.title }}
+              run: echo "building \"$PR_TITLE\""
+
+            # footgun: secrets + fork-chosen checkout
+            on: pull_request_target
+            jobs:
+              triage:
+                steps:
+                  - uses: actions/checkout@<pinned>
+                    with: {ref: "refs/pull/${{ github.event.number }}/head"}
+                  - run: ./scripts/triage   # runs fork-authored code WITH secrets
+        - type: quiz
+          question_id: ptm-untrusted-interpolation
+          question: 'Why does wrapping ${{ github.event.issue.title }} in double quotes inside a run block fail to fix injection?'
+          options:
+            - id: a
+              text: 'Workflow engines forbid quotes around expressions.'
+            - id: b
+              text: 'The engine substitutes text before the shell parses, so crafted titles can break out regardless of quoting.'
+            - id: c
+              text: 'Double quotes expand variables twice.'
+            - id: d
+              text: 'Titles are always sanitized upstream.'
+          answer_ids: [b]
+          explanation: >
+            Interpolation precedes interpretation. A title containing a quote
+            plus a subshell closes your string and opens theirs; only env-var
+            indirection keeps data out of program text entirely.
+    - id: secrets-that-expire-on-time
+      title: 'Secrets that expire on time'
+      blocks:
+        - type: prose
+          markdown: |
+            Static credentials in pipeline stores are breaches rehearsing.
+            They outlive rotation intentions, leak through logs and forked
+            scripts, and grant the same powers at 3 a.m. that they granted at
+            review time. The modern replacement is workload identity
+            federation: the pipeline authenticates with its platform-signed
+            token, the cloud trusts that issuer, and short-lived credentials
+            get minted per job. Nothing long-lived exists to steal; revoking
+            access means changing a trust policy, not hunting every stored
+            key across every environment.
+
+            When static secrets remain unavoidable, shrink them. Scope each
+            token to the single resource its job touches, set automatic
+            expiry where the provider allows, mask values in logs while
+            remembering masking fails against deliberate echo through shells
+            and debug flags, and rotate on schedule with proof. Audit which
+            workflows can read which secrets, because secret visibility often
+            defaults broader than anyone remembers. Prefer per-job secret
+            declarations over repository-wide bundles, since scoping at read
+            time limits what any single workflow compromise can even attempt.
+        - type: code
+          language: yaml
+          code: |
+            permissions:
+              contents: read          # default-deny the job token
+            jobs:
+              deploy:
+                environment: production   # requires human approval gate
+                steps:
+                  - uses: aws-actions/configure-aws-credentials@<pinned>
+                    with:
+                      role-to-assume: arn:aws:iam::441299887710:role/ci-deploy
+                      aws-region: eu-central-1
+                      # OIDC federation mints minutes-long creds here;
+                      # no AWS keys stored anywhere in repo settings
+
+            Pinned action references (commit SHA) stop tag-retargeting
+            attacks against your supply chain's smallest links.
+        - type: quiz
+          question_id: ptm-secret-strategy
+          question: 'Which property makes OIDC-style federation strictly better than storing a static cloud key in pipeline settings?'
+          options:
+            - id: a
+              text: 'Federated tokens carry no permissions.'
+            - id: b
+              text: 'Credentials exist only for minutes per job and nothing durable can leak from settings or logs.'
+            - id: c
+              text: 'Federation removes the need for least privilege.'
+            - id: d
+              text: 'Federated roles cannot be audited, improving privacy.'
+          answer_ids: [b]
+          explanation: >
+            Federation keeps the permission model but deletes the durable
+            secret. Theft windows collapse from forever to minutes, and
+            revocation becomes policy editing instead of credential hunting.
+    - id: runner-isolation
+      title: 'Runner isolation'
+      blocks:
+        - type: prose
+          markdown: |
+            Runners are computers that execute stranger-influenced programs,
+            so their hygiene equals pipeline integrity. Hosted runners give
+            you a fresh virtual machine per job managed by the provider,
+            which quietly solves state pollution. Self-hosted runners trade
+            cost for responsibility, and the common failure is persistence:
+            leftover caches, installed tools, docker images, and ambient
+            credentials from job one leaking into job two, turning any code
+            execution in either job into lateral movement across everything
+            sharing the host.
+
+            Treat untrusted workloads as radioactive. Jobs building external
+            contributions belong on ephemeral, single-use runners, ideally
+            isolated networks away from internal services, destroyed after
+            the job regardless of success. Persistent runners, if economics
+            force them, must never accept fork-originated jobs and should
+            hold no ambient authority beyond what each job declares. Label
+            routing decides fate: route by trust level, not by convenience,
+            so nobody's hotfix accidentally executes a stranger's test suite
+            beside production deployment keys.
+
+            Document runner inventory and routing rules beside the pipeline
+            code itself, so auditors verify isolation claims from files
+            rather than from folklore and hallway assurances.
+        - type: callout
+          tone: warning
+          markdown: |
+            A self-hosted runner with access to internal networks plus any
+            fork-triggered job is remote code execution sold as convenience.
+            Auditors have a phrase for this configuration: incident pending.
+    - id: hardening-checklist
+      title: 'Hardening checklist'
+      blocks:
+        - type: prose
+          markdown: |
+            Checklists convert understanding into pull requests. The starter
+            set fits in a review comment: pin third-party actions to full
+            commit SHAs, scope job tokens with explicit permissions blocks,
+            route untrusted input through env vars, gate deploys behind
+            protected environments requiring named approvals, separate build
+            and publish identities so no single job both writes packages and
+            signs releases, and schedule a quarterly rehearsal where you
+            deliberately attempt each attack from this module against your
+            own pipeline with authorization. The rehearsal matters most,
+            because defenses decay silently while attack knowledge compounds.
+            Assign each checklist line to an owner on the platform team too,
+            since unowned checklists become decoration within a quarter no
+            matter how sensible the lines look today.
+
+            Wire the checklist into review itself. A CODEOWNERS entry forcing
+            security review on workflow changes, plus a lint rule rejecting
+            unpinned actions and raw interpolations of event context, turns
+            individual vigilance into institutional memory that survives
+            team turnover and deadline seasons alike.
+        - type: code
+          language: text
+          code: |
+            Pipeline hardening v1 (apply to every workflow file)
+            [ ] third-party actions pinned to full commit SHA
+            [ ] permissions: block scoped per job, contents: read default
+            [ ] no event-context interpolation inside run/script blocks
+            [ ] pull_request_target absent, or base-ref-only + label-gated
+            [ ] deploys via protected environment w/ required reviewers
+            [ ] publish + sign held by distinct identities/roles
+            [ ] fork jobs land only on ephemeral isolated runners
+            [ ] secrets referenced by name; none echoed through shells
+
+            Eight boxes; each maps to one attack from this module.
+        - type: quiz
+          question_id: ptm-runner-state
+          question: 'Your team reuses one self-hosted runner for fork PRs and production deploys to save minutes. Which risk statement is accurate?'
+          options:
+            - id: a
+              text: 'Safe if the runner reboots nightly.'
+            - id: b
+              text: 'Fork-authored code executing near ambient deploy credentials enables cross-job compromise; isolate by trust level with ephemeral runners for forks.'
+            - id: c
+              text: 'Runners cannot retain state between jobs by design.'
+            - id: d
+              text: 'Risk applies only to public repositories.'
+          answer_ids: [b]
+          explanation: >
+            Shared persistent runners couple untrusted execution to ambient
+            authority through leftover state. Nightly reboots leave the
+            window wide open; only trust-based separation removes the class.
+  cheat_sheet: |
+    # Pipeline threat model quick reference
+
+    Seams to defend (seven questions):
+        trigger who fires | checkout whose code | deps which source
+        test whose fixtures | build artifact swap | publish who pushes
+        deploy who approves
+
+    Injection rules:
+        never ${{ event.* }} inside run blocks; use env: indirection
+        pull_request_target = secrets + fork checkout = footgun
+        treat titles, branches, comments, matrix values as attacker text
+
+    Secrets ladder:
+        federation/OIDC (minutes-lived) > scoped static w/ expiry >
+        broad static (never). Masking != redaction from determined echo.
+
+    Runners:
+        fresh VM per job for untrusted work; persistent runners never
+        take forks; route by trust label; kill ambient credentials
+
+    Hardening card:
+        SHA-pin actions, permissions block everywhere, protected envs,
+        split publish/sign identities, workflow-change reviews enforced
