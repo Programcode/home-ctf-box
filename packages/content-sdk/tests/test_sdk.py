@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from openrange.content.harness import expected_flag
 from openrange.content.linting import lint_room
 from openrange.content.loader import LoadError, load_bundle
-from openrange.content.models import RoomBundle, Validator
+from openrange.content.models import RoomBundle, Task, Validator
 from openrange.content.solver import (
     SolveContext,
     derive_flag,
@@ -124,3 +125,112 @@ def test_elevated_target_requires_reviewer_justification(tmp_path: Path) -> None
     )
     findings = lint_room(tmp_path / "room")
     assert "privilege-profile" not in {f.rule for f in findings}
+
+
+EXTERNAL_YAML = """apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: ext-wrapper
+  title: 'External Wrapper'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 15
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    Wrapper room around an official upstream lab image pulled by digest,
+    with authored lessons and a fixed public completion answer.
+  objectives:
+    - 'Complete the upstream lab objective through its own interface.'
+    - 'Submit the documented public completion artifact.'
+  scope:
+    allowed_targets: ['http://target:3000']
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Runs the official unmodified upstream image on an isolated internal network.'
+  target:
+    external_image: example/upstream:latest@sha256:{digest}
+    sidecars:
+      - name: db
+        image: example/companion:latest@sha256:{digest}
+        env:
+          EXAMPLE_PASSWORD: hunter2
+    ports: [3000]
+    healthcheck:
+      http_path: /
+      timeout_seconds: 120
+    flag_delivery: static
+  workstation: terminal
+  tasks:
+    - id: find-it
+      title: 'Find the hidden page'
+      prompt: >-
+        Reach the documented upstream endpoint and submit its path as the
+        public completion answer for this wrapper room.
+      points: 75
+      solution: |
+        Open the upstream app, locate the documented hidden endpoint through
+        its own interface, then submit its path as the completion answer.
+      validator:
+        type: exact
+        value: '/score-board'
+"""
+
+_DIGEST = "a" * 64
+
+
+def _write_external_room(tmp_path: Path, yaml_text: str) -> Path:
+    room = tmp_path / "ext-wrapper"
+    (room / "lesson").mkdir(parents=True)
+    (room / "solver").mkdir()
+    (room / "solver" / "solver.py").write_text("def solve(ctx):\n    raise RuntimeError\n")
+    (room / "room.yaml").write_text(yaml_text.format(digest=_DIGEST))
+    return room
+
+
+def test_external_target_model_and_lint(tmp_path: Path) -> None:
+    room = _write_external_room(tmp_path, EXTERNAL_YAML)
+    bundle = load_bundle(room / "room.yaml")
+    assert isinstance(bundle, RoomBundle)
+    target = bundle.spec.target
+    assert target.external_image == f"example/upstream:latest@sha256:{_DIGEST}"
+    assert target.build_context == "./target"
+    assert target.sidecars[0].name == "db"
+    assert target.sidecars[0].env == {"EXAMPLE_PASSWORD": "hunter2"}
+
+    rules = {f.rule: f.severity for f in lint_room(room)}
+    assert "target" not in rules
+
+
+def test_static_delivery_requires_declared_validator_values(tmp_path: Path) -> None:
+    room = _write_external_room(tmp_path, EXTERNAL_YAML)
+    manifest = room / "room.yaml"
+    manifest.write_text(
+        manifest.read_text().replace(
+            "      validator:\n        type: exact\n        value: '/score-board'",
+            "      validator:\n        type: per_session_flag",
+        )
+    )
+    assert "static-flag-delivery" in {f.rule for f in lint_room(room)}
+
+
+def test_expected_flag_static_answer_vs_derived() -> None:
+    task = Task(
+        id="find-it",
+        title="Find the hidden page",
+        prompt="Reach the documented upstream endpoint and submit its path.",
+        points=10,
+        solution="Browse the app until the hidden page renders, then submit its path.",
+        validator=Validator(type="exact", value="/score-board"),
+    )
+    static = expected_flag(
+        task, static_delivery=True, master_key=b"k", instance_id="i", content_slug="c"
+    )
+    derived = expected_flag(
+        task, static_delivery=False, master_key=b"k", instance_id="i", content_slug="c"
+    )
+    assert static == "/score-board"
+    assert derived.startswith("FLAG{")

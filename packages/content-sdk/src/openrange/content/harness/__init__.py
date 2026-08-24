@@ -21,13 +21,26 @@ from typing import Any
 
 import docker
 from openrange.content.loader import load_room
-from openrange.content.models import RoomBundle
+from openrange.content.models import RoomBundle, Task
 from openrange.content.solver import derive_flag
 
 logger = logging.getLogger(__name__)
 
 NETWORK_PREFIX = "openrange-test"
 ATTACKER_IMAGE = "openrange/harness-attacker:latest"
+
+# Bounded capability set for setuid-dependent services (sshd privsep, sudo,
+# SUID, database entrypoints that drop to a dedicated user). no-new-privileges
+# must stay off or elevation is a no-op.
+_ELEVATED_CAPS = [
+    "CHOWN",
+    "DAC_OVERRIDE",
+    "FOWNER",
+    "SETGID",
+    "SETUID",
+    "NET_BIND_SERVICE",
+    "SYS_CHROOT",
+]
 
 _DRIVER_TEMPLATE = """
 import dataclasses
@@ -58,6 +71,32 @@ class HarnessResult:
 
 class HarnessError(Exception):
     pass
+
+
+def expected_flag(
+    task: Task,
+    *,
+    static_delivery: bool,
+    master_key: bytes,
+    instance_id: str,
+    content_slug: str,
+) -> str:
+    """Flag a task expects this run.
+
+    Rooms with flag_delivery "static" wrap upstream labs that cannot host
+    injected per-session flags; their answers are fixed public constants
+    declared on exact/normalized validators. Everything else derives the
+    canonical per-session flag (ADR 0007).
+    """
+    v = task.validator
+    if static_delivery and v.type in ("exact", "normalized") and v.value is not None:
+        return str(v.value)
+    return derive_flag(
+        master_key,
+        instance_id=instance_id,
+        content_slug=content_slug,
+        task_id=task.id,
+    )
 
 
 def _ensure_attacker_image(client: docker.DockerClient) -> object:
@@ -129,10 +168,24 @@ class RoomEnv:
                 ["curl", "-fsS", f"http://127.0.0.1:{port}{path}"],
                 ["wget", "-qO-", f"http://127.0.0.1:{port}{path}"],
             ):
-                if self._container.exec_run(probe_cmd).exit_code == 0:
+                probe = self._container.exec_run(probe_cmd)
+                if probe.exit_code == 0:
                     return True
-            return False
+                if probe.exit_code not in (126, 127):
+                    return False
+            # Tool-less target (no python3/curl/wget, e.g. hardened
+            # upstream images): probe over HTTP from the attacker instead.
+            return self._probe_from_attacker(port, path)
         return False
+
+    def _probe_from_attacker(self, port: int, path: str) -> bool:
+        code = (
+            "import urllib.request,sys;"
+            f"urllib.request.urlopen('http://target:{port}{path}',timeout=3);"
+            "sys.exit(0)"
+        )
+        result = self._attacker.exec_run(["python3", "-c", code])
+        return bool(result.exit_code == 0)
 
     def restart(self) -> None:
         """Reset proof: fresh process must serve fresh state."""
@@ -190,23 +243,33 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
     container = None
     attacker = None
     image = None
+    built_image = False
+    sidecars: list[Any] = []
     try:
-        context_dir = (manifest.parent / bundle.spec.target.build_context).resolve()
-        logger.info("building %s", image_tag)
-        image, _logs = client.images.build(path=str(context_dir), tag=image_tag, rm=True)
+        external_ref = bundle.spec.target.external_image
+        if external_ref:
+            logger.info("pulling %s", external_ref)
+            image = client.images.pull(external_ref)
+        else:
+            context_dir = (manifest.parent / bundle.spec.target.build_context).resolve()
+            logger.info("building %s", image_tag)
+            image, _logs = client.images.build(path=str(context_dir), tag=image_tag, rm=True)
+            built_image = True
 
         master_key = os.environ.get("OPENRANGE_FLAG_MASTER_KEY", "").encode() or b"harness-key"
+        static_delivery = bundle.spec.target.flag_delivery == "static"
         expected = {
-            task.id: derive_flag(
-                master_key,
+            task.id: expected_flag(
+                task,
+                static_delivery=static_delivery,
+                master_key=master_key,
                 instance_id=run_id,
                 content_slug=bundle.metadata.slug,
-                task_id=task.id,
             )
             for task in bundle.spec.tasks
         }
 
-        env: dict[str, str] = {}
+        env: dict[str, str] = dict(bundle.spec.target.env)
         if bundle.spec.target.flag_delivery == "env":
             if len(expected) == 1:
                 env[bundle.spec.target.flag_env] = next(iter(expected.values()))
@@ -214,6 +277,21 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
                 for task_id, flag in expected.items():
                     suffix = task_id.upper().replace("-", "_")
                     env[f"{bundle.spec.target.flag_env}_{suffix}"] = flag
+
+        for sc in bundle.spec.target.sidecars:
+            sidecars.append(
+                client.containers.run(
+                    sc.image,
+                    detach=True,
+                    name=f"{sc.name}-{run_id}",
+                    hostname=sc.name,
+                    network=network_name,
+                    environment=sc.env,
+                    nano_cpus=int(0.5 * 1e9),
+                    mem_limit="512m",
+                    cap_add=_ELEVATED_CAPS,  # upstream entrypoints drop privileges
+                )
+            )
 
         elevated = bundle.spec.target.privilege_profile == "elevated"
         container_kwargs: dict[str, object] = dict(
@@ -226,18 +304,14 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
             mem_limit="512m",
             pids_limit=256,
         )
+        if bundle.spec.target.external_image:
+            # Upstream images carry their own JVM/Node runtime budgets;
+            # the built-room defaults are too tight for them.
+            container_kwargs["mem_limit"] = "2g"
+            container_kwargs["nano_cpus"] = int(2 * 1e9)
+            container_kwargs["pids_limit"] = 1024
         if elevated:
-            # Bounded set for setuid-dependent services (sshd privsep, sudo,
-            # SUID). no-new-privileges must stay off or elevation is a no-op.
-            container_kwargs["cap_add"] = [
-                "CHOWN",
-                "DAC_OVERRIDE",
-                "FOWNER",
-                "SETGID",
-                "SETUID",
-                "NET_BIND_SERVICE",
-                "SYS_CHROOT",
-            ]
+            container_kwargs["cap_add"] = list(_ELEVATED_CAPS)
         else:
             container_kwargs["cap_drop"] = ["ALL"]
             container_kwargs["security_opt"] = ["no-new-privileges:true"]
@@ -272,7 +346,7 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
             _attacker=attacker,
         )
     finally:
-        for c in (container, attacker):
+        for c in (*sidecars, container, attacker):
             if c is not None:
                 try:
                     c.remove(force=True)
@@ -282,7 +356,7 @@ def room_environment(bundle_dir: Path) -> Iterator[RoomEnv]:
             network.remove()
         except Exception:  # noqa: S110 - best-effort teardown
             pass
-        if image is not None:
+        if built_image and image is not None:
             try:
                 client.images.remove(image.id, force=True)
             except Exception:  # noqa: S110 - best-effort teardown

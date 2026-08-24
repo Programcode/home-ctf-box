@@ -106,9 +106,50 @@ class Healthcheck(StrictModel):
         return bool(self.http_path or self.tcp_port)
 
 
+class SidecarSpec(StrictModel):
+    name: Annotated[str, Field(min_length=2, max_length=64)]
+    image: Annotated[
+        str,
+        Field(description="official companion image ref, digest-pinned"),
+    ]
+    env: dict[str, str] = Field(default_factory=dict)
+
+
 class TargetSpec(StrictModel):
-    build_context: Annotated[str, Field(description="relative dir containing Dockerfile")]
+    build_context: Annotated[
+        str, Field(default="./target", description="relative dir containing Dockerfile")
+    ]
     image_name: str | None = None  # derived from slug when absent
+    external_image: Annotated[
+        str | None,
+        Field(
+            description=(
+                "official upstream image ref (digest-pinned). When set, the "
+                "harness pulls and runs it instead of building build_context."
+            )
+        ),
+    ] = None
+    sidecars: Annotated[
+        list[SidecarSpec],
+        Field(
+            default_factory=list,
+            max_length=2,
+            description=(
+                "companion containers from the upstream deployment topology "
+                "(e.g. the database service an upstream compose file expects)"
+            ),
+        ),
+    ]
+    env: Annotated[
+        dict[str, str],
+        Field(
+            default_factory=dict,
+            description=(
+                "target container environment; external rooms use the "
+                "variables upstream documents for their image"
+            ),
+        ),
+    ]
     ports: list[Annotated[int, Field(ge=1, le=65535)]] = Field(min_length=1, max_length=16)
     healthcheck: Healthcheck
     flag_delivery: FlagDelivery = "env"

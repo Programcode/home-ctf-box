@@ -1,0 +1,70 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: juice-shop-tour
+  title: 'Juice Shop Tour: The Hidden Score Board'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 25
+  tags: [owasp, juice-shop, recon, javascript]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    OWASP Juice Shop runs here as the official upstream container image,
+    untouched. Your objective is the app's own classic first challenge:
+    find the hidden score-board page that the interface deliberately does
+    not link to, using only the client-side code the app serves you.
+  objectives:
+    - 'Recognize that a single-page application hides its routes in client-side JavaScript.'
+    - 'Locate the score-board route by inspecting the bundles the shop serves.'
+    - "Submit the hidden route path as this room's public completion answer."
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:3000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Runs the official unmodified OWASP Juice Shop image on an isolated internal network with no egress.'
+  target:
+    external_image: 'bkimminich/juice-shop@sha256:73c53fbf442e8337b3ea3d98c7e8550308854701ebdfce4cc39768f36b75430e'
+    ports: [3000]
+    healthcheck:
+      http_path: /
+      timeout_seconds: 180
+    flag_delivery: static
+  workstation: terminal
+  tasks:
+    - id: find-score-board
+      title: 'Find the hidden Score Board page'
+      prompt: >-
+        Juice Shop never links to its score board from the navigation.
+        Dig through the JavaScript bundles the storefront serves until you
+        find the route that renders it, then open it and submit its path,
+        for example /some-route, as your answer.
+      points: 75
+      hints:
+        - cost: 0
+          text: 'The browser loads one or more main.*.js bundles. Everything the frontend can navigate to lives in there as string literals.'
+        - cost: 10
+          text: 'Pull the bundle with curl, save it, and grep it for the word scoreboard or score-board. Route fragments sit next to component names.'
+        - cost: 25
+          text: 'The route is /score-board. Confirm with curl -s http://target:3000/score-board | grep -i "Score Board" and submit /score-board.'
+      solution: |
+        1. Fetch the storefront root and note the main JavaScript bundle
+           references in the HTML.
+        2. Download the main bundle, for example:
+           curl -s http://target:3000/main.js -o main.js
+           (the exact file name is visible in the page source).
+        3. Search it for routing strings:
+           grep -o "score-board" main.js
+           Angular route definitions appear as plain literals.
+        4. Open http://target:3000/score-board and confirm the Score Board
+           renders with challenge progress.
+        5. Submit the answer /score-board.
+      validator:
+        type: exact
+        value: '/score-board'
