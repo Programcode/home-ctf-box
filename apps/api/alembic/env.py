@@ -16,6 +16,7 @@ from openrange.api.notifications import (
 )
 from openrange.api.orgs import models as orgs_models  # noqa: F401 - register tables
 from openrange.api.scoring import models as scoring_models  # noqa: F401 - register tables
+from openrange.api.streaks import models as streaks_models  # noqa: F401 - register tables
 from openrange.api.studio import models as studio_models  # noqa: F401 - register tables
 from openrange.api.teams import models as teams_models  # noqa: F401 - register tables
 from openrange.api.users import models  # noqa: F401 - register tables
