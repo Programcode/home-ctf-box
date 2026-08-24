@@ -13,7 +13,7 @@ from fastapi import APIRouter
 from openrange.api.auth import service
 from openrange.api.auth.dependencies import DbSession
 from openrange.api.auth.service import AuthError
-from openrange.api.auth.tokens import generate_token
+from openrange.api.auth.tokens import constant_time_equals, generate_token
 from openrange.api.config import get_settings
 from openrange.api.setup.tokens import get_pending_setup_token, store_setup_token
 from pydantic import BaseModel
@@ -56,7 +56,7 @@ async def complete_setup(payload: SetupComplete, db: DbSession) -> dict[str, str
     if await service.user_count(db) > 0:
         raise AuthError("setup already completed", 409)
     expected = get_pending_setup_token()
-    if expected is None or payload.token != expected:
+    if expected is None or not constant_time_equals(payload.token, expected):
         raise AuthError("invalid setup token", 403)
     user = await service.create_user(
         db,

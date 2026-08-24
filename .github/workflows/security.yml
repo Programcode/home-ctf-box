@@ -1,0 +1,60 @@
+name: security
+
+# Phase 14 automated security gates: SAST (bandit), dependency audit
+# (pip-audit + pnpm audit), and secret scanning (gitleaks). Findings
+# triage lives in security/threat-model.md.
+
+on:
+  schedule:
+    # Weekly, Mondays 04:07 UTC.
+    - cron: '7 4 * * 1'
+  pull_request:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      # The gitleaks GitHub action crashes on Node 24 runners; run the CLI.
+      - name: gitleaks secret scan
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --config ./gitleaks.toml --redact --exit-code 1
+  python-sast-and-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081
+        with:
+          enable-cache: true
+      - name: Install workspace (incl. bandit, pip-audit)
+        run: uv sync --all-packages
+      - name: Bandit (medium+ severity)
+        run: uv run bandit -r apps/api -ll --quiet
+      - name: Export lockfile for audit
+        run: uv export --all-packages --no-hashes --format requirements-txt -o requirements-audit.txt
+      - name: pip-audit (known Python CVEs)
+        run: uv run pip-audit -r requirements-audit.txt --progress-spinner off
+
+  node-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          version: 11.22.0
+      # pnpm audit reads pnpm-lock.yaml directly; no install needed.
+      - name: Audit prod dependencies (high+ fails the build)
+        run: pnpm audit --prod --audit-level=high

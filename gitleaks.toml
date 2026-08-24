@@ -1,0 +1,21 @@
+# Gitleaks configuration for OpenRange (Phase 14).
+#
+# Extends the default rule set; only narrows it for intentional
+# challenge material. Room bundles under content/rooms/ embed flags,
+# codes, and credentials BY DESIGN - they are training fixtures, not
+# operational secrets. Real secrets live in env/settings only and stay
+# covered by every default rule. Everything else in the repo is scanned
+# at full strictness.
+title = "OpenRange gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional challenge fixtures: room targets and manifests carry training flags/codes"
+paths = [
+  '''^content/rooms/[^/]+/target/.*$''',
+  '''^content/rooms/[^/]+/room\.yaml$''',
+  '''^rooms/''',
+  '''^platform/''',
+]

@@ -2,6 +2,12 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
+# Transitive prod deps of `next` with known high advisories (phase 14):
+# pin above the patched versions until next bumps them.
+overrides:
+  postcss: '>=8.5.23'
+  sharp: '>=0.35.0'
+
 # esbuild needs a postinstall to place its platform binary.
 onlyBuiltDependencies:
   - esbuild
