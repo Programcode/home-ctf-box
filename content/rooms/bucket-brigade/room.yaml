@@ -1,0 +1,101 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: bucket-brigade
+  title: 'Bucket Brigade'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 20
+  tags: [cloud-concepts, object-storage-sim, misconfiguration, data-exposure, simulation]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    Object storage buckets leak when a policy grants anonymous principals
+    more than anyone remembers. This room runs a small local S3-style API:
+    two buckets correctly refuse anonymous callers, but nimbus-nightly-backups
+    answers listings and object reads to anyone because of a migration-era
+    policy statement nobody reviewed. Walk the paginated listing, find the
+    one backup that should never have been there, and download it.
+  objectives:
+    - 'Confirm an anonymous-read policy misconfiguration on a simulated bucket.'
+    - 'Enumerate a large listing through marker-based pagination instead of trusting the first page.'
+    - 'Identify and retrieve the sensitive object hidden among routine backups.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single Flask process with an in-memory deterministic object map; no
+      cloud SDK, no credentials, no egress. The policy document uses a
+      sim.s3 namespace so nothing is copied from any provider verbatim.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: expose-backup-leak
+      title: 'Pull the backup that was never meant to be public'
+      prompt: >-
+        The object storage sim on http://target:8000 hosts three buckets.
+        One of them honors anonymous requests end to end. Confirm which,
+        read its policy, then walk the full listing page by page until you
+        find the one object that does not belong among nightly dumps and
+        sync logs: an ops keyring recovery file from the July incident.
+        Download it and submit the recovery flag printed inside.
+      points: 150
+      hints:
+        - cost: 0
+          text: >-
+            Ask each bucket for a listing with plain GET requests against
+            http://target:8000/<bucket>. Two answer 403 AccessDenied; the
+            third hands you objects. Appending ?policy=1 shows exactly why.
+        - cost: 10
+          text: >-
+            Listings are capped at max-keys per call and set
+            is_truncated with a next_marker. Feed that marker back as
+            &marker=... until is_truncated turns false; the total count is
+            in the response so you can check you saw everything.
+        - cost: 25
+          text: >-
+            Keep going until you reach ops/incident-2026-07/
+            keyring-recovery.txt, then GET it directly at
+            /nimbus-nightly-backups/ops/incident-2026-07/keyring-recovery.txt
+            and read the recovery flag line inside.
+      solution: |
+        1. Probe the buckets anonymously:
+           curl http://target:8000/nimbus-prod-media
+           curl http://target:8000/nimbus-fin-archive
+           Both return 403 AccessDenied, which is what healthy looks like.
+        2. curl http://target:8000/nimbus-nightly-backups returns a JSON
+           listing with objects, is_truncated true, and next_marker set.
+           The first page holds only db/ and logs/ keys, so resist
+           concluding anything yet.
+        3. curl 'http://target:8000/nimbus-nightly-backups?policy=1' shows
+           the misconfiguration: a statement with principal * allowing
+           ListBucket and GetObject, annotated as added during a 2025
+           migration and never reviewed. That is the whole bug.
+        4. Page through everything:
+           curl 'http://target:8000/nimbus-nightly-backups?max-keys=8&marker=<next_marker>'
+           Repeat, always feeding back next_marker, until is_truncated is
+           false. The object_count_total field lets you verify you saw all
+           38 keys.
+        5. Among the pages appears ops/incident-2026-07/
+           keyring-recovery.txt, size 431 bytes, sitting between routine
+           dumps. Nothing else references keyrings or incidents.
+        6. Fetch it:
+           curl http://target:8000/nimbus-nightly-backups/ops/incident-2026-07/keyring-recovery.txt
+           The notes end with a recovery flag line carrying FLAG{...}.
+           Submit that value.
+      validator:
+        type: per_session_flag

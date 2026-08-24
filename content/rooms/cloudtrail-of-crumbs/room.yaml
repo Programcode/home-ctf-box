@@ -1,0 +1,111 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: cloudtrail-of-crumbs
+  title: 'Cloudtrail of Crumbs'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 25
+  tags: [cloud-concepts, aws-simulation, audit-logs, incident-response, simulation]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    A production backup bucket started serving its contents to strangers,
+    and the only honest witness is the audit trail. This room hands you a
+    deterministic simulated cloud audit log in which one compromised
+    long-lived access key leads to an assumed role, a minted persistence
+    key, and finally a bucket policy rewritten for anonymous reads.
+    Reconstruct the chain from the events and file a complete report.
+  objectives:
+    - 'Separate routine automation traffic from anomalous activity inside a simulated cloud audit log.'
+    - 'Trace the attacker progression from credential reuse through role assumption and key creation to policy change.'
+    - 'Answer the incident report questions with exact values pulled from the evidence.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Static JSON evidence file plus one Flask route; no cloud SDK, no
+      network egress, nothing stateful beyond string comparison. The log
+      imitates cloud audit conventions with a sim.* namespace so no real
+      provider event format is copied wholesale.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: reconstruct-key-chain
+      title: 'Reconstruct the leaked key chain'
+      prompt: >-
+        Download the simulated audit trail from /evidence/
+        cloudtrail-sim.json on http://target:8000 and read it end to end.
+        Routine sync jobs share the log with a quiet overnight intrusion:
+        someone reused a long-lived access key from an outside address,
+        assumed a role with it, created a fresh access key for a different
+        user to persist access, and rewrote the bucket policy so anyone
+        could list and fetch the backups. Answer the report desk at
+        /report with q1 set to the IAM user whose key was reused, q2 set
+        to the user who received the attacker-minted key, and q3 set to
+        the API action that opened the bucket to anonymous reads. Submit
+        the FLAG value printed when all three answers verify.
+      points: 175
+      hints:
+        - cost: 0
+          text: >-
+            Read events in time order and watch sourceIPAddress. The
+            office network sits in 10.44.0.0/16; everything else deserves
+            suspicion. The first outside address appears right before the
+            damage starts.
+        - cost: 10
+          text: >-
+            The assume_role event names the user whose credentials were
+            abused in userIdentity.userName. The create_access_key event
+            carries the victim of the new key in requestParameters.userName,
+            and its responseElements confirm who now owns AKIASIMPERSIST77.
+        - cost: 25
+          text: >-
+            Find the event whose responseElements embed a policy with
+            Principal * granting GetObject and ListObjects on the backups
+            bucket; its eventName is your third answer. Then GET
+            /report?q1=ci-deployer&q2=backup-archiver&q3=put_bucket_policy
+            if you want to check yourself.
+      solution: |
+        1. Fetch the evidence:
+           curl -o cloudtrail-sim.json http://target:8000/evidence/cloudtrail-sim.json
+           It is plain JSON with an events array in chronological order.
+        2. Skim the daytime events first. ci-deployer lists and fetches
+           nightly backups from 10.44.0.15, which is the office range.
+           That is the baseline of normal behavior.
+        3. At 2026-08-19T02:47:03Z a get_object arrives for ci-deployer's
+           key AKIASIMDEPLOY01 but from 203.0.113.66. Same identity, new
+           continent: the long-lived key leaked and is being reused.
+           That answers q1 with ci-deployer.
+        4. Two minutes later the same address calls assume_role against
+           arn:sim:iam::111122223333:role/log-archive-reader and receives
+           session credentials ASIMSIMPTEMP2211.
+        5. Event ev-0007 uses that session to call create_access_key for
+           userName backup-archiver and returns AKIASIMPERSIST77 marked
+           Active. The attacker just manufactured durable access for a
+           second identity. That answers q2 with backup-archiver.
+        6. Event ev-0009 calls put_bucket_policy on nimbus-prod-backups
+           and the response shows the new document: Effect Allow,
+           Principal *, actions GetObject and ListObjects. Anonymous
+           downloads follow immediately in ev-0010 and ev-0011 from a
+           third address, 198.51.100.23. That answers q3 with
+           put_bucket_policy.
+        7. File the report:
+           curl 'http://target:8000/report?q1=ci-deployer&q2=backup-archiver&q3=put_bucket_policy'
+           The desk verifies all three values and prints the room flag.
+      validator:
+        type: per_session_flag

