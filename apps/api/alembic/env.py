@@ -6,6 +6,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from openrange.api.challenges import models as challenges_models  # noqa: F401 - register tables
 from openrange.api.db.base import Base
 from openrange.api.events import models as events_models  # noqa: F401 - register tables
 from openrange.api.labs import models as labs_models  # noqa: F401 - register tables
