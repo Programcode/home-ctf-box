@@ -46,6 +46,46 @@ numeric fields; invalid bundles fail loudly instead of rendering. Set
 Filters write `?difficulty=&type=&track=` query params, so filtered views are
 shareable URLs while the grid itself renders server-side.
 
+### Learning, challenges, notifications
+
+`/learn`, `/learn/[pathSlug]`, `/learn/[pathSlug]/[moduleSlug]`,
+`/challenges`, and `/notifications` read and mutate through the same-origin
+proxy from client components (`lib/api-browser.ts`). These surfaces are
+inherently per-user and interactive, so the browser owns the fetch lifecycle:
+loading skeletons first, an inline sign-in prompt on 401/403, and a problem-
+details error banner otherwise. Response types live once in
+`@openrange/contracts` (`ApiClient.learning`, `.challenges`, `.notifications`);
+the web app casts nothing.
+
+Two behaviors worth knowing:
+
+- Quiz feedback shows only per-question correctness returned by
+  `POST /api/or/quiz/{section_id}/attempt`. Answer keys never reach the
+  browser, so the UI cannot leak them.
+- The module reading pane offers a language switcher only when a probe of
+  `GET /api/or/learning/modules/{slug}?lang=<code>` answers 200 for a
+  candidate language ("when 200 else hide"). Today no candidate answers 200,
+  so the switcher stays hidden until localization ships backend-side.
+
+### Browser terminal
+
+`/terminal` attaches xterm.js to the gateway WebSocket at
+`/terminal/{instance_id}?token=...` (binary frames carry keystrokes and PTY
+output; text frames are control JSON such as resize, plus the initial
+`{"type":"session"}` handshake used for `?resume=` reconnects).
+
+Token reality check (grep before you trust this): the gateway verifies
+short-lived `lab-v1` tokens (`apps/lab-gateway/src/openrange/gateway/tokens.py`),
+but the FastAPI side has **no minting endpoint yet** — there is no
+`POST /api/labs/{id}/terminal-token` route in `apps/api`, and the tokens
+module docstring says minting lands in a later branch. Until that endpoint
+ships, the page therefore stays gated behind selecting a READY lab from your
+own instance list, and Connect reports precisely that the token endpoint is
+missing instead of pretending to attach. When the endpoint exists, the same
+client connects for real: it expects `{token}` from
+`POST /api/or/labs/{id}/terminal-token` and opens
+`${NEXT_PUBLIC_GATEWAY_WS_URL:-ws://localhost:8772}/terminal/{id}?token=...`.
+
 ### Styling and accessibility
 
 - `packages/ui` owns tokens (`tokens.css`: near-black surfaces, single lime
@@ -56,8 +96,11 @@ shareable URLs while the grid itself renders server-side.
 - Keyboard support: skip link as first tab stop, visible focus rings
   everywhere, native `<dialog>` for modals (focus trap + Escape for free),
   WAI-ARIA tabs pattern in the Tabs primitive, reduced-motion-safe animations.
-- Playwright runs axe on `/`, `/catalog`, `/login` at 320 px and 1280 px, plus
-  a keyboard-only journey test.
+- The top navigation marks the active route with `aria-current="page"`;
+  below the `md` breakpoint it collapses into a disclosure menu button.
+- Playwright runs axe on `/`, `/catalog`, `/login`, `/learn`, and
+  `/challenges` at 320 px and 1280 px, plus a keyboard-only journey test and
+  mocked-API journeys for enroll/module/quiz and challenge flag submission.
 
 ## Local development
 
@@ -70,6 +113,9 @@ Environment variables (see `.env.example` at the repo root):
 
 - `ORIGIN_API_URL`: where FastAPI listens (default `http://localhost:8700`).
 - `OPENRANGE_CONTENT_DIR`: override for the content bundle directory.
+- `NEXT_PUBLIC_GATEWAY_WS_URL`: gateway WebSocket base for the browser
+  terminal (default `ws://localhost:8772`); production Caddy exposes it under
+  `/gateway/*`, so set `wss://<host>/gateway`.
 
 ## Commands
 

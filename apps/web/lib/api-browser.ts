@@ -62,3 +62,8 @@ export class ProxyError extends Error {
     this.status = status;
   }
 }
+
+/** True when the proxy answered 401/403, i.e. the visitor is not signed in. */
+export function isAuthError(error: unknown): error is ProxyError {
+  return error instanceof ProxyError && (error.status === 401 || error.status === 403);
+}
