@@ -1,0 +1,106 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: license-to-learn
+  title: 'License To Learn'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 35
+  tags: [reversing, gdb, debuggers, linux, ssh]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    The activation binary on this box computes its expected activation
+    code through a deliberately slow naive loop, then quietly compares
+    your argument against it. Recomputing that value by hand or by
+    script is the wrong tool here; this room teaches the honest way:
+    break into a debugger at the moment validation happens and read the
+    computed expectation straight out of memory. You will complete a
+    provided gdb script template, use it to dump the expected code, and
+    feed that code back to the real binary to collect the flag.
+  objectives:
+    - 'Set breakpoints in gdb against an unmodified program and inspect live memory.'
+    - 'Read symbol tables with nm to find the function and variable a debugger needs.'
+    - 'Recognize why debugging a setuid binary works best on a plain copy of the file.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and the
+      learner shell; sessions run as unprivileged learner (uid 1000). The
+      activator helper is purpose-built for this room and carries the
+      setuid bit only so the accepted path can read the root-owned flag
+      file; the debugger workflow itself runs on a non-setuid copy under
+      the unprivileged account. No anti-debugging tricks, no ptrace games,
+      and no real-world exploit code are involved. Disposable Debian
+      container on an internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: debugger-read
+      title: 'Break after validation and read the expected code'
+      prompt: >-
+        Log in as learner with password learner. Run
+        /opt/challenges/activator without arguments to see its usage, and
+        note that guessing the numeric activation code means racing a slow
+        internal computation you never see. Complete the gdb template at
+        /opt/challenges/cheatsheet.gdb using symbol names from nm, run it
+        against a copy of the binary, read the expected code from memory,
+        then pass that exact code to the original binary as its argument
+        and submit the FLAG it prints.
+      points: 200
+      hints:
+        - cost: 0
+          text: >-
+            The cheatsheet needs three names: where to break, a throwaway
+            argument for run, and which global to inspect. nm on a copy of
+            the binary lists both missing names; anything that looks like
+            a report step and an expectation holder is what you want.
+        - cost: 10
+          text: >-
+            Break at report, not inside the slow loop. By the time report
+            starts, main has already stored the finished computation into
+            the global variable, so one memory dump shows the final value.
+        - cost: 25
+          text: >-
+            Fill the template as break report, run 1, x/1wx &expected_code,
+            run gdb -batch against your copy, convert the printed hex dword
+            to decimal, then execute /opt/challenges/activator <that
+            decimal> to get the flag.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run /opt/challenges/activator and /opt/challenges/activator
+           12345. Both fail fast or slow without revealing anything; the
+           expected code exists only in memory after the internal loop.
+        3. Make a working copy so setuid bits stay out of the debugger's
+           way:
+           cp /opt/challenges/activator /tmp/activator-copy
+           chmod 755 /tmp/activator-copy
+        4. Read symbols: nm /tmp/activator-copy shows the report function
+           and the expected_code global among a short list.
+        5. Complete /opt/challenges/cheatsheet.gdb by replacing
+           @@BREAKPOINT@@ with report, @@ARGUMENT@@ with 1, and
+           @@VARIABLE@@ with expected_code, saving it as /tmp/sheet.gdb.
+        6. Run: gdb -batch -x /tmp/sheet.gdb /tmp/activator-copy
+           It stops at report and dumps four bytes:
+           0x404060 <expected_code>: 0x........
+        7. Convert that hex dword to decimal and feed it back to the real
+           binary: /opt/challenges/activator <decimal>. The comparison now
+           succeeds and prints === ACTIVATION ACCEPTED === with FLAG{...}.
+           Submit that value.
+      validator:
+        type: per_session_flag

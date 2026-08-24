@@ -1,0 +1,97 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: strings-attached
+  title: 'Strings Attached'
+  version: 1.0.0
+  difficulty: beginner
+  points: 125
+  estimated_minutes: 30
+  tags: [reversing, static-analysis, linux, ssh]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    This bookkeeping box ships a small custom binary at /opt/challenges/ledger.
+    Its usage line advertises two harmless reports, but compiled binaries
+    carry every string literal they contain, and one string in this binary
+    mentions a mode the usage never shows. You will identify the file, dump
+    its printable strings, run the hidden export mode it reveals, and undo
+    the fixed-byte cipher that mode applies before printing.
+  objectives:
+    - 'Triage an unknown ELF with file and strings before running anything.'
+    - 'Compare advertised usage against strings output to surface hidden functionality.'
+    - 'Undo a single-byte XOR using the key byte the program itself discloses.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and the
+      learner shell; sessions run as unprivileged learner (uid 1000). The
+      ledger helper is purpose-built for this room and carries the setuid
+      bit only so its export mode can read the root-owned flag file; it
+      prints data and changes nothing. No real-world exploit code and no
+      offensive tooling are involved. Disposable Debian container on an
+      internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: export-secrets
+      title: 'Surface the hidden mode and decode its export'
+      prompt: >-
+        Log in as learner with password learner and triage
+        /opt/challenges/ledger without trusting its usage line. Identify
+        what kind of file it is, dump the printable strings it embeds,
+        and find the option those strings mention but the usage hides.
+        Run that mode, note the key byte it discloses, decode the hex
+        blob it prints, and submit the FLAG value inside.
+      points: 125
+      hints:
+        - cost: 0
+          text: >-
+            Start with `file /opt/challenges/ledger` to confirm it is an
+            ELF executable, then run plain `strings` on it. A usage line
+            only shows what the author wanted you to see; string tables
+            show what actually got compiled in.
+        - cost: 10
+          text: >-
+            Among the strings sits an option the usage never lists. Run
+            the binary with that option and read every output line; the
+            program volunteers the cipher key it uses for the export.
+        - cost: 25
+          text: >-
+            /opt/challenges/ledger --export-secrets prints hex bytes XORed
+            with byte 0x5A. XOR is its own inverse: python3 -c "print(bytes(b ^ 0x5A
+            for b in bytes.fromhex('PASTE')).decode())" turns the blob back
+            into readable text.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. `file /opt/challenges/ledger` reports an ELF 64-bit executable,
+           dynamically linked and stripped, so there are no symbol names
+           to lean on; embedded strings are the map.
+        3. Run `strings /opt/challenges/ledger`. Between the usage text
+           and ordinary library noise appear two interesting literals:
+           "ledger export cipher: single-byte xor, key byte 0x5A" and the
+           option name "--export-secrets", which the usage line omits.
+        4. Probe the documented options first (`--balance`, `--accounts`),
+           then run `/opt/challenges/ledger --export-secrets`. It prints:
+           export-key=0x5A followed by secret-blob: <hex bytes>.
+        5. Decode the blob. Paste the hex after the colon into:
+           python3 -c "print(bytes(b ^ 0x5A for b in bytes.fromhex('HEXHERE')).decode())"
+           or apply XOR 0x5A by hand in any tool. Applying the same key
+           again restores the plaintext.
+        6. The decoded line reads FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag
