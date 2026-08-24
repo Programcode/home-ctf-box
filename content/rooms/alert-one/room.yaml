@@ -1,0 +1,91 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: alert-one
+  title: 'Alert One'
+  version: 1.0.0
+  difficulty: beginner
+  points: 100
+  estimated_minutes: 25
+  tags: [soc, alert-triage, siem, true-positive, false-positive]
+spec:
+  track: defense-cloud
+  type: guided
+  summary: >-
+    The Meridian Archive security operations desk queues every detection
+    for human review before anything is escalated. You will read eight
+    alerts with their enrichment fields, apply a two-question triage rule
+    to decide true positive or false positive for each one, submit your
+    verdicts to the classification endpoint, and close the queue when the
+    full set matches the senior analyst's ground truth.
+  objectives:
+    - 'Triage SIEM alerts using intel enrichment and change-ticket context instead of alert titles.'
+    - 'Classify eight alerts as true positive or false positive through a documented two-question rule.'
+    - 'Explain why an intel hit alone does not make an alert a true positive.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Flask training service serving a fixed synthetic alert queue; classification state lives in one process and resets on restart. No external feeds are contacted and every artifact is invented.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: triage-the-queue
+      title: 'Classify the full alert queue'
+      prompt: >-
+        Fetch the queue from GET /alerts and study each alert's
+        enrichment fields. Apply the desk playbook: an alert is a true
+        positive only when intel_hit is true AND change_ticket is null;
+        everything else is a false positive. Submit one POST /classify
+        call per alert with its id and your verdict of true_positive or
+        false_positive. When all eight verdicts are correct the response
+        returns the FLAG value.
+      points: 100
+      hints:
+        - cost: 0
+          text: 'Judge each alert by its fields, not its scary title. The playbook rule needs both conditions at once: intel_hit true and no change ticket.'
+        - cost: 10
+          text: 'Pull the queue with curl http://target:8000/alerts | jq ''.alerts[]''. For each row compute verdict = if .intel_hit == true and .change_ticket == null then "true_positive" else "false_positive" end.'
+        - cost: 25
+          text: 'Loop it: curl -s http://target:8000/alerts | jq -c ''.alerts[]'' | while read a; do id=$(jq -r .id <<<"$a"); v=$(jq -r ''if .intel_hit == true and .change_ticket == null then "true_positive" else "false_positive" end'' <<<"$a"); curl -s -X POST http://target:8000/classify -H "Content-Type: application/json" -d "{\"alert_id\":\"$id\",\"verdict\":\"$v\"}"; done. The last responses carry the flag once all eight land correctly.'
+      solution: |
+        1. Open http://target:8000/ and read the case page, then fetch
+           the queue: curl -s http://target:8000/alerts | jq.
+           Eight alerts come back, each with id, title, severity,
+           src_ip, account, intel_hit, change_ticket, and a summary.
+        2. Apply the playbook to each row. The desk rule has two
+           questions: did threat intel confirm the indicator
+           (intel_hit true), and is there any approved change ticket
+           that explains the activity (change_ticket not null)? A true
+           positive needs intel confirmation and no covering ticket.
+           Everything else is noise you can close.
+        3. Work the queue by hand first to see the logic:
+           ALT-1001 impossible travel, intel_hit true, ticket null,
+           so true_positive. ALT-1003 bulk download by svc-backup has
+           intel_hit false plus ticket CHG-2291, so false_positive.
+           ALT-1005 encoded PowerShell has intel_hit true and no
+           ticket, so true_positive. ALT-1007 data staging looks bad
+           but carries ticket CHG-2310, an approved migration tool,
+           so false_positive even though intel_hit is true.
+        4. Submit each verdict:
+           curl -s -X POST http://target:8000/classify \
+             -H 'Content-Type: application/json' \
+             -d '{"alert_id":"ALT-1001","verdict":"true_positive"}'
+           Repeat for all eight ids. Each answer reports how many of
+           eight have been classified.
+        5. When every verdict is in and correct, the classify response
+           prints FLAG{...}. If it instead lists wrong ids, reread
+           those rows against the two-question rule and resubmit.
+           Submit the flag to finish the room.
+      validator:
+        type: per_session_flag

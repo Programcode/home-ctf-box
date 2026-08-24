@@ -1,0 +1,28 @@
+Received: from mx-out.mailer-relay-east.net (mx-out.mailer-relay-east.net [198.51.100.66])
+	by mailshield.meridian-archive.com (MailShield simulated) with ESMTPS id 4f2a91c6
+	for ops@meridian-archive.com; Fri, 14 Aug 2026 08:12:04 +0000
+Return-Path: <bounce@mailer-relay-east.net>
+X-MailShield-Spam-Check: none passed
+From: "Meridian Archive IT Service Desk" <it-servicedesk@meridian-archive.com>
+Reply-To: ticket-desk@mailpost-cdn.net
+To: ops@meridian-archive.com
+Subject: Action required: your mailbox reaches its quota in 24 hours
+Date: Fri, 14 Aug 2026 08:11:58 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+X-Mailer: PHPMailer 6.8.0
+
+Dear staff member,
+
+Your mailbox has exceeded 98 percent of its storage quota. Unless you
+confirm your account within 24 hours the service desk will suspend
+delivery to your address.
+
+Confirm now: https://meridian-archive.com.portal-reset.mailpost-cdn.net/verify?u=ops
+
+This is an automated notice from the Meridian Archive IT Service Desk.
+Do not reply to this message.
+
+IT Service Desk
+Meridian Archive

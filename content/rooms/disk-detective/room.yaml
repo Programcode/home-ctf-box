@@ -1,0 +1,103 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: disk-detective
+  title: 'Disk Detective'
+  version: 1.0.0
+  difficulty: medium
+  points: 275
+  estimated_minutes: 50
+  tags: [dfir, disk-forensics, timeline, mactime, persistence]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    The Meridian Archive imaging rig carved a filesystem timeline from a
+    compromised host before anyone touched it again, and the lab saved
+    it as a mactime-style body file around the intrusion window. You
+    will learn the eleven pipe-separated columns, cut the timeline down
+    to the hours that matter, spot the cleanup script the intruder
+    deleted after running it, identify the cron drop they left behind
+    for persistence, and submit both findings in chronological order.
+  objectives:
+    - 'Read a TSK body file by column and filter it to an incident window.'
+    - 'Recognize deleted-file markers and creation-time signals of dropped persistence.'
+    - 'Report findings in chronological order the way an incident ticket demands.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The timeline is synthetic text generated deterministically inside one Flask process; epochs are computed from a fixed date and no real forensic image exists.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: order-the-findings
+      title: 'File both findings in order'
+      prompt: >-
+        Download /evidence/timeline.csv from the case page. It is a
+        mactime-style body file sorted by modification time and covering
+        five days around the intrusion. Find the deleted-file hint: the
+        script the intruder ran and removed during the attack window,
+        still visible because its name carries the deletion marker
+        exactly as the timeline shows it. Then find the persistence
+        artifact: the file dropped under the scheduler's configuration
+        directory during the same window. Submit BOTH by POST /report
+        as JSON with key findings, a two-element list holding the
+        deleted file first and the persistence path second, matching
+        their chronological order. Correct ordered findings return the
+        FLAG value.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'Body files are pipe-delimited with eleven columns: md5, name, inode, mode, uid, gid, size, atime, mtime, ctime, crtime. Field two is what you report, fields nine through eleven are when things happened. Times are epoch seconds.'
+        - cost: 10
+          text: 'Window the noise away: S=$(date -d ''2026-08-14 02:00:00 UTC'' +%s); E=$(date -d ''2026-08-14 04:00:00 UTC'' +%s); awk -F''|'' -v s=$S -v e=$E ''$9 >= s && $9 <= e {print $2" "$9}'' timeline.csv. Deletion survivors are even easier: grep ''(deleted)'' timeline.csv.'
+        - cost: 25
+          text: 'The scheduler reads /etc/cron.d/, so filter the windowed output for that prefix. Order your JSON by mtime, oldest first: curl -s -X POST http://target:8000/report -H "Content-Type: application/json" -d "{\"findings\":[\"<deleted name exactly as shown>\",\"<persistence path>\"]}".'
+      solution: |
+        1. Save the evidence:
+           curl -sO http://target:8000/evidence/timeline.csv
+           wc -l shows roughly six hundred rows spanning five days,
+           which is far too much to eyeball.
+        2. Convert the incident window to epochs once and reuse it:
+           S=$(date -d '2026-08-14 02:00:00 UTC' +%s)
+           E=$(date -d '2026-08-14 04:00:00 UTC' +%s)
+           Column nine is mtime, so everything that changed inside the
+           window falls out of:
+           awk -F'|' -v s=$S -v e=$E '$9 >= s && $9 <= e {print $9, $2}' timeline.csv | sort -n
+           The rows now read like a story: a tarball lands in /tmp,
+           authorized_keys changes, a script appears, auth.log gets
+           truncated, a helper binary appears, a cron drop appears.
+        3. Catch the deleted file. The Sleuth Kit marks dead names
+           instead of erasing them, so the script the intruder removed
+           survives with a marker glued to its name:
+           grep '(deleted)' timeline.csv
+           One row matches, /var/tmp/.cleanup.sh (deleted), modified at
+           02:38:11 inside the window. Copy its full name column
+           character for character, marker included; that exact string
+           is finding one.
+        4. Catch the persistence. Cron runs every file sitting in
+           /etc/cron.d/, which makes that directory a favorite drop
+           point:
+           awk -F'|' -v s=$S -v e=$E '$9 >= s && $9 <= e && $2 ~ /^\/etc\/cron.d\// {print}' timeline.csv
+           Exactly one row appears, /etc/cron.d/system-health-sync,
+           written at 02:52:47. That path is finding two.
+        5. Check the order before you send it. The deleted script was
+           touched at 02:38:11 and the cron drop at 02:52:47, so the
+           deleted file goes first in the list:
+           curl -s -X POST http://target:8000/report \
+             -H 'Content-Type: application/json' \
+             -d '{"findings":["/var/tmp/.cleanup.sh (deleted)","/etc/cron.d/system-health-sync"]}'
+           Accepted prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag
