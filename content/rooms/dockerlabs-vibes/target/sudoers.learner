@@ -1,0 +1,2 @@
+# The daemon-sim is the only privileged door, and the docker group holds the key.
+%docker ALL=(root) NOPASSWD: /usr/local/bin/dockersim

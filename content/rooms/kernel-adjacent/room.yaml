@@ -1,0 +1,100 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: kernel-adjacent
+  title: 'Kernel Adjacent'
+  version: 1.0.0
+  difficulty: medium
+  points: 300
+  estimated_minutes: 45
+  tags: [kernel, cve-triage, linux, box, methodology]
+spec:
+  track: linux-networking
+  type: box
+  summary: >-
+    A legacy build host reports a simulated kernel and platform facts
+    that do not match its container reality, which is exactly the trap
+    this room teaches you to avoid. You will gather the authoritative
+    facts with the lab sysinfo tool, record them in a recon file,
+    evaluate three candidate CVEs against their stated preconditions,
+    edit a preconditions file to reflect what you actually observed,
+    and run the lab exploit-checker, which validates every step before
+    it prints the flag.
+  objectives:
+    - 'Collect authoritative platform facts from a simulated sysinfo source instead of trusting ambient tool output.'
+    - 'Evaluate candidate CVE preconditions against observed facts and select the single applicable one.'
+    - 'Record recon results and precondition edits so the checker can verify your triage before printing the flag.'
+  prerequisites:
+    - kernel-of-truth
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd must run as root inside this disposable Debian container
+      because binding port 22 and privilege separation require setuid
+      and DAC overrides; login sessions drop to unprivileged learner
+      (uid 1000). The only privileged path is a sudo grant for one
+      root-owned python script, exploit-checker, which compares text
+      files and prints the flag; it executes nothing else. No exploit
+      code, payloads, or real kernel interaction exist in this image.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: triage-and-prove
+      title: 'Triage the candidates, then prove the work'
+      prompt: >-
+        SSH in as learner and collect the platform facts from
+        /usr/local/bin/sysinfo. Save the reported kernel string into
+        ~/.recon/kernel.txt exactly as the lab records it. Read
+        ~/lab/CANDIDATES.txt and decide which single candidate's stated
+        preconditions hold on this platform. Fill in every key of
+        ~/lab/preconditions.conf to match the observed facts, then run
+        the checker under sudo with --cve set to your chosen candidate.
+        Submit the FLAG value it prints once all three validations pass.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'Run /usr/local/bin/sysinfo first. Its FACTS lines are the ground truth for this room; container uname output is deliberately irrelevant.'
+        - cost: 10
+          text: 'Each candidate block in ~/lab/CANDIDATES.txt carries an APPLIES-WHEN line with machine-readable bounds such as kernel-min, kernel-max, userns, or pkexec-present. Compare those bounds against the sysinfo facts; exactly one block survives.'
+        - cost: 25
+          text: 'Write ~/.recon/kernel.txt with the full KERNEL string from sysinfo, fill preconditions.conf as kernel-version=4.19.260, userns=enabled, pkexec-present=no, then run: sudo -n /usr/local/bin/exploit-checker --cve CVE-2021-22555'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run `/usr/local/bin/sysinfo`. It prints FACTS lines for this
+           simulated platform: KERNEL=Linux target
+           4.19.260-lab #1 SMP..., kernel-version=4.19.260,
+           userns=enabled, pkexec-present=no, bpf-unpriv=disabled.
+           These are the authoritative facts; ignore uname.
+        3. Create the recon file the checker expects:
+           mkdir -p ~/.recon && put the exact KERNEL line from step 2
+           into ~/.recon/kernel.txt.
+        4. Open ~/lab/CANDIDATES.txt. Three candidates are listed with
+           APPLIES-WHEN bounds:
+           CVE-2016-5195 needs kernel below 4.9, so 4.19.260 falls
+           outside the affected range.
+           CVE-2021-4034 needs a setuid pkexec binary present, and
+           sysinfo reports pkexec-present=no.
+           CVE-2021-22555 needs kernel between 2.6.19 and 5.11.x plus
+           user namespaces enabled; both hold here.
+        5. Edit ~/lab/preconditions.conf and set all three keys to the
+           observed values: kernel-version=4.19.260, userns=enabled,
+           pkexec-present=no.
+        6. Run `sudo -n /usr/local/bin/exploit-checker --cve
+           CVE-2021-22555`. The checker validates the recon file, the
+           candidate choice against its recorded matrix, and every
+           conf value, then prints FLAG{...} from the root-only file.
+        7. Submit the flag.
+      validator:
+        type: per_session_flag

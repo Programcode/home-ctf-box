@@ -1,0 +1,11 @@
+Welcome to the ops jump box image.
+
+Your account was provisioned into the docker group so you can reach
+the daemon helper. Before you use it, read its manual:
+
+    dockersim help
+    less /usr/share/doc/dockersim/API.md
+
+Ops keeps synced copies of protected host files under /hostsim.
+Housekeeping reminder from your predecessor: do not assume a group
+is harmless just because nobody complains about it.

@@ -1,0 +1,95 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: services-everywhere
+  title: 'Services Everywhere'
+  version: 1.0.0
+  difficulty: easy
+  points: 250
+  estimated_minutes: 35
+  tags: [ftp, tomcat, recon, linux, box]
+spec:
+  track: linux-networking
+  type: box
+  summary: >-
+    This appliance answers on more ports than its owners remember.
+    A file-drop service on 2121 accepts anonymous logins and still
+    carries an old deployment note, and an application manager console
+    on 8080 guards the rest. You will enumerate both services, recover
+    the manager credentials from the anonymous share, and use the
+    console's documented deploy action to publish a copy of the
+    application flag into a readable web path.
+  objectives:
+    - 'Enumerate nonstandard services and identify their protocols from banner text.'
+    - 'Log into an anonymously accessible file drop and retrieve a leaked credentials note.'
+    - 'Authenticate to the manager console and drive its documented deploy action end to end.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+      - 'tcp://target:2121'
+      - 'http://target:8080'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd must run as root inside this disposable Debian container
+      because binding port 22 and privilege separation require setuid
+      and DAC overrides; login sessions drop to unprivileged learner
+      (uid 1000). The 2121 file drop and the 8080 manager console are
+      plain python3 text services run as an unprivileged account in the
+      same container. The deploy action copies one flag string between
+      two files inside the container; no command execution, no host
+      mounts, no network egress exist anywhere in this image.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22, 2121, 8080]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: deploy-flagcopy
+      title: 'Turn a leaked note into a published flag copy'
+      prompt: >-
+        Sweep the appliance beyond port 22 and identify the text service
+        on 2121 and the web console on 8080. Sign into the 2121 service
+        without an account, pull the deployment note it still hosts,
+        and use the credentials inside to open the manager console.
+        Trigger the console's documented artifact deploy with the
+        flagcopy artifact, then read the deployed copy at its published
+        path and submit the FLAG value.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'The 2121 service speaks a small FTP-like line protocol. Connect with a raw TCP client, read the banner, and answer its USER and PASS prompts; anonymous works.'
+        - cost: 10
+          text: 'After USER anonymous and PASS guest@, list the pub directory and fetch pub/deploy-notes.txt with RETR. The note names the manager console account for port 8080.'
+        - cost: 25
+          text: 'Use Basic auth user manager password deploy1994 on http://target:8080/manager/html. POST artifact=flagcopy to /manager/html/deploy, then GET http://target:8080/flagcopy/ and read FLAG{...}.'
+      solution: |
+        1. Enumerate the target beyond SSH. Port 2121 answers any TCP
+           connection with a banner announcing a file drop that speaks
+           an FTP-like line protocol.
+        2. Connect with a raw socket (netcat or Python's socket module).
+           Send `USER anonymous` then `PASS guest@`. The server replies
+           230 and grants read-only guest access.
+        3. Send `LIST pub` to see the share contents, then send
+           `RETR pub/deploy-notes.txt`. The note describes an old
+           application deploy and lists the manager console account:
+           username manager, password deploy1994.
+        4. Open http://target:8080/manager/html and authenticate with
+           Basic auth using those credentials. The console page
+           documents exactly one supported action: deploying the
+           flagcopy artifact, which publishes a fresh copy of the
+           application flag under /flagcopy/.
+        5. POST to http://target:8080/manager/html/deploy with body
+           `artifact=flagcopy` (form encoded) and the same Basic auth
+           header. The response confirms the deployment path.
+        6. GET http://target:8080/flagcopy/. The page contains
+           FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag
