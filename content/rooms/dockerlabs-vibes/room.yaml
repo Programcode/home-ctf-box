@@ -1,0 +1,96 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: dockerlabs-vibes
+  title: 'Dockerlabs Vibes'
+  version: 1.0.0
+  difficulty: easy
+  points: 225
+  estimated_minutes: 30
+  tags: [docker, misconfig, privesc, linux, box]
+spec:
+  track: linux-networking
+  type: box
+  summary: >-
+    This box hands your lab account membership in the docker group,
+    and a dockersim helper stands in for the container daemon with a
+    small documented API. In the real world that combination is a
+    polite way of saying the account is root. You will confirm the
+    group membership, read the helper's documented subset, discover
+    which host-synced files the vault keeps, and use the mount-and-run
+    equivalent to have the privileged daemon-sim read a root-only flag.
+  objectives:
+    - 'Recognize why docker group membership is effectively root-equivalent access.'
+    - 'Read a documented tool interface and stay inside its supported subset.'
+    - 'Use a simulated bind-mount run to make the privileged helper expose a root-only file.'
+  prerequisites:
+    - services-everywhere
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest disclosure: there is no real Docker daemon, socket, or
+      container here. dockersim is one root-owned python script whose
+      documented run action performs a single privileged file read
+      inside this disposable container, reachable only through a sudo
+      grant limited to the docker group. sshd runs as root solely for
+      port binding and privilege separation; sessions are learner uid
+      1000. No namespaces, mounts, or host state are touched.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: mount-and-read
+      title: 'Use the daemon-sim to read what your account cannot'
+      prompt: >-
+        SSH in as learner and note which groups you belong to. Read
+        the dockersim documentation on the box, list its simulated
+        containers to learn where ops syncs protected host files, then
+        drive the documented run action with a bind-mount so the
+        privileged helper cats /hostsim/root/flag.txt from inside the
+        simulated container. Submit the FLAG value it prints.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'Run id first. Membership in the docker group is the whole story of this room; on real hosts it is equivalent to passwordless root.'
+        - cost: 10
+          text: 'The helper documents itself: dockersim help prints the supported subset, and dockersim ps lists a stopped vaultbox container labeled HOSTSYNC=/hostsim/root. The API manual also lives at /usr/share/doc/dockersim/API.md.'
+        - cost: 25
+          text: 'sudo -n /usr/local/bin/dockersim run --image alpine --mount src=/hostsim/root/flag.txt,dst=/mnt/flag.txt -- cat /mnt/flag.txt   (the sim reads the mounted source as root and prints FLAG{...})'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run `id`. Output shows the docker group alongside the usual
+           groups. On production systems this membership lets anyone
+           talk to the container daemon, which mounts host paths at
+           will; it is functionally passwordless root.
+        3. Run `dockersim help` (or read /usr/share/doc/dockersim/
+           API.md). The documented subset is ps, info, and run with an
+           allowlisted image, one src=...,dst=... mount, and a cat
+           command inside the simulated container.
+        4. Run `dockersim ps`. A stopped vaultbox entry carries the
+           label HOSTSYNC=/hostsim/root, marking where protected host
+           files land in this lab.
+        5. Confirm the direct path is closed: cat /hostsim/root/flag.txt
+           fails with permission denied because the directory is
+           root-only.
+        6. Ask the privileged daemon-sim to do it through the
+           documented front door:
+           `sudo -n /usr/local/bin/dockersim run --image alpine --mount
+           src=/hostsim/root/flag.txt,dst=/mnt/flag.txt -- cat
+           /mnt/flag.txt`
+           The helper validates the image, mount, and command against
+           its documented subset, reads the source as root, and prints
+           the file contents as the simulated container would show.
+        7. The output contains FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

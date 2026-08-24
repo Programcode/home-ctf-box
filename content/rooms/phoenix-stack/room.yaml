@@ -1,0 +1,98 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: phoenix-stack
+  title: 'Phoenix Stack'
+  version: 1.0.0
+  difficulty: medium
+  points: 275
+  estimated_minutes: 45
+  tags: [stack, format-string, pwn-sim, raw-sockets]
+spec:
+  track: linux-networking
+  type: challenge
+  summary: >-
+    A training ladder in the classic exploitation-ladder tradition:
+    five stages over one TCP service on port 4000, each stage printing
+    its own memory map and grading your payload before the next opens.
+    You will smash a simulated stack frame, carry a canary through
+    untouched, read a secret with a format-string specifier, write a
+    counter with a simulated %n, and assemble a return-to-libc style
+    call chain, all by driving raw sockets.
+  objectives:
+    - 'Translate a printed memory map into exact payload bytes for overflow and canary stages.'
+    - 'Locate and leak an out-of-scope value using positional format-string specifiers.'
+    - 'Simulate an arbitrary write via padding plus %n and order a ret2libc-style gadget chain.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'tcp://target:4000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single python socket server inside one disposable locked container;
+      no memory corruption exists anywhere because the ladder validates
+      hand-built byte strings against the printed map instead of executing
+      them. No shellcodes, binaries, or host interaction; the flag prints
+      from ROOM_FLAG after stage five validates.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [4000]
+    healthcheck:
+      tcp_port: 4000
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: climb-the-ladder
+      title: 'Clear all five rungs and take the flag'
+      prompt: >-
+        Connect to tcp/4000 and work the ladder top to bottom in one
+        session: build the stage 1 overflow from its map, keep the
+        stage 2 canary intact while redirecting the saved return,
+        find and leak the magic slot with a positional specifier,
+        hit the stage 4 write target using counted padding and %n,
+        then chain the three stage 5 addresses in the correct order.
+        The server grades every rung; submit the FLAG it prints after
+        the fifth pass.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'Nothing is hidden. Every stage prints the exact layout it will validate against, so the whole skill is turning map rows into bytes with struct.pack("<Q", value).'
+        - cost: 10
+          text: 'Stage 1 is 64 filler bytes plus the little-endian win address. Stage 2 is the same but the canary bytes from the map sit between filler and address, exactly where the map says they live.'
+        - cost: 25
+          text: 'Stage 3: send %<slot>$p for the slot holding the magic word, echo the value back as 0x... . Stage 4: send 1337 literal characters followed by %6$n. Stage 5: pack pop_rdi, binsh_str, system_plt in that order.'
+      solution: |
+        1. Open a raw TCP connection to target port 4000. The banner
+           explains that payloads are raw bytes terminated by a newline
+           and that every stage shows its own map first.
+        2. Stage 1 (overflow): the map gives BUFFER_SIZE=64 and
+           WIN=0x4012a3. Send b'A'*64 + struct.pack('<Q', 0x4012a3)
+           followed by newline. The grader checks length, filler, and
+           the overwritten return address, then prints STAGE 1 PASS.
+        3. Stage 2 (canary): this round's canary appears in the map as
+           a 16 hex digit value. Parse it, rebuild the payload as
+           b'A'*64 + canary_bytes + pack('<Q', WIN2) so the canary is
+           carried intact and only the saved return changes. STAGE 2
+           PASS follows.
+        4. Stage 3 (format string read): the briefing names a magic
+           word and dumps ten fake stack slots. Find which slot holds
+           that magic value, send %<slot>$p such as %5$p, receive the
+           LEAK line, then echo the leaked value back as 0x<hex> on
+           the echo> prompt. STAGE 3 PASS.
+        5. Stage 4 (format string write): the engine counts literal
+           characters before a %n directive and writes that count into
+           the named slot. The map demands slot 6 equal 1337, so send
+           b'A'*1337 + b'%6$n'. STAGE 4 PASS when the write lands.
+        6. Stage 5 (call chain): the map lists pop_rdi gadget,
+           /bin/sh string, and system PLT addresses. Concatenate
+           pack('<Q', pop_rdi) + pack('<Q', binsh) + pack('<Q',
+           system) so the simulated frame pops the argument register
+           before reaching system. STAGE 5 PASS, then the server
+           prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

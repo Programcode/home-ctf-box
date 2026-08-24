@@ -1,0 +1,113 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: boot2root-finale
+  title: 'Boot2Root Finale'
+  version: 1.0.0
+  difficulty: hard
+  points: 350
+  estimated_minutes: 60
+  tags: [port-knocking, smb, share, sudo, path-hijack, boot2root]
+spec:
+  track: linux-networking
+  type: box
+  summary: >-
+    A full classic arc on one box. Three quiet TCP ports must be
+    knocked in order before the share server even exists, an
+    anonymously readable share page leaks a staff sync note with live
+    credentials, and the recovered account's sudo grant runs a menu
+    script that resolves a helper by bare name while keeping your
+    PATH. You will knock, browse, leak, log in, and finish with a
+    PATH-injection escalation that reads the root flag.
+  objectives:
+    - 'Replay an ordered TCP port-knock sequence inside its time window to wake a hidden service.'
+    - 'Mine a publicly readable share page for leaked credentials and pivot into SSH.'
+    - 'Abuse sudo env_keep PATH plus an unqualified helper call to execute your own root-owned script.'
+  prerequisites:
+    - knock-knock
+    - dockerlabs-vibes
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+      - 'http://target:8080'
+      - 'tcp://target:4010'
+      - 'tcp://target:5011'
+      - 'tcp://target:6012'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd runs as root solely for binding port 22 and privilege
+      separation; interactive sessions are unprivileged accounts. The
+      knock daemon and share server run as a dedicated unprivileged
+      user. The escalation is the classic sudo PATH injection taught
+      by every boot2root curriculum: one NOPASSWD script resolves a
+      helper by bare name, so the intended abuse is writing a two-line
+      shell shim that cats the flag file, all inside this disposable
+      container. No malware, payloads, persistence, or host access of
+      any kind exist in the image.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22, 8080, 4010, 5011, 6012]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: knock-leak-escalate
+      title: 'Walk the full boot2root arc from silence to root flag'
+      prompt: >-
+        The box ignores everything until you prove you know the ritual.
+        Knock TCP ports 4010, then 5011, then 6012 in order inside the
+        time window to bring up the share server on 8080. Browse the
+        public incoming share, recover the staff sync credentials it
+        should never have published, and sign into SSH as that user.
+        From there, read sudo -l carefully: one maintenance script
+        runs as root without a password and calls its helper by bare
+        name while sudo keeps your PATH. Put a shim earlier in PATH,
+        trigger the script, and submit the FLAG value printed from the
+        root-only file.
+      points: 350
+      hints:
+        - cost: 0
+          text: 'Port knocking over TCP needs no payload: complete a connect then close, port by port, in ascending order within twelve seconds. Before the third knock lands, port 8080 refuses connections; after it, the share server answers.'
+        - cost: 10
+          text: 'The incoming share lists staff_sync.txt. Between the noise lines sits a credential pair for the sysop account; try those against ssh://target:22.'
+        - cost: 25
+          text: "sudo -l shows Defaults !secure_path plus env_keep PATH, and /opt/admin-tools/menu runs status-report unqualified. Write /tmp/knock/status-report with '#!/bin/sh' plus 'cat /root/flag.txt', chmod +x, then: PATH=/tmp/knock:$PATH sudo -n /opt/admin-tools/menu"
+      solution: |
+        1. Recon first: nmap-style probing shows 22 open and 8080
+           refusing, plus three filtered high ports. The refusal on
+           8080 means nothing is listening yet; something must wake it.
+        2. Perform the TCP knock with any client (nc or Python):
+           connect-and-close to 4010, then 5011, then 6012, each step
+           within twelve seconds of the previous. Wrong order or slow
+           timing resets the daemon's memory for your source address.
+        3. After the third knock, GET http://target:8080/. The share
+           browser lists two shares; incoming is anonymous.
+        4. Open /share/incoming, then fetch staff_sync.txt. Among the
+           housekeeping noise sits a line like `sysop <password>`.
+           That is the leak: live credentials published next to
+           everybody's cleanup notes.
+        5. SSH in as sysop with the recovered password.
+        6. Run `sudo -l`. It reports NOPASSWD for
+           /opt/admin-tools/menu, plus `Defaults !secure_path` and
+           `Defaults env_keep += "PATH"`, meaning sudo will hand the
+           script your own PATH unchanged.
+        7. Read /opt/admin-tools/menu: it calls `status-report`
+           without an absolute path. Whatever resolves first in PATH
+           executes as root.
+        8. mkdir -p /tmp/knock; write /tmp/knock/status-report
+           containing:
+           #!/bin/sh
+           cat /root/flag.txt
+           chmod +x it, then run:
+           PATH=/tmp/knock:$PATH sudo -n /opt/admin-tools/menu
+        9. The menu prints its banner, resolves status-report to your
+           shim through the preserved PATH, and executes it as root.
+           FLAG{...} prints. Submit the value.
+      validator:
+        type: per_session_flag

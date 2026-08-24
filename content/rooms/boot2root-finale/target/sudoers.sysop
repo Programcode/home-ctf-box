@@ -1,0 +1,4 @@
+# Maintenance menu: sysop runs it root, no password. PATH is kept on purpose.
+Defaults !secure_path
+Defaults env_keep += "PATH"
+sysop ALL=(root) NOPASSWD: /opt/admin-tools/menu

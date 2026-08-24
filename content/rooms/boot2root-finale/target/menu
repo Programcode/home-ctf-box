@@ -1,0 +1,7 @@
+#!/bin/bash
+# Admin maintenance menu. Runs as root through the sudo grant.
+# The status helper is invoked by bare name on purpose: ops relies on
+# PATH lookup so local overrides are possible during incidents.
+echo "=== admin maintenance menu ==="
+status-report
+echo "menu complete"
