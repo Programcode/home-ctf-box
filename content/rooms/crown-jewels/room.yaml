@@ -1,0 +1,119 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: crown-jewels
+  title: 'Crown Jewels'
+  version: 1.0.0
+  difficulty: insane
+  points: 500
+  estimated_minutes: 90
+  tags: [active-directory, kill-chain, capstone, simulation]
+spec:
+  track: windows-ad
+  type: range
+  summary: >-
+    The plan's five-host capstone estate, honestly collapsed onto one
+    box: web.dmz, db.internal, filesrv, dc01, and workstation7 run as
+    five simulated host APIs on distinct loopback ports behind one front
+    controller you address by Host header. Each host guards a four
+    character flag fragment. Walk the kill chain: squeeze a reused
+    secret out of the DMZ portal, bypass a parameterization claim on
+    the database host, find the hidden share, crack the exposed
+    authentication export on the domain controller, then hunt down the
+    persistence artifact on the workstation. Submit all five fragments
+    to /scoreboard and it hands back the assembled master flag.
+  objectives:
+    - 'Chain findings across five simulated hosts, treating each result as recon for the next hop.'
+    - 'Exercise the track C skill set end to end: leak analysis, injection bypass, hidden resources, credential cracking, artifact hunting.'
+    - 'Understand how one compromised foothold cascades across an estate when internal services trust their neighbors.'
+  prerequisites: [forest-footpath, blue-screenplay]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: the five-host estate is five small Flask
+      apps bound to separate loopback ports inside one locked container,
+      fronted by a controller that routes by Host header like nginx.
+      Fragments are slices of this session's flag, the crack uses a
+      documented toy cipher against a served wordlist, and no real
+      exploit code or malware exists anywhere. Unprivileged app user,
+      capabilities dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: crown-master
+      title: 'Take the whole estate and assemble the master flag'
+      prompt: >-
+        Address the five simulated hosts through http://target:8000 using
+        Host headers: web.dmz, db.internal, filesrv, dc01, workstation7.
+        Recover one four-character fragment from each host, then submit
+        the complete set to http://target:8000/scoreboard as JSON
+        {"fragments": {"web.dmz": "...", "db.internal": "...",
+        "filesrv": "...", "dc01": "...", "workstation7": "..."}}.
+        All five accepted unlock the master flag, which is the value to
+        submit. The per-host fragments are intermediate state only and
+        score nothing on their own.
+      points: 500
+      hints:
+        - cost: 0
+          text: "Start at web.dmz and read its homepage HTML source: an ops comment says where the legacy deploy config lives and that the obfuscation key is the host's own name. The decoded config holds this host's fragment and credentials for db.internal."
+        - cost: 10
+          text: "On db.internal the docs insist every query is parameterized; probe each documented endpoint yourself. The archive search concatenates its input, so a UNION against the vault table returns the db.internal fragment plus intel naming filesrv's hidden share and dc01's preauth-less account."
+        - cost: 25
+          text: 'filesrv: browse /shares/<name from intel> and read its log for the third fragment. dc01: pull /wordlist.txt and the as-rep export for the intel account; the cipher is rot+7 per byte, so hash each candidate locally and redeem the match. workstation7: read every artifact command for the last fragment. Post all five to /scoreboard for the master FLAG{...}.'
+      solution: |
+        Sub-flag intermediates are marked [fragment N of 5]; the graded
+        deliverable is only the master flag from step 9.
+        1. GET http://target:8000/ and read the disclosure: one container
+           plays five hosts, addressed by Host header.
+        2. GET http://target:8000/ with Host web.dmz and view the page
+           source. An ops comment points at /legacy/config.b64 and says
+           the XOR key is the hostname itself.
+        3. Download /legacy/config.b64, base64-decode it, XOR with the
+           key web.dmz, and read the plaintext: db.internal credentials
+           svc_report / R3p0rt!ng26 plus fragment[web.dmz]=AAAA
+           [fragment 1 of 5].
+        4. On db.internal (basic auth with those credentials) read / and
+           /docs. Both claim strict parameterization. Test the claim:
+           GET /reports?region=north behaves normally, but
+           GET /archive?name=' UNION SELECT fragment,note FROM vault--
+           returns a row whose note begins intel:. The row's first
+           column is fragment[db.internal]=BBBB [fragment 2 of 5]; the
+           note names filesrv's hidden share backup$ and dc01 account
+           svc_sqlsim as lacking preauth.
+        5. On filesrv, GET /shares shows only public shares; hidden is
+           not listed. GET /shares/backup$ works regardless, listing
+           recovery-keys.txt and quarterly-backup.log.
+        6. Read quarterly-backup.log: one entry carries
+           fragment[filesrv]=CCCC [fragment 3 of 5] alongside a note
+           that dc01 exports weak legacy encryption for offline practice.
+        7. On dc01, GET /kerberos/users marks svc_sqlsim with preauth
+           disabled. GET /kerberos/asrep/svc_sqlsim returns a hex export;
+           the cipher is documented as rot+7 per byte. GET /wordlist.txt,
+           encode every candidate with the same cipher, and find the
+           match Autumn2026!. POST it to /kerberos/redeem to receive
+           fragment[dc01]=DDDD [fragment 4 of 5] and a pointer to
+           workstation7's Sys-named tasks.
+        8. On workstation7, GET /artifacts lists six persistence
+           artifacts. Read every detail record: the ChromeUpdater task's
+           action string hides fragment[workstation7]=EEEE
+           [fragment 5 of 5] inside padding noise.
+        9. Assemble and submit: POST /scoreboard with
+           {"fragments": {"web.dmz": "AAAA", "db.internal": "BBBB",
+           "filesrv": "CCCC", "dc01": "DDDD",
+           "workstation7": "EEEE"}}. The reply reports all five accepted
+           and returns the assembled master FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,91 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: backup-operator
+  title: 'Backup Operator'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 30
+  tags: [ssh, linux, groups, backup-privilege]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    On Windows, membership in Backup Operators is quietly one of the
+    most powerful grants in the directory: SeBackupPrivilege lets the
+    holder read any file on disk, because backups must traverse every
+    ACL. This Linux-flavored room simulates that idea honestly. Your
+    account sits in a backup group whose only perk is access to a
+    root-owned helper called disk-shadow-sim that stages an exact copy
+    of any file onto /tmp, permissions be damned. You will confirm your
+    group memberships, understand what the tool's grant really means,
+    and use it against /root/flag.txt.
+  objectives:
+    - 'Enumerate group memberships and recognize why a backup-style grant is effectively total read access.'
+    - 'Inspect the restricted helper and reason about what running as root implies for file access.'
+    - 'Stage a shadow copy of /root/flag.txt into /tmp and capture the flag.'
+  prerequisites: [sudo-side-door]
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Elevated profile required: disk-shadow-sim is a compiled SUID-root
+      binary restricted to group backup (mode 4750), mirroring the
+      elevated pattern of the other SSH rooms where sshd itself needs
+      setuid for privilege separation. The binary performs exactly one
+      operation, copying a named file to a path under /tmp inside this
+      disposable container, and refuses everything else. Login sessions
+      drop to unprivileged learner (uid 1000); capabilities stay bounded
+      to the server profile.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: shadow-copy-flag
+      title: 'Use the backup grant to copy the flag'
+      prompt: >-
+        Log in as learner with password learner. Confirm which groups you
+        belong to and read the box's backup policy note. One helper on
+        this machine exists to emulate SeBackupPrivilege: it runs as
+        root for members of the backup group and stages a copy of any
+        file you name under /tmp. Point it at /root/flag.txt, read the
+        staged copy, and submit the FLAG value.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'Run id -nG to see your groups. The file /etc/backup-policy.txt explains the local emulation of backup privilege and names the helper.'
+        - cost: 10
+          text: '/usr/local/bin/disk-shadow-sim takes a source and a destination. It executes as root when a backup group member runs it, so the source is opened without regard to its permissions. Destinations must live under /tmp.'
+        - cost: 25
+          text: 'Copy then read: /usr/local/bin/disk-shadow-sim /root/flag.txt /tmp/shadow.flag && cat /tmp/shadow.flag. The output ends with FLAG{...}.'
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Run `id -nG`. Output includes backup alongside the usual
+           groups. Membership, not uid, is what unlocks this room.
+        3. Read `cat /etc/backup-policy.txt`. It states that the box
+           emulates Windows' SeBackupPrivilege with a root-owned helper
+           that only backup group members may execute, and that copies
+           stage under /tmp.
+        4. Inspect the helper: `ls -l /usr/local/bin/disk-shadow-sim`
+           shows -rwsr-x--- root backup. The s bit plus group execute is
+           the whole trick: executing it makes you root for its duration,
+           and its single purpose is copying files you name.
+        5. Stage the copy:
+           `/usr/local/bin/disk-shadow-sim /root/flag.txt /tmp/shadow.flag`.
+           The tool reports the staged path even though /root/flag.txt is
+           mode 600 and unreadable to you directly.
+        6. Read the copy: `cat /tmp/shadow.flag`. The contents are the
+           FLAG value. Submit it.
+      validator:
+        type: per_session_flag
