@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simulated security-settings GPO (training data). Defines no tasks;
+     included so learners must compare policies rather than assume the
+     first XML they open is the interesting one. -->
+<SecuritySettings clsid="{D5783E66-6F2F-41A0-8C1B-9A2F3D4E5F60}">
+  <RegistryKeys desc="Simulated hardening baseline">
+    <Key path="SOFTWARE\Policies\Lab\DisableNTLM" value="0"/>
+    <Key path="SOFTWARE\Policies\Lab\SmbSigning" value="required"/>
+  </RegistryKeys>
+</SecuritySettings>

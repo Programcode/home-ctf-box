@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simulated GPO scheduled-task definitions (training data, not real
+     Group Policy). The policy loop under /usr/local/sbin parses every
+     Tasks XML below /srv/sysvol-sim and executes each Command as root
+     on its stated interval. -->
+<Tasks clsid="{CC3F3C46-95B7-47d5-B840-9E1F26BE7E6F}">
+  <ScheduledTask clsid="{A6EA5C5C-D8AA-4A0D-9EFC-BE24D2E492F1}"
+                 name="Cache Refresh" status="SYSVOL-SIM">
+    <Properties action="U"
+                name="Cache Refresh"
+                runAs="NT AUTHORITY\SYSTEM"
+                interval="PT30S">
+      <Command>/srv/gpo-scripts/cache-refresh.sh</Command>
+      <Arguments></Arguments>
+    </Properties>
+  </ScheduledTask>
+  <ScheduledTask clsid="{B39FD4C2-1B62-4FBE-93B1-F0CB4B7D2C55}"
+                 name="Audit Stamp" status="SYSVOL-SIM">
+    <Properties action="U"
+                name="Audit Stamp"
+                runAs="NT AUTHORITY\SYSTEM"
+                interval="PT60S">
+      <Command>/usr/local/sbin/audit-stamp.sh</Command>
+      <Arguments></Arguments>
+    </Properties>
+  </ScheduledTask>
+</Tasks>

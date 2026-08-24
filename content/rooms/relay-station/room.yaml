@@ -1,0 +1,110 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: relay-station
+  title: 'Relay Station'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 60
+  tags: [windows-ad, ntlm-relay, challenge-response, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    NTLM relay works because a challenge-response credential is bound
+    to the challenge but not to the party that posed it: whatever
+    answers you can collect, you can spend where the same answer is
+    valid. This room simulates the arc without any real NTLM bytes. A
+    Flask coordinator mints deterministic per-target challenges, the
+    printer-sim device answers any challenge handed to it under its
+    account, and the fileserver-sim accepts proofs minted for its own
+    target. Run the provided relay-sim client to carry printer-svc's
+    response to the fileserver endpoint and claim your flag.
+  objectives:
+    - 'Explain why challenge-response credentials can be replayed across parties.'
+    - 'Capture a challenge minted for the fileserver target.'
+    - 'Coerce printer-svc into answering that captured challenge.'
+    - 'Relay the response to /fileserver/verify and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted NTLM relay SIMULATION with zero NTLM bytes.
+      The handshake is HMAC-SHA256 over documented deterministic
+      challenges (sha256 of target plus fixed room secret), standing in
+      for NTLMv2 chosen for determinism and legality; SMB, HTTP
+      NTLM auth, Net-NTLMv1/v2 hashes, and responder-style sniffers do
+      not exist here, and all accounts are fictional training labels.
+      Plain Flask app on a disposable python:3.12-alpine container
+      under the locked privilege profile (cap_drop ALL,
+      no-new-privileges), running as uid 10001.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: relay-the-printer
+      title: 'Carry printer-svc proof to the fileserver endpoint'
+      prompt: >-
+        Open http://target:8000 and read /docs/protocol first: the
+        challenge derivation, proof computation, and disclosure are all
+        written there. Fetch a coordinator challenge for the
+        fileserver target, present it to the printer device at
+        POST /devices/printer/connect so printer-svc answers it, then
+        relay the account, challenge, and proof triple to POST
+        /fileserver/verify. The easiest route is the provided
+        /tools/relay-sim.py client, which chains every step and prints
+        the final page. Submit the FLAG value shown there.
+      points: 300
+      hints:
+        - cost: 0
+          text: >-
+            GET /coordinator/challenge?target=fileserver returns the
+            challenge the fileserver will accept. Challenges are
+            deterministic per target, so capturing one now means the
+            answer stays valid later.
+        - cost: 10
+          text: >-
+            POST /devices/printer/connect with JSON
+            {"challenge":"<hex>"} makes printer-svc compute
+            HMAC-SHA256 keyed by sha256(printer password) over the
+            challenge bytes and hand the response back to you, exactly
+            as if you were the service it meant to call.
+        - cost: 25
+          text: >-
+            POST /fileserver/verify with JSON
+            {"account":"printer-svc","challenge":"<hex>","proof":
+            "<hex>"}. It re-derives the fileserver challenge, checks
+            yours matches, recomputes the expected proof, and prints
+            FLAG{...}. Or just run python3 relay-sim.py --base
+            http://target:8000 from /tools/.
+      solution: |
+        1. GET http://target:8000/docs/protocol. Note the disclosure:
+           challenges equal sha256("challenge|<target>|COORDSIM-RELAY-V1")
+           truncated to 24 hex characters, proofs equal HMAC-SHA256
+           keyed by sha256(account password) over the challenge hex
+           decoded to bytes. No NTLM anywhere.
+        2. Download tooling: save /tools/relay-sim.py locally.
+        3. Run `python3 relay-sim.py --base http://target:8000`. It
+           fetches the fileserver challenge from /coordinator/
+           challenge, presents it to /devices/printer/connect, prints
+           the captured {account, challenge, proof} blob, and relays
+           the triple to /fileserver/verify.
+        4. Watch the negative control in the client output: submitting
+           a challenge minted for the printserver target fails
+           WRONG_TARGET_CHALLENGE, showing responses are bound to the
+           challenge they answered, not to the session or channel.
+        5. The final page verifies the relayed triple and prints
+           FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag
