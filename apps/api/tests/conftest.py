@@ -18,6 +18,9 @@ TEST_DB_URL = os.environ.get(
 _TEST_DB_DSN = TEST_DB_URL.replace("+asyncpg", "")
 
 TABLES = [
+    "publish_events",
+    "draft_reviews",
+    "drafts",
     "announcements",
     "notification_prefs",
     "notifications",
