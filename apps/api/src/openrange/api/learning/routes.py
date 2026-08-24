@@ -10,6 +10,12 @@ from openrange.api.auth.dependencies import CurrentUser, DbSession
 from openrange.api.auth.service import AuthError
 from openrange.api.learning import content as learning_content
 from openrange.api.learning import service as learning
+from openrange.content.i18n import resolve_locale
+from openrange.content.loader import (
+    apply_section_overrides,
+    available_locales,
+    load_locale_overrides,
+)
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/learning", tags=["learning"])
@@ -69,12 +75,24 @@ async def resume(slug: str, user: CurrentUser, db: DbSession) -> dict[str, objec
 
 
 @router.get("/modules/{slug}")
-async def module_detail(slug: str, user: CurrentUser) -> dict[str, object]:
+async def module_detail(
+    slug: str,
+    user: CurrentUser,
+    lang: Annotated[str, Query(max_length=16)] = "en",
+) -> dict[str, object]:
     _progress_permission(user)
     module = learning_content.get_module_bundle(slug)
     if module is None:
         raise AuthError("unknown module", 404)
-    return learning.public_module(module)
+    module_dir = learning_content.content_root() / "modules" / slug
+    resolved = resolve_locale(lang, available_locales(module_dir))
+    payload = learning.public_module(module)
+    if resolved != "en":
+        overrides = load_locale_overrides(module_dir, resolved)
+        if overrides is not None:
+            payload = learning.public_module(apply_section_overrides(module, overrides))
+    payload["locale"] = resolved
+    return payload
 
 
 @router.post("/modules/{slug}/sections/{section_id}/complete")
