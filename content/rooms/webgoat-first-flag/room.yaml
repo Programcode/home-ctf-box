@@ -1,0 +1,71 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: webgoat-first-flag
+  title: 'WebGoat: First Assignment, First Completion'
+  version: 1.0.0
+  difficulty: easy
+  points: 125
+  estimated_minutes: 30
+  tags: [owasp, webgoat, http-basics, sessions]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    OWASP WebGoat runs as the official upstream container image. Register
+    your own learner account through the application's real registration
+    flow, then complete the HTTP Basics assignment the way the lesson
+    intends and capture the wire-level completion marker.
+  objectives:
+    - 'Create a learner account in WebGoat through its registration endpoint.'
+    - 'Solve the HTTP Basics assignment by submitting a value the server reverses.'
+    - 'Read the assignment response JSON and submit its completion marker.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8080'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Runs the official unmodified WebGoat image on an isolated internal network with no egress.'
+  target:
+    external_image: 'webgoat/webgoat@sha256:3101bd9e7bcfe122d7ef91e690ef3720de36cc4e86b3d06763a1ddf2e2751a4b'
+    ports: [8080]
+    healthcheck:
+      http_path: /WebGoat/login
+      timeout_seconds: 300
+    flag_delivery: static
+  workstation: terminal
+  tasks:
+    - id: http-basics-done
+      title: 'Complete the HTTP Basics assignment'
+      prompt: >-
+        Register a learner account in WebGoat, open the HTTP Basics lesson,
+        and complete its first assignment by sending your name to the
+        attack endpoint. The response JSON reports what the server did.
+        Submit the completion marker exactly as it appears in that JSON,
+        in the form key: value.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'The registration form lives at /WebGoat/registration. Passwords must be 6 to 10 characters, and you must tick the agreement checkbox.'
+        - cost: 10
+          text: 'In HTTP Basics, the assignment form posts a person field to /WebGoat/HttpBasics/attack1. The server reverses whatever you send.'
+        - cost: 25
+          text: 'On success the endpoint replies with JSON where "lessonCompleted" is true. Submit lessonCompleted: true as the answer.'
+      solution: |
+        1. Open http://target/WebGoat/registration and create an account,
+           for example user learner1 with password Goat12345, confirming
+           the password and accepting the terms.
+        2. Registration signs you in and lands on the attack overview.
+        3. Open the HTTP Basics lesson and read both theory pages so the
+           assignment unlocks.
+        4. In the assignment form enter any name and press Go. The app
+           POSTs person=<name> to /WebGoat/HttpBasics/attack1.
+        5. The reply is JSON containing "lessonCompleted" : true plus
+           feedback showing your reversed name.
+        6. Submit lessonCompleted: true.
+      validator:
+        type: normalized
+        value: 'lessonCompleted: true'

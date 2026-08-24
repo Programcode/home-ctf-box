@@ -241,10 +241,37 @@
       "title": "ScopeSpec",
       "type": "object"
     },
+    "SidecarSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 64,
+          "minLength": 2,
+          "title": "Name",
+          "type": "string"
+        },
+        "image": {
+          "description": "official companion image ref, digest-pinned",
+          "title": "Image",
+          "type": "string"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        }
+      },
+      "required": ["name", "image"],
+      "title": "SidecarSpec",
+      "type": "object"
+    },
     "TargetSpec": {
       "additionalProperties": false,
       "properties": {
         "build_context": {
+          "default": "./target",
           "description": "relative dir containing Dockerfile",
           "title": "Build Context",
           "type": "string"
@@ -260,6 +287,36 @@
           ],
           "default": null,
           "title": "Image Name"
+        },
+        "external_image": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "official upstream image ref (digest-pinned). When set, the harness pulls and runs it instead of building build_context.",
+          "title": "External Image"
+        },
+        "sidecars": {
+          "description": "companion containers from the upstream deployment topology (e.g. the database service an upstream compose file expects)",
+          "items": {
+            "$ref": "#/$defs/SidecarSpec"
+          },
+          "maxItems": 2,
+          "title": "Sidecars",
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "target container environment; external rooms use the variables upstream documents for their image",
+          "title": "Env",
+          "type": "object"
         },
         "ports": {
           "items": {
@@ -313,7 +370,7 @@
           "type": "string"
         }
       },
-      "required": ["build_context", "ports", "healthcheck"],
+      "required": ["ports", "healthcheck"],
       "title": "TargetSpec",
       "type": "object"
     },

@@ -1,0 +1,69 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: wrongsecrets-one
+  title: 'WrongSecrets: The Hardcoded First Secret'
+  version: 1.0.0
+  difficulty: easy
+  points: 100
+  estimated_minutes: 30
+  tags: [owasp, wrongsecrets, secrets-management]
+spec:
+  track: web-foundations
+  type: guided
+  summary: >-
+    OWASP WrongSecrets runs in its official local no-vault container mode,
+    which is how upstream publishes it for Kubernetes-free play. Challenge
+    1 hides a hardcoded password in shipped code; recover it the way the
+    app's own hints suggest and submit it through the challenge page.
+  objectives:
+    - 'Understand why secrets hardcoded into distributed artifacts leak by design.'
+    - 'Use the app hint system and public upstream sources to locate the challenge 1 secret.'
+    - 'Submit the recovered secret to WrongSecrets itself and confirm its success response.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8080'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Runs the official unmodified jeroenwillemsen/wrongsecrets no-vault image on an isolated internal network with no egress.'
+  target:
+    external_image: 'jeroenwillemsen/wrongsecrets:latest-no-vault@sha256:7d80321e40dd6ab41600a20a086bd63406d553fc833e4e7cf68fd07b476ec730'
+    ports: [8080]
+    healthcheck:
+      http_path: /
+      timeout_seconds: 240
+    flag_delivery: static
+  workstation: terminal
+  tasks:
+    - id: challenge-one-secret
+      title: 'Recover the hardcoded secret from challenge 1'
+      prompt: >-
+        Open WrongSecrets, go to challenge 1, and work its hints until you
+        can name the password that ships hardcoded inside the application
+        code. Enter it into the challenge answer box so the app confirms
+        it, then submit that exact secret string here as your answer.
+      points: 100
+      hints:
+        - cost: 0
+          text: 'Challenge 1 is about code that never should have kept a secret. The app tells you where to look if you read its hints on the challenge page.'
+        - cost: 10
+          text: 'The upstream repository is public. Search it for the class named Challenge1 and follow what getAnswer returns.'
+        - cost: 25
+          text: 'The constant lives in WrongSecretsConstants.java: DefaultLoginPasswordDoNotChange! Type it into the answer box on /challenge/challenge-1 until the app says Congratulations.'
+      solution: |
+        1. Browse to http://target/ and open Challenges, then challenge 1.
+        2. Read the hint text on the page. It points at source code that
+           was shipped with the artifact.
+        3. The OWASP wrongsecrets repository is public: find
+           src/main/java/org/owasp/wrongsecrets/challenges/docker/
+           WrongSecretsConstants.java on the matching version tag.
+        4. The hardcoded value is DefaultLoginPasswordDoNotChange!
+        5. Paste it into the answer box on the challenge page and press
+           Submit Answer. The app answers with Congratulations.
+        6. Submit DefaultLoginPasswordDoNotChange! here.
+      validator:
+        type: exact
+        value: 'DefaultLoginPasswordDoNotChange!'

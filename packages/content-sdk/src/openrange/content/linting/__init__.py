@@ -107,12 +107,27 @@ def lint_room(bundle_dir: Path) -> list[Finding]:
                 )
             )
 
-    # Target build context exists.
-    target_dir = bundle_dir / spec.target.build_context
-    if not (target_dir / "Dockerfile").exists():
-        findings.append(
-            Finding("error", "target", f"{spec.target.build_context}/Dockerfile missing")
-        )
+    # Target build context exists unless the room wraps an external image.
+    if spec.target.external_image is None:
+        target_dir = bundle_dir / spec.target.build_context
+        if not (target_dir / "Dockerfile").exists():
+            findings.append(
+                Finding("error", "target", f"{spec.target.build_context}/Dockerfile missing")
+            )
+
+    # Static-answer rooms must declare every answer on the task validator.
+    if spec.target.flag_delivery == "static":
+        for t in spec.tasks:
+            v = t.validator
+            if v.type not in ("exact", "normalized") or v.value is None or not str(v.value).strip():
+                findings.append(
+                    Finding(
+                        "error",
+                        "static-flag-delivery",
+                        f"task {t.id}: flag_delivery static needs an exact/normalized "
+                        "validator with a non-empty value",
+                    )
+                )
 
     # Safety declaration must be explicit.
     if not spec.safety.simulated_only or not spec.safety.no_real_malware:
