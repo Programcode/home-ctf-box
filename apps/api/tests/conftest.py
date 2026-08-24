@@ -67,6 +67,9 @@ TABLES = [
     "achievements_catalog",
     "leaderboard_snapshots",
     "anti_cheat_signals",
+    "streak_freezes",
+    "streak_profiles",
+    "streak_states",
 ]
 
 

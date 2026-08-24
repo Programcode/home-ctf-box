@@ -23,6 +23,9 @@ class ApiSettings(Settings):
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     team_max_size: int = Field(default=8, ge=2, le=64)
+    # Weekly streak credit needs this many distinct active days per
+    # anchored week (plan Phase 9 item 5).
+    streak_weekly_threshold: int = Field(default=3, ge=1, le=7)
 
 
 @lru_cache
