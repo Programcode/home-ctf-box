@@ -45,7 +45,16 @@ jobs:
       - name: Export lockfile for audit
         run: uv export --all-packages --no-hashes --format requirements-txt -o requirements-audit.txt
       - name: pip-audit (known Python CVEs)
-        run: uv run pip-audit -r requirements-audit.txt --progress-spinner off
+        # The PyPI advisory API rate-limits bursts; retry before failing.
+        run: |
+          for attempt in 1 2 3; do
+            if uv run pip-audit -r requirements-audit.txt --progress-spinner off; then
+              exit 0
+            fi
+            echo "pip-audit attempt $attempt failed; retrying after backoff"
+            sleep $((attempt * 30))
+          done
+          exit 1
 
   node-deps:
     runs-on: ubuntu-latest

@@ -1,0 +1,87 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: tiny-rsa
+  title: 'Tiny RSA'
+  version: 1.0.0
+  difficulty: medium
+  points: 200
+  estimated_minutes: 35
+  tags: [rsa, small-exponent, cube-root, textbook-rsa]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    FastSign's TinyVault seals payloads with a slim 512-bit modulus,
+    public exponent e=3, and plain zero padding instead of OAEP. Every
+    block is so short that its ciphertext is a perfect cube over the
+    integers. You will pull public parameters and sealed blocks from the
+    API, take integer cube roots with pure Python arithmetic, and reassemble
+    the flag.
+  objectives:
+    - 'Explain why small-message cubing under e=3 never wraps the modulus.'
+    - 'Compute integer cube roots without any crypto library.'
+    - 'Describe what randomized padding like OAEP does that zero padding cannot.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single Flask service on the isolated room network; all attack math is offline integer arithmetic in the learner container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: cube-root-the-blocks
+      title: 'Take cube roots of the sealed blocks'
+      prompt: >-
+        Fetch the public key and sealed blocks from /api/pubkey and
+        /api/sealed, invert the sealing with integer cube-root math of
+        your own (no crypto libraries), and submit the FLAG value you
+        recover.
+      points: 200
+      hints:
+        - cost: 0
+          text: 'Check sizes first: a chunk is at most 16 bytes, so m is under 2^128 and m^3 stays under 2^384, far below the 512-bit modulus n. The modular reduction never happens.'
+        - cost: 10
+          text: 'Because c = m^3 exactly, m is the integer cube root of c. Binary search it: keep lo, hi with lo^3 <= c and shrink until they meet.'
+        - cost: 25
+          text: "For each hex block run icbrt(c), assert root**3 == c, then root.to_bytes(16, 'big').lstrip(b'\\x00') gives the original chunk. Concatenate chunks in order."
+      solution: |
+        1. GET http://target:8000/api/pubkey returns n (512-bit decimal)
+           and e=3. GET /api/sealed returns the blocks list, one lowercase
+           hex string per 16-byte chunk.
+        2. Reason about the size bound. Each chunk m fits in 16 bytes, so
+           m < 2^128 and m^3 < 2^384. Since n > 2^511, the reduction mod n
+           during sealing is inert: ciphertext equals the exact integer
+           cube m^3.
+        3. Invert by taking an integer cube root. Pure python binary
+           search:
+
+           def icbrt(x):
+               lo, hi = 0, 1 << (x.bit_length() // 3 + 2)
+               while lo < hi:
+                   mid = (lo + hi + 1) // 2
+                   if mid ** 3 <= x:
+                       lo = mid
+                   else:
+                       hi = mid - 1
+               return lo
+
+        4. For each block: c = int(hex_string, 16); r = icbrt(c);
+           assert r ** 3 == c to prove nothing wrapped. Then
+           chunk = r.to_bytes(16, 'big').lstrip(b'\x00') recovers the raw
+           bytes (the leading zeros were padding).
+        5. Concatenate the chunks; the flag text appears intact. Submit
+           the FLAG value. gmpy2.iroot(c, 3) would do the same job, but
+           the point is that plain ints already can.
+      validator:
+        type: per_session_flag
