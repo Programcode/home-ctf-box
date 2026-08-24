@@ -1,0 +1,381 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: filesystem-memory-forensics
+  title: 'Filesystem forensics method and memory triage'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 75
+  tags:
+    - dfir
+    - forensics
+    - filesystems
+    - memory-forensics
+spec:
+  track: defense-cloud
+  summary: >-
+    Two evidence sources anchor almost every intrusion case, and this
+    module trains the method for both. On disk you learn how filesystems
+    record file history in metadata that survives deletion on purpose,
+    then walk a repeatable examination loop over an image with The
+    Sleuth Kit: partition it, list it, recover what was removed. In
+    memory you run the standard triage pass with Volatility, reading
+    process lists the way an analyst reads them, catching processes that
+    hide from one view but not another, and pulling command lines,
+    libraries, handles, and network tables out of a raw image. The
+    module closes where real cases get interesting, at disagreements
+    between the two sources, because a filesystem edited to lie is
+    itself evidence, if memory is there to contradict it.
+  objectives:
+    - Read filesystem metadata structures that record file history.
+    - Examine disk images by locating partitions and filesystem offsets.
+    - Recover deleted content while preserving its metadata context.
+    - Triage memory images with process listings before anything else.
+    - Extract process, library, handle, and network detail from memory.
+    - Reconcile disagreements between disk and memory findings honestly.
+  sections:
+    - id: how-filesystems-remember
+      title: 'How filesystems remember'
+      blocks:
+        - type: prose
+          markdown: |
+            Filesystems are databases about files, and the database entries
+            outlive the files they describe. On ext systems each file has
+            an inode holding size, ownership, link count, and four
+            timestamps; on NTFS the equivalent lives in the master file
+            table as an MFT record. When a file is deleted, most designs
+            simply mark the space available and drop the directory
+            reference. The inode or MFT entry often remains intact until
+            reuse, which is why recovery works at all, and why the
+            timestamps attached to a deleted file remain trustworthy enough
+            to build timelines from.
+
+            The analyst's first skill is reading those structures directly
+            instead of trusting a GUI's summary. Timestamps carry meaning
+            in their pattern: creation after modification on a system
+            binary suggests replacement; access times mass-updated by an
+            antivirus sweep say nothing about attacker behavior; journals
+            record the transitions themselves. Every filesystem family has
+            quirks, so the method stays constant even when the field names
+            change.
+        - type: code
+          language: text
+          code: |
+            $ istat web03-work.img 4211885
+            inode: 4211885
+            Allocated
+            Group: 512
+            uid / gid: 1001 / 1001
+            mode: rrw-r--r--
+            size: 19312
+            num of links: 1
+
+            Accessed:   2026-08-19 03:14:07 UTC
+            Modified:   2026-08-19 03:11:52 UTC
+            Changed:    2026-08-19 03:12:01 UTC
+            Created:    2026-08-19 03:09:44 UTC
+
+            reading: created three minutes before modified, then touched;
+            a fresh tool staged and configured during one short session
+        - type: callout
+          tone: info
+          markdown: |
+            Convert every timestamp to UTC once, early, and store it that
+            way forever. Local time zones with daylight saving jumps have
+            ruined more timelines than any anti-forensic tool ever written.
+    - id: imaging-to-partitions
+      title: 'From image bytes to partitions'
+      blocks:
+        - type: prose
+          markdown: |
+            An image file is just bytes until you impose structure on it.
+            The examination loop starts by finding where volumes begin.
+            Partition tables announce themselves at predictable offsets,
+            and tools like mmls read them directly, printing each region
+            with its start sector. Inside a partition sits a filesystem,
+            whose superblock describes block sizes and layout; fsstat
+            summarizes it so you can sanity check the offset choice before
+            running anything expensive. Getting this stage right matters
+            because every later command takes an offset argument, and an
+            off-by-one-sector error produces confusing emptiness that
+            wastes an afternoon.
+
+            Write the discovered layout into your notes immediately: image
+            name, table type, partition index, start sector, filesystem
+            type. Cases routinely involve several disks and several
+            partitions each, and the notes become the map everyone else
+            follows. Multi-volume Linux boxes with LVM layers add one more
+            hop, activating the volume group against a copy rather than
+            the original image, which the custody habits from the previous
+            module already cover.
+        - type: code
+          language: text
+          code: |
+            $ mmls web03-work.img
+            DOS Partition Table
+            Offset Sector: 0
+            Units are in 512-byte sectors
+
+             Slot    Start        End          Length       Description
+             000: Meta 0000000000 0000000000 0000000001 Primary Table (#0)
+             001: ----- 0000000000 0000002047 0000002048 Unallocated
+             002: 000:000 0000002048 0001050623 0001048576 Linux swap
+             003: 000:001 0001050624 0245039103 0243988480 Linux (0x83)
+
+            $ fsstat -o 1050624 web03-work.img | head -8
+            FILE SYSTEM INFORMATION
+            --------------------------------------------
+            File System Type: Ext4
+            Volume Name: web03-root
+            Last Written at: 2026-08-20 02:41:13 UTC
+        - type: quiz
+          question_id: ffm-mmls-purpose
+          question: 'What does mmls contribute to the examination loop?'
+          options:
+            - id: a
+              text: 'It recovers deleted files by scanning unallocated clusters.'
+            - id: b
+              text: 'It lists partition boundaries so analysis commands can target correct offsets.'
+            - id: c
+              text: 'It computes hashes of each partition independently.'
+            - id: d
+              text: 'It mounts the image under a chosen directory.'
+          answer_ids: [b]
+          explanation: >
+            mmls reads the partition table and reports sector ranges.
+            Those numbers feed the offset arguments every later Sleuth
+            Kit command needs. Recovery, hashing, and mounting are jobs
+            of other tools entirely.
+    - id: recovering-deleted-files
+      title: 'Recovering deleted files'
+      blocks:
+        - type: prose
+          markdown: |
+            With the right offset in hand, fls walks the filesystem the way
+            ls walks a directory, except it reports deleted entries too,
+            marked with an asterisk, and prints the metadata address behind
+            each name. That address is the key: icat can stream the file's
+            content straight out of the image using it, whether the entry
+            still exists or only lingers as an unallocated inode. Recovery
+            succeeds fully while the data blocks stay unreused; partial
+            recovery happens when blocks were partially rewritten, and the
+            recovered fragment still tells you something.
+
+            Discipline matters more here than cleverness. Recover into a
+            quarantined export directory inside the case structure, hash
+            everything recovered at birth, and never run recovered
+            executables outside an isolated lab. Record which entries came
+            back whole, which came back partial, and which names existed
+            with no recoverable content, because all three outcomes carry
+            investigative weight.
+        - type: code
+          language: bash
+          code: |
+            $ fls -r -p -o 1050624 web03-work.img | grep '\*'
+            + * /tmp/.sysupdate/cron-checker.sh
+            + * /tmp/.sysupdate/fetch.sh
+            r/r * 4211885:	/home/deploy/upload/notes_2026.pdf
+
+            $ icat -o 1050624 web03-work.img 4211885 \
+                > exports/notes_2026_recovered.pdf
+            $ sha256sum exports/notes_2026_recovered.pdf | tee -a exports.sha256
+            e77b0c9d24a58f31bc60d7a95e2f4088...  exports/notes_2026_recovered.pdf
+            $ file exports/notes_2026_recovered.pdf
+            exports/notes_2026_recovered.pdf: PDF document, version 1.7
+        - type: prose
+          markdown: |
+            Read the transcript like an investigator rather than a
+            tourist. The dot-prefixed directory under tmp is classic
+            hiding behavior, two scripts whose names promise maintenance
+            work, and the asterisk tells you someone tried to clean them
+            away. The recovered PDF gives context, possibly how the
+            attacker chose their lure. Each fact lands in the case notes
+            with its source command recorded, so the next person reproduces
+            the listing instead of trusting your summary.
+        - type: callout
+          tone: warning
+          markdown: |
+            Recovered binaries stay inert until you decide otherwise.
+            Copy them into the isolated analysis environment with the same
+            custody rigor as any other evidence item, and let the static
+            triage habits later in this path decide what deserves more.
+    - id: memory-triage-first-pass
+      title: 'Memory triage, first pass'
+      blocks:
+        - type: prose
+          markdown: |
+            A memory image answers the question disk evidence cannot: what
+            was actually happening. Triage begins with process listings
+            because intrusions are processes before they are anything
+            else. Volatility's pslist walks the kernel's own task list,
+            giving parent-child relationships and start times. Malware that
+            unlinks itself from that list evades pslist, which is why the
+            pass continues with psscan, a pool-tag scan that finds process
+            structures wherever they hide in memory. Running both costs a
+            minute; comparing them is free, and a process present in the
+            scan but absent from the active list is one of the loudest
+            findings memory forensics offers.
+
+            Keep the pass boring and repeatable: pslist, psscan, then a
+            quick diff, saving full output to the case file every time.
+            Speed comes from doing exactly the same five commands on every
+            image, so anomalies stand out precisely because the baseline
+            procedure never varies.
+
+            One caution belongs next to the commands: memory analysis
+            versions matter. Plugin output differs between Volatility 2
+            and 3 profiles, and an image acquired from a mismatched kernel
+            can produce partial listings that look authoritative. Record
+            the tool version beside every saved output, the same way
+            acquisition logs record imager versions, and treat any plugin
+            error as a finding about your method before treating it as a
+            finding about the host.
+        - type: code
+          language: text
+          code: |
+            $ vol -f mem-web03.raw windows.pslist --output pslist.txt
+            $ vol -f mem-web03.raw windows.psscan --output psscan.txt
+            $ comm -13 <(cut -c1-16 pslist.txt | sort) \
+                       <(grep -v '^$' psscan.txt | cut -c1-16 | sort)
+            4212  nc.exe      0xdea81c40  exited
+            5580  svhost.exe  0xdec23a80  running
+
+            reading: svhost.exe appears only in the scan, note the
+            misspelling; nc.exe exited but left its structure behind
+        - type: quiz
+          question_id: ffm-pslist-vs-psscan
+          question: 'A process shows up in psscan results but not in pslist. What is the strongest immediate interpretation?'
+          options:
+            - id: a
+              text: 'Volatility malfunctioned; rerun until outputs agree.'
+            - id: b
+              text: 'The process hid from the active list or already exited; investigate before judging.'
+            - id: c
+              text: 'The process is definitely legitimate background noise.'
+            - id: d
+              text: 'The memory image is corrupt and must be reacquired.'
+          answer_ids: [b]
+          explanation: >
+            The two views use different sources, kernel list versus pool
+            scan. A discrepancy means either deliberate unlinking or
+            simple termination, both common. Escalation follows
+            investigation, not assumption in either direction.
+    - id: deeper-process-evidence
+      title: 'Deeper process evidence'
+      blocks:
+        - type: prose
+          markdown: |
+            Once triage flags a process, the toolbox opens. cmdline prints
+            the exact invocation, frequently exposing download URLs,
+            credential arguments, and the working directory the operator
+            forgot about. dlllist enumerates loaded libraries, where a
+            system utility hosting odd paths deserves a second look.
+            handles lists what the process holds open: registry keys,
+            mutexes, files, which reveals intent even when the binary
+            resists parsing. netscan reconstructs network activity from
+            memory pools, mapping connections back to owning processes,
+            something packet captures cannot do once traffic stopped.
+
+            Run these per flagged process, not across the whole image, so
+            output stays reviewable. Save everything with filenames that
+            encode the image, the plugin, and the process id. Six months
+            later, nobody should wonder which output belongs to which
+            question.
+        - type: code
+          language: text
+          code: |
+            $ vol -f mem-web03.raw windows.cmdline --pid 5580
+            svhost.exe Pid 5580
+            "C:\Users\deploy\AppData\Roaming\svhost.exe" -k runsvc
+
+            $ vol -f mem-web03.raw windows.netscan | grep 5580
+            Offset  Proto  Local addr       Foreign Addr        State   Pid
+            0xd9..  TCPv4  10.20.6.3:49771  203.0.113.77:443    ESTAB   5580
+
+            reading: fake service binary under a user profile, holding a
+            live connection to documentation-range address on 443
+        - type: prose
+          markdown: |
+            The foreign address deserves the standard caution: 203.0.113.x
+            belongs to a range reserved for examples, which in a real case
+            would be resolved through reputation feeds and the client's
+            proxy logs before anyone names a country. What the memory
+            evidence establishes locally is already strong though, a
+            masquerading binary under a user profile maintaining outbound
+            connectivity, and that claim needs no external attribution to
+            justify containment conversations today.
+    - id: reconciling-sources
+      title: 'When disk and memory disagree'
+      blocks:
+        - type: prose
+          markdown: |
+            The best cases end with tension between sources, because lies
+            require maintenance. Disk shows a service binary deleted at
+            04:00 while memory captured hours earlier shows the same path
+            running; someone cleaned up after your window opened. File
+            modification times claim 2019 while the MFT sequence says the
+            record was born last week; timestomping, caught by comparing
+            the two timestamp sets NTFS keeps. Process start times in
+            memory predate every log entry mentioning the account; logs
+            were cleared or forwarded selectively. None of these
+            contradictions ruin a case, they enrich it, provided you write
+            down both readings and the reasoning about why they differ.
+
+            Resist the urge to declare a winner. Sources answer different
+            questions: disk preserves what was, memory proves what ran,
+            logs show what the system believed was happening. Reports gain
+            credibility when they carry confidence levels per claim, high
+            where hashes and times agree across sources, moderate where a
+            single source stands alone, and say plainly where evidence
+            went missing.
+        - type: callout
+          tone: tip
+          markdown: |
+            A useful closing exercise for any case: write one paragraph
+            titled what we cannot know, listing decayed memory, reused
+            blocks, missing log windows. Reviewers trust reports more, not
+            less, when limits come from the analyst first.
+        - type: quiz
+          question_id: ffm-source-conflict
+          question: 'Disk timestamps say a binary existed since 2019, but its NTFS record sequence marks creation last week. What now?'
+          options:
+            - id: a
+              text: 'Trust the 2019 dates; file systems never produce inconsistent timestamps.'
+            - id: b
+              text: 'Treat it as suspected timestomping, document both timestamp sets, and keep investigating.'
+            - id: c
+              text: 'Discard all timeline conclusions since the disk is unreliable.'
+            - id: d
+              text: 'Reimage the machine immediately to resolve the contradiction.'
+          answer_ids: [b]
+          explanation: >
+            NTFS keeps multiple timestamp sets per file, and mismatched
+            patterns are the signature of deliberate editing. The finding
+            strengthens the case when documented carefully; discarding
+            evidence or reflexive reimaging throw away exactly the
+            leverage you just found.
+  cheat_sheet: |
+    # Filesystem and memory forensics quick reference
+
+    Method loop:
+        mmls img                     partition offsets
+        fsstat -o OFF img            confirm filesystem
+        fls -r -p -o OFF img         walk incl. deleted (*)
+        icat -o OFF img INODE > out  recover, hash at birth
+
+    Timestamp sense:
+        istat INODE                  MACB times + links
+        created >> modified = staged tool
+        convert to UTC once, store UTC forever
+
+    Memory triage pass (every image):
+        vol -f mem.raw windows.pslist     active list + parents
+        vol -f mem.raw windows.psscan     hidden/exited structures
+        diff the two                      scan-only hits = loud lead
+        cmdline / dlllist / handles / netscan --pid FLAGGED
+
+    Reconciliation:
+        disk = what was; memory = what ran; logs = what was believed
+        contradictions documented, not adjudicated
+        confidence per claim: cross-source high, single-source moderate

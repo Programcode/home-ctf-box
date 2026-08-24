@@ -1,0 +1,422 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: reporting-capstone-preparation
+  title: 'Reporting to two audiences and capstone preparation'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - reporting
+    - executive-communication
+    - debrief
+    - capstone
+spec:
+  track: web-foundations
+  summary: >-
+    Engagements end as documents and conversations, and this module makes
+    those endings count. You learn why executives and engineers need the
+    same findings at different altitudes, then practice both renders:
+    executive summaries that lead with business consequence and decisions
+    requested, technical reports detailed enough for a stranger to
+    reproduce every claim. Debrief delivery gets its own section, because
+    how findings land determines whether they get fixed. The final third
+    looks forward: a full-spectrum rehearsal method that reuses rooms you
+    have already solved, mailroom, packet-diary, kernel-of-truth,
+    quiet-persistence, container-window, as case files wrapped in complete
+    engagement paperwork, and a readiness checklist for the full-spectrum
+    capstone room being built on this platform, so when it opens you walk
+    in rehearsed instead of hopeful.
+  objectives:
+    - Render one engagement story at executive and engineering altitude.
+    - Write executive summaries leading with impact and decisions.
+    - Assemble technical reports a stranger can reproduce from.
+    - Deliver debriefs that convert defensiveness into fixes.
+    - Rehearse full engagements by re-solving earlier rooms as case files.
+    - Assess capstone readiness against an explicit checklist.
+  sections:
+    - id: two-audiences
+      title: 'Two audiences, one truth'
+      blocks:
+        - type: prose
+          markdown: |
+            Every finding supports two renderings because two groups must
+            act on it. Executives allocate money and attention; they need
+            consequence, scale, and the decision being asked of them, and
+            they need it in ninety seconds. Engineers implement repairs;
+            they need reproduction steps, root cause, and fix guidance,
+            and they distrust anything that cannot be checked. Neither
+            rendering may bend facts, which is what makes the exercise
+            honest: same evidence, different starting altitude, identical
+            conclusions available to anyone who reads both.
+
+            The craft lies in choosing what leads. An executive sentence
+            opens with the business object at risk and the mechanism only
+            as needed; an engineering sentence opens with component and
+            behavior. Jargon sits at engineer altitude by default but dies
+            in summaries, where unexplained acronyms read as either
+            showing off or hiding something. Practicing translation in
+            both directions, summary to detail, detail to summary, is the
+            fastest way to spot when your own report drifts into serving
+            only one tribe.
+        - type: code
+          language: text
+          code: |
+            Same finding, F-3 password reuse enabling archive access:
+
+            executive altitude:
+              "One leaked service password opened the records archive.
+               Staff accounts shared credentials with old system logins.
+               Fix: rotate + single sign-on rollout, est. 2 sprints."
+
+            engineering altitude:
+              "archivist account shares its password with the retired
+               backup service (hash match, /var/archives readable).
+               Repro: enumerate users -> spray retired-service credential.
+               Fix: rotate, disable legacy login path, add reuse checks."
+
+            reading: no contradiction possible between these; altitude
+            changed, facts did not
+        - type: callout
+          tone: info
+          markdown: |
+            Test your summary on someone outside security before sending.
+            If they cannot say what is at risk and what you want decided,
+            the altitude drifted toward engineering.
+    - id: executive-summary-craft
+      title: 'Executive summary craft'
+      blocks:
+        - type: prose
+          markdown: |
+            The executive summary is not the report shrunk; it is the
+            decision document extracted. Strong openings name the state of
+            risk in one sentence, testing found no blockers versus testing
+            found three paths to customer data lead very different meetings.
+            Severity counts follow, small numbers with context attached,
+            since raw counts mislead: five highs in a lab network differ
+            from one high on the payment path. Then come the requested
+            decisions, explicit and numbered, approve the SSO migration,
+            fund the segmentation project, accept listed risks with review
+            dates. A summary ending without asks has merely delayed the
+            meeting.
+
+            Language discipline separates professionals here more than
+            anywhere else. Business nouns over tool names, likelihood and
+            impact over metric strings, confidence levels stated plainly
+            where evidence thins. The temptation to impress with
+            complexity produces exactly the documents executives route
+            past, and routing past means unfunded fixes.
+
+            Structure carries skimmers, so write for the reader who will
+            only see one screen: headline sentence, three numbered items,
+            decisions block. Bold sparingly for the asks themselves rather
+            than decorating nouns. If a paragraph cannot be cut without
+            losing a decision, it belongs; if cutting it changes nothing,
+            it was written for the author's comfort rather than the
+            reader's schedule.
+        - type: code
+          language: text
+          code: |
+            ## Executive summary
+
+            State: overall sound, three priority items below.
+
+            1. Records archive reachable via reused service password
+               (HIGH). Contained to internal records; audit trail intact.
+               Decision: approve rotation + SSO phase for service accounts.
+
+            2. Public API accepts forged session tokens under load (MED).
+               Exploitation requires sustained traffic; monitoring would
+               catch it. Decision: schedule fix sprint, interim rate rule.
+
+            3. Legacy backup host out of support window (LOW today).
+               Becomes HIGH when it re-enters production rotation.
+               Decision: confirm decommission date or accept with review.
+
+            reading: three paragraphs, three decisions, zero acronyms;
+            a director can act on this in the meeting itself
+        - type: quiz
+          question_id: rcp-executive-opening
+          question: 'Which opening line belongs in an executive summary?'
+          options:
+            - id: a
+              text: '"We tested 47 endpoints using Burp Suite Professional and Nmap."'
+            - id: b
+              text: '"Customer order data was reachable through one reused password; containment verified."'
+            - id: c
+              text: '"CVSS v4.0 scoring was applied consistently across all base metrics."'
+            - id: d
+              text: '"Numerous sophisticated attack vectors were emulated comprehensively."'
+          answer_ids: [b]
+          explanation: >
+            Executives need asset, exposure, and current state in
+            business nouns. Tool lists belong in methodology, metric
+            talk belongs in findings, and puffery signals nothing while
+            consuming the ninety seconds you had.
+    - id: technical-report-anatomy
+      title: 'Technical report anatomy'
+      blocks:
+        - type: prose
+          markdown: |
+            The technical report's reader is a stranger six months from
+            now, possibly a different firm's reviewer verifying your work,
+            possibly the incident responder using it as a map. It stands
+            on four pillars. Scope and methodology state exactly what was
+            examined, when, with what approach and limitations, so claims
+            carry visible boundaries. Findings arrive individually with
+            identifier, rating plus adjustment card, reproduction steps
+            that start from nothing, evidence references pointing into the
+            artifact register, and remediation per the earlier module's
+            anatomy. Appendices carry bulk material, full indicator lists,
+            hashes, tool versions, scan exports, kept out of the narrative
+            body.
+
+            The artifact register deserves emphasis because it converts
+            assertions into checkable claims: every screenshot, log
+            excerpt, and capture named, hashed, and dated per the custody
+            habits learned earlier. Reports referencing a register survive
+            dispute; reports whose evidence lives in chat history do not.
+
+            Length discipline keeps the anatomy honest. Findings sections
+            repeat structure rather than growing prose; methodology states
+            limits once instead of apologizing throughout; appendices
+            absorb bulk quietly. A report that reads fast is not a shallow
+            one, it is one whose depth got organized so different readers
+            each find exactly their layer without excavating the others'.
+        - type: code
+          language: text
+          code: |
+            Report skeleton:
+
+            1 scope & methodology   assets, window, limits, tools+versions
+            2 findings (per ID)
+                rating + adjustment card | repro from clean state |
+                evidence refs -> register | remediation w/ root cause
+            3 prioritization table  severity x effort x proposal
+            4 appendices           IOCs, hashes, configs, scans
+
+            Artifact register row format:
+              ref     file                          sha256(first16)  UTC date
+              EV-041  shots/f3-archive-access.png   5ad07be19c33f284 2026-09-08
+              EV-042  logs/day2.session             b41f9e02c7da8356 2026-09-08
+        - type: quiz
+          question_id: rcp-register-purpose
+          question: 'Why does the technical report reference a hashed artifact register instead of embedding everything inline?'
+          options:
+            - id: a
+              text: 'Inline images make PDFs too large.'
+            - id: b
+              text: 'Checkable provenance lets reviewers verify claims without trusting the author.'
+            - id: c
+              text: 'Registers hide sensitive details from clients.'
+            - id: d
+              text: 'Appendices were deprecated by reporting standards.'
+          answer_ids: [b]
+          explanation: >
+            Hashed, dated artifacts turn every claim into something a
+            skeptic can re-examine independently. Size and standards are
+            trivia; verifiability under dispute is the register's actual
+            job.
+    - id: debrief-delivery
+      title: 'Delivering the debrief'
+      blocks:
+        - type: prose
+          markdown: |
+            The debrief walkthrough decides whether findings become fixes
+            or lawsuits against the messenger. Defensive framing starts
+            with acknowledging what worked, detections that fired, patches
+            that held, because teams hear criticism better after their
+            competence got recognized. Each finding then lands as the
+            system's story rather than the team's failure, here is how the
+            boundary was missing, here is who exploits that shape, here is
+            the smallest solid repair. Questions get answered precisely;
+            unknowns get logged honestly instead of improvised. And the
+            meeting ends with owners and dates attached to every item,
+            because a debrief without assignments is theater with slides.
+
+            Defensiveness still arrives sometimes, budgets feel attacked,
+            someone recognizes their commit. The steady responses return
+            to shared goals, everyone present wants the perimeter real,
+            the tone stays factual, and disagreements about severity route
+            through the documented adjustment process rather than live
+            negotiation. Testers who win arguments lose clients; testers
+            who keep the room solving problems get invited back annually.
+        - type: callout
+          tone: tip
+          markdown: |
+            Send materials twenty-four hours ahead. Surprised audiences
+            defend; briefed audiences plan. The walkthrough then spends
+            its time on decisions instead of damage control.
+        - type: quiz
+          question_id: rcp-debrief-defensive
+          question: 'Mid-debrief, the platform lead says the XSS finding exaggerates because nobody would click that. Best response?'
+          options:
+            - id: a
+              text: 'Concede and downgrade the finding verbally to keep momentum.'
+            - id: b
+              text: 'Walk the recorded exploitation end to end, note the context assumption, offer the formal adjustment process.'
+            - id: c
+              text: 'Explain that their opinion does not affect CVSS math.'
+            - id: d
+              text: 'Move past the question and hope leadership sides with you.'
+          answer_ids: [b]
+          explanation: >
+            Evidence plus process beats both capitulation and contempt.
+            Showing the recorded path grounds disagreement in fact, and
+            the adjustment card gives legitimate context concerns a
+            proper home instead of a hallway verdict.
+    - id: full-spectrum-rehearsal
+      title: 'Full-spectrum rehearsal'
+      blocks:
+        - type: prose
+          markdown: |
+            Skills integrate only under rehearsal, and earlier rooms make
+            excellent rehearsal material precisely because you already
+            know them: attention goes to the paperwork wrapping, not the
+            puzzle inside. Pick a solved room, mailroom, packet-diary,
+            kernel-of-truth, quiet-persistence, container-window, and run
+            the complete engagement loop around it in miniature. Scope
+            memo first, boundaries written as if the room were a client
+            system. Operation second, executed under RoE constraints with
+            automatic logs and a running evidence register. Reporting
+            third, both renderings, ratings with adjustment cards,
+            remediation entries, verification checklists. Finally a
+            self-debrief recorded and reviewed against the checklist a
+            colleague would apply.
+
+            Rotating roles sharpens the drill further: solve once as the
+            tester, then write the client-side review of your own report,
+            marking every place a stranger would stumble. The gaps you
+            find are curriculum gold, each one names a habit to drill
+            before the capstone room grades it for real.
+        - type: code
+          language: text
+          code: |
+            Rehearsal template (90 minutes per room):
+
+              10m  scope memo        assets, window, exclusions
+              30m  execution         under RoE; script logs ON; register rows
+                                     appended as you work
+              20m  report            exec summary + top finding full entry
+                                     (rating card + repro + remediation)
+              15m  self-debrief      record walkthrough; mark defensive
+                                     moments and unsupported claims
+              15m  client-role pass  review own report cold; list every
+                                     unclear step as a drill item
+
+            suggested rotation: mailroom -> packet-diary ->
+            kernel-of-truth -> quiet-persistence -> container-window
+        - type: quiz
+          question_id: rcp-rehearsal-transfer
+          question: 'What makes rehearsal on already-solved rooms transfer to live work?'
+          options:
+            - id: a
+              text: 'Faster solving times prove growing skill.'
+            - id: b
+              text: 'Attention shifts entirely to scope, evidence, and reporting discipline under realistic constraints.'
+            - id: c
+              text: 'Repeating rooms memorizes their flags permanently.'
+            - id: d
+              text: 'It replaces the need for authorization paperwork later.'
+          answer_ids: [b]
+          explanation: >
+            The technical puzzles stopped being the bottleneck long ago;
+            integration practice targets exactly the professional layer
+            the capstone will grade. Memorized flags are irrelevant
+            noise, and paperwork habits are the point.
+    - id: capstone-readiness
+      title: 'Capstone readiness checklist'
+      blocks:
+        - type: prose
+          markdown: |
+            A full-spectrum capstone room is being built for this platform,
+            designed to grade the entire chain, scoping discipline,
+            authorized testing, evidence handling, rating honesty,
+            reporting quality, in one sitting. It ships separately, and
+            waiting passively would waste the interval. The readiness
+            checklist below turns the wait into preparation: each line
+            states a capability the room will demand, phrased so you can
+            test yourself against any solved room today and score honestly.
+
+            Score weak lines ruthlessly and let them dictate practice.
+            Can you write a scope memo from a one-paragraph brief without
+            gaps? Keep command logs automatically, without deciding to?
+            Rate a finding with its adjustment card and defend it aloud?
+            Produce both report renderings inside an hour? Rehearsal
+            sections in the previous block exist precisely to move these
+            lines from aspirational to boring. When the room opens, the
+            prepared learner experiences it as a familiar day at work;
+            the unprepared experience an expensive surprise, and surprise
+            is exactly what this path exists to delete.
+        - type: code
+          language: text
+          code: |
+            Capstone readiness self-check (score each 0-2):
+
+            __ scope memo complete from short brief, no omissions
+            __ ROE stop conditions recited unprompted
+            __ authorization pre-flight catches the planted gap
+            __ logs + register maintained without reminders
+            __ out-of-scope discovery routed correctly
+            __ rating defended with adjustment card aloud
+            __ remediation passes the senior-dev test
+            __ exec summary + tech entry both done in 60 min
+            __ debrief recorded, zero unsupported claims
+
+            14+ ready    8-13 rehearse weakest 3 lines
+            <8           repeat rehearsal block per room
+        - type: callout
+          tone: info
+          markdown: |
+            Log your checklist scores per rehearsal run. Improvement
+            across runs is the signal that matters; a single number means
+            little without its trend line.
+        - type: quiz
+          question_id: rcp-readiness-purpose
+          question: 'Why phrase readiness as a scored checklist rather than a feeling of preparedness?'
+          options:
+            - id: a
+              text: 'Checklists look professional in screenshots.'
+            - id: b
+              text: 'Scored lines expose specific weak capabilities and track improvement across rehearsal runs.'
+            - id: c
+              text: 'Feelings are unreliable after midnight.'
+            - id: d
+              text: 'The capstone room publishes the scores publicly.'
+          answer_ids: [b]
+          explanation: >
+            Preparedness feelings correlate poorly with performance
+            under pressure. Itemized scores name what to drill next and
+            produce a trend line proving the drilling worked, which is
+            exactly the feedback loop rehearsal needs.
+  cheat_sheet: |
+    # Reporting and capstone prep quick reference
+
+    Two renderings:
+        exec: consequence + counts-with-context + numbered decisions
+        eng : repro from nothing + root cause + fix guidance
+        same facts, different altitude, zero contradictions
+
+    Exec summary rules:
+        open with state of risk; no unexplained jargon
+        end with explicit asks; 90-second budget
+
+    Tech report pillars:
+        scope/method limits -> findings w/ rating cards ->
+        prioritization table -> appendices
+        artifact register: ref + sha256 + UTC = checkable claims
+
+    Debrief:
+        acknowledge wins first; systems fail, not people
+        disagreements -> adjustment process, not hallway verdicts
+        close with owners + dates or skip the meeting
+
+    Rehearsal loop (per solved room):
+        scope memo -> RoE-constrained run w/ register ->
+        both report layers -> recorded self-debrief ->
+        cold client-role review of own report
+
+    Readiness:
+        scored checklist per run; drill weakest 3 lines;
+        trend over absolute score

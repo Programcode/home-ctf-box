@@ -1,0 +1,416 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: risk-rating-remediation-writing
+  title: 'Risk rating and remediation writing'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - cvss
+    - risk
+    - remediation
+    - prioritization
+spec:
+  track: web-foundations
+  summary: >-
+    Findings change nothing until someone decides they matter, and this
+    module teaches the two crafts that drive that decision. Rating starts
+    from CVSS thinking, base metrics separating exploitability from
+    impact, scored consistently across a report so comparisons mean
+    something. Then it goes past the calculator: environmental context,
+    compensating controls, and exposure reality adjust numbers through
+    documented reasoning rather than dogma, because a score without its
+    assumptions is just a costume for an opinion. Remediation writing is
+    the other half of the trade: root-cause fixes phrased for the engineer
+    who will implement them, alternatives when ideal fixes are impractical,
+    and verification steps that let anyone prove the fix works. The module
+    closes with prioritization conversations, where ratings meet roadmaps
+    and the professional's job becomes options instead of verdicts.
+  objectives:
+    - Separate vulnerability facts from environment-dependent risk framing.
+    - Apply CVSS base metrics consistently across a finding set.
+    - Adjust ratings with documented contextual reasoning.
+    - Write remediations engineers can implement without follow-up questions.
+    - Define verification steps proving each fix effective.
+    - Facilitate prioritization decisions between owners and roadmaps.
+  sections:
+    - id: finding-versus-risk
+      title: 'Findings are facts, risks are stories'
+      blocks:
+        - type: prose
+          markdown: |
+            A vulnerability is a statement about software: this endpoint
+            reflects input, this service trusts client-supplied identity.
+            Risk adds the world around it: what data lives there, who can
+            reach it, what happens when it breaks, how fast it gets noticed.
+            The same reflected cross-site scripting rates as a curiosity in
+            an internal admin console used by three employees with hardware
+            keys, and as a serious problem in a customer-facing portal
+            feeding a payments pipeline. Confusing the two produces reports
+            where everything is critical, which clients learn to discount,
+            or everything is medium, which attackers do not.
+
+            The professional habit separates layers explicitly. The finding
+            section states technical fact with reproduction steps; the risk
+            section argues consequence using the client's own context,
+            their compliance obligations, their incident history, their
+            architecture diagrams. Ratings then summarize the argument
+            rather than replacing it, and readers can disagree with the
+            number while still holding the reasoning in front of them.
+        - type: code
+          language: text
+          code: |
+            Finding V-4: stored XSS via profile display name (same code)
+
+            Context A - internal admin tool, SSO + MFA, 3 users:
+              impact path requires insider session already cleared MFA;
+              plausible worst case = prank-grade defacement
+              rating: LOW (documented reasoning kept)
+
+            Context B - public community site, session cookie theft:
+              attacker script runs in victims' browsers at scale;
+              session hijack + credential phishing become routine
+              rating: HIGH
+
+            reading: identical bug, different worlds; the report carries
+            both facts and both arguments
+        - type: callout
+          tone: info
+          markdown: |
+            Clients forgive disagreement with your severity; they never
+            forgive discovering you hid the reasoning. Show the context
+            assumptions beside every adjusted rating.
+    - id: base-metrics-consistency
+      title: 'CVSS base metrics, applied consistently'
+      blocks:
+        - type: prose
+          markdown: |
+            CVSS earns its place by forcing eight small decisions per
+            finding. Attack vector asks whether the network suffices or
+            proximity is needed. Attack complexity and user interaction
+            price the conditions beyond attacker control. Privileges
+            required distinguishes anonymous exploitation from
+            authenticated work. Scope captures whether a compromise escapes
+            its component into others. Impact metrics split confidentiality,
+            integrity, availability, because real systems care unevenly.
+            Answered honestly, these produce comparable severities across
+            the whole report, and comparability is the entire product.
+
+            Consistency beats precision here. A team scoring one finding
+            generously and the next strictly produces noise no dashboard
+            survives. The working method scores every finding with the same
+            rubric card open, writes the metric string next to the score,
+            and reserves judgment calls for a documented convention decided
+            once, before the first finding, not improvised per case.
+
+            Publish the rubric card with the report. A half page stating
+            how your team treats registration requirements, shared hosting
+            assumptions, and multi-tenant scope questions turns severity
+            disputes into rubric disputes, which are faster to resolve and
+            leave the report's internal consistency intact. Reviewers who
+            can see the rules stop assuming the rules were bent for them.
+        - type: code
+          language: text
+          code: |
+            Finding V-7: SQL injection in order search (pre-auth)
+
+            AV:N / AC:L / PR:N / UI:N      network, easy, anonymous
+            S:U / C:H / I:H / A:L          reads+writes DB rows, app stays
+
+            base string : CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L
+            base score  : 9.8 -> CRITICAL
+
+            cross-check: same-session IDOR rated earlier
+            AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:L -> 6.3 MEDIUM
+            gap explained: authentication requirement + write reach
+        - type: quiz
+          question_id: rrr-metric-choice
+          question: 'An endpoint exploitable only by logged-in subscribers gets which privileges-required value?'
+          options:
+            - id: a
+              text: 'PR:N, since registration is free.'
+            - id: b
+              text: 'PR:L, valid credentials to any subscriber account satisfy the precondition.'
+            - id: c
+              text: 'PR:H, accounts are privileged.'
+            - id: d
+              text: 'PR is skipped for web findings.'
+          answer_ids: [b]
+          explanation: >
+            Low privileges means some non-admin credential unlocks the
+            path. Free registration keeps it low rather than none, and
+            consistency matters more than where exactly teams draw that
+            line, provided the convention holds across the report.
+    - id: context-not-dogma
+      title: 'Context adjusts, documents justify'
+      blocks:
+        - type: prose
+          markdown: |
+            Base scores assume hostile networks and absent defenses, and
+            real deployments differ on purpose. A service reachable only
+            through an authenticated VPN differs materially from its base
+            vector; a web application firewall that demonstrably blocks a
+            payload class changes exploitability today, though not the
+            underlying flaw. Mature practices fold such facts back into the
+            rating as documented modifiers, sometimes formalized as
+            environmental metrics, often as a written adjustment note.
+            What separates adjustment from dogma is falsifiability: the
+            note names the control, states why it changes the number, and
+            dies the moment the control does.
+
+            The failure modes sit at both extremes. Teams that forbid
+            adjustments ship absurd priorities, internet-scale emergencies
+            ranked beside internal trivia. Teams that adjust freely under
+            business pressure produce scores that always land where budgets
+            want them, and their reports stop meaning anything. The middle
+            path is procedural: standard modifier categories, evidence
+            required per category, reviewer sign-off, expiry dates on
+            control-dependent downgrades.
+        - type: code
+          language: text
+          code: |
+            Adjustment card (kept beside finding in report):
+
+            V-7 SQL injection, base 9.8 CRITICAL
+            modifier : WAF rule set blocks union/error payloads
+            evidence : bypass attempts blocked in test window (log ref)
+            residual : blind boolean path remains feasible (shown)
+            decision : stays HIGH not CRITICAL; WAF buys triage time only
+            expiry   : downgrade void if WAF rules change or bypass lands
+                       re-check scheduled with retest
+
+            reading: number moved one band, reasoning travels with it,
+            and the downgrade has a fuse
+        - type: quiz
+          question_id: rrr-adjustment-legitimacy
+          question: 'Which adjustment practice keeps ratings trustworthy?'
+          options:
+            - id: a
+              text: 'Adjusting whenever project managers request calmer numbers.'
+            - id: b
+              text: 'Named control plus evidence plus expiry attached to every modification.'
+            - id: c
+              text: 'Never adjusting anything, regardless of demonstrated controls.'
+            - id: d
+              text: 'Rounding all scores to medium to avoid arguments.'
+          answer_ids: [b]
+          explanation: >
+            Trustworthy adjustment is auditable and temporary by design.
+            Pressure-driven edits corrupt the signal permanently, blanket
+            refusal wastes real information, and uniform rounding is
+            just lying politely.
+    - id: remediation-craft
+      title: 'Writing remediation engineers can use'
+      blocks:
+        - type: prose
+          markdown: |
+            A remediation entry succeeds when the implementing engineer
+            ships the right fix without calling anyone. That takes three
+            parts. Root cause stated plainly, parameterized query missing,
+            authorization check absent server-side, because fixing symptoms
+            guarantees recurrence elsewhere. Concrete guidance matching the
+            stack in front of them, library calls and configuration keys,
+            not generic advice posters. And scope honesty about what the
+            fix covers, this instance versus this class, so verification
+            knows what to prove.
+
+            Alternatives belong in the entry too. Ideal fixes sometimes
+            cost quarters; a competent mitigation, WAF rule, feature flag,
+            network segmentation, buys that time when labeled clearly as
+            partial. What poisons relationships is presenting workarounds
+            as repairs. The tone stays collaborative and specific: most
+            engineers want to fix things properly and need exactly the map
+            this paragraph describes, not a lecture about how they got
+            here.
+
+            Curated references finish the entry: the exact upstream
+            advisory, the framework page documenting the recommended
+            function, an internal note from the last fix of this class.
+            Three precise links beat thirty generic ones, because every
+            search round-trip you remove shortens the path between report
+            and repaired system.
+        - type: code
+          language: text
+          code: |
+            BAD  : "Fix the XSS vulnerability immediately."
+            WHY  : names symptom, offers no action, invites whack-a-mole
+
+            GOOD :
+              Root cause: display name rendered with v-html, bypassing
+                          auto-escaping (src/components/ProfileCard.vue:41)
+              Fix       : render via text interpolation; if rich text is
+                          required, sanitize server-side with DOMPurify
+                          allowlist before storage
+              Scope     : audit sibling component for same pattern (2 hits
+                          found in review, filed as V-11, V-12)
+              Mitigation if delayed: CSP script-src 'self' blocks inline
+                          payloads; verify against test payload set
+
+            reading: file, line, method, blast radius, fallback; an
+            afternoon ticket, not a philosophy debate
+        - type: quiz
+          question_id: rrr-remediation-quality
+          question: 'Which remediation entry would a senior developer prefer to receive?'
+          options:
+            - id: a
+              text: '"Upgrade all dependencies and follow best practices."'
+            - id: b
+              text: 'Root cause location, concrete fix matching the framework, affected-class scope check, optional interim mitigation.'
+            - id: c
+              text: 'A link to a blog post about secure coding generally.'
+            - id: d
+              text: '"Rewrite the authentication system" with no further detail.'
+          answer_ids: [b]
+          explanation: >
+            Actionable specificity wins: where the flaw lives, what good
+            looks like in this codebase, which siblings share the
+            pattern, and what buys time safely. Everything else defers
+            the thinking onto the person with the least context.
+    - id: verification-and-retest
+      title: 'Verification and the retest loop'
+      blocks:
+        - type: prose
+          markdown: |
+            Unverified fixes create confidence without accuracy, so every
+            finding ships with acceptance criteria: the exact checks whose
+            passing closes the item. Good criteria reuse the original
+            reproduction as regression proof, the payload that worked must
+            fail identically afterward, plus class-level sweeps where
+            patterns suggested siblings, and negative testing confirming
+            the fix broke nothing legitimate. Retest windows get agreed
+            up front, and results land as verified, partially fixed, or
+            unfixed with evidence, never as vibes forwarded from chat.
+
+            The loop also feeds the next engagement. Verification failures
+            cluster instructively: fixes reverted by later merges, fixes
+            applied to staging but not production, fixes addressing the
+            shown instance while siblings persist. Tracking those patterns
+            by team and codebase turns future scoping conversations
+            concrete, because regression history is the rare security
+            metric nobody can argue with.
+        - type: code
+          language: text
+          code: |
+            Verification checklist template:
+
+            F-4 stored XSS (profile name)
+              [ ] original payload renders inert (regression script xss-rev.py)
+              [ ] event handlers stripped across name/bio/avatar fields
+                  (class sweep, same sink family)
+              [ ] legit formatting (emoji, unicode names) still displays
+                  (negative test)
+              [ ] CSP header present + tested (mitigation layer intact)
+            result format: pass/fail per box + screenshot refs + hashes
+            retest window: within 14 days of fix deployment notification
+        - type: callout
+          tone: tip
+          markdown: |
+            Automate the regression scripts during the engagement, not
+            after. A five-line checker committed with the finding makes
+            every future retest a command instead of a project.
+        - type: quiz
+          question_id: rrr-verification-standard
+          question: 'What makes a fix verifiable rather than merely claimed?'
+          options:
+            - id: a
+              text: 'A developer asserting completion in the deployment channel.'
+            - id: b
+              text: 'Pre-agreed acceptance criteria including the original repro failing again.'
+            - id: c
+              text: 'The vulnerability disappearing from scanner output.'
+            - id: d
+              text: 'Time passing without complaints.'
+          answer_ids: [b]
+          explanation: >
+            Acceptance criteria agreed before the fix remove ambiguity
+            about done. Developer assertions and scanner silence both
+            miss partially-applied and sibling-instance cases that the
+            checklist explicitly hunts.
+    - id: prioritization-conversations
+      title: 'Prioritization conversations'
+      blocks:
+        - type: prose
+          markdown: |
+            Ratings meet reality in scheduling meetings, and the tester's
+            role there is narrower than ego prefers: supply accurate
+            severity, exposure, and effort context, then help owners make
+            the call that belongs to them. Useful framing pairs each
+            finding with its realistic attack story and its fix cost
+            estimate, letting tradeoffs surface honestly, this one is
+            cheap and urgent, that one is expensive and contained. Matrices
+            help groups see the shape; arguments about individual numbers
+            usually hide disagreements about context, which the adjustment
+            cards from earlier sections resolve faster than volume ever
+            will.
+
+            Two habits keep these rooms productive. Bring options rather
+            than verdicts: mitigate now, fix this sprint, accept with
+            review date, each with consequences written down. And record
+            acceptance explicitly when it happens, owner, date, rationale,
+            revisit trigger, because accepted risk managed deliberately is
+            governance, while accepted risk nobody wrote down is just
+            forgetting with extra steps. Reports close stronger for having
+            that register attached.
+        - type: code
+          language: text
+          code: |
+            Prioritization board (client planning session, week 2):
+
+            ID   sev   story                        fix est   proposal
+            V-7  HIGH  pre-auth DB read/write       2 days    fix sprint 40
+            V-4  MED   session theft via XSS        4 hours   hotfix Thu
+            V-9  MED   verbose errors leak paths    1 day     bundle w/ 40
+            V-12 LOW   weak lockout on admin UI     ?         accept + SSO
+                                                          migration Q1,
+                                                          review 2027-01
+
+            reading: every row carries story + cost + a named path forward;
+            disagreement now has somewhere useful to go
+        - type: quiz
+          question_id: rrr-prioritization-role
+          question: 'During prioritization, the strongest professional stance is which?'
+          options:
+            - id: a
+              text: 'Insist all high findings merge before any feature work.'
+            - id: b
+              text: 'Provide severity, exposure, and effort context, then support owners choosing among documented options.'
+            - id: c
+              text: 'Let the loudest engineer set the order to keep peace.'
+            - id: d
+              text: 'Refuse to attend; ratings speak for themselves.'
+          answer_ids: [b]
+          explanation: >
+            Ownership of scheduling belongs to the business; quality of
+            information belongs to the tester. Documented options with
+            consequences beat both ultimatums and abdication, and the
+            acceptance register keeps whatever gets deferred visible.
+  cheat_sheet: |
+    # Risk rating and remediation quick reference
+
+    Two layers:
+        finding = technical fact + repro
+        risk    = consequence argued in client context
+
+    CVSS discipline:
+        same rubric card for every finding; write the metric string
+        AV/AC/PR/UI price the path; C/I/A split the damage; S = escape
+        consistency > precision
+
+    Adjustments:
+        named control + evidence + expiry, or no adjustment
+        pressure-edited scores end the report's meaning
+
+    Remediation anatomy:
+        root cause (file:line) -> concrete fix -> class sweep
+        mitigations labeled partial; alternatives listed
+
+    Verification:
+        acceptance criteria pre-agreed; original repro must fail
+        automate regression scripts during engagement
+        track fix-failure patterns (reverted/staging-only/siblings)
+
+    Prioritization:
+        bring options + consequences, not verdicts
+        accepted risk = owner + date + revisit trigger, in writing

@@ -1,0 +1,398 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: scoping-rules-of-engagement
+  title: 'Scoping and rules of engagement'
+  version: 0.1.0
+  difficulty: easy
+  points: 140
+  estimated_minutes: 60
+  tags:
+    - pentest
+    - scoping
+    - authorization
+    - rules-of-engagement
+spec:
+  track: web-foundations
+  summary: >-
+    Offensive work earns its legitimacy from paper, not from skill, and
+    this module teaches the paperwork that separates professionals from
+    trespassers. You learn to turn a client's business question into
+    scope boundaries precise enough to test against, then build rules of
+    engagement covering techniques, stop conditions, contacts, and
+    evidence expectations before any packet leaves your machine.
+    Authorization gets its own section because third-party infrastructure,
+    cloud tenants, DNS providers, SaaS vendors, breaks more engagements
+    than any technical failure. The second half covers the operational
+    habits that run alongside testing: evidence logs written as you work,
+    out-of-scope discoveries handled through channels instead of
+    curiosity, and communication cadence that keeps clients calm. Every
+    room you have solved, from mailroom to kernel-of-truth, becomes a
+    different exercise once you practice it under these constraints.
+  objectives:
+    - Translate business questions into testable scope boundaries.
+    - Draft rules of engagement covering techniques, stops, and contacts.
+    - Verify written authorization including third-party dependencies.
+    - Maintain operation evidence logs contemporaneously with testing.
+    - Route out-of-scope discoveries through defined channels.
+    - Communicate status on cadence with clear escalation triggers.
+  sections:
+    - id: scope-as-contract
+      title: 'Scope is the contract'
+      blocks:
+        - type: prose
+          markdown: |
+            Scope answers one deceptively simple question: what may be
+            touched, when, by whom, and how hard. Clients rarely open with
+            that answer; they open with goals, we want confidence before
+            launch, our insurer demands an assessment, someone breached us
+            last year. The professional skill is converting those goals
+            into boundaries specific enough to check a packet against:
+            address ranges, hostnames, application URLs, accounts, time
+            windows, rate ceilings. Ambiguity in scope always resolves
+            itself during testing at the worst moment, usually as a scanner
+            touching a system somebody forgot was shared with production.
+
+            Good scope documents carry exclusions as prominently as
+            inclusions. The marketing site owned by an agency, the payment
+            page operated by a processor, the staging environment that
+            quietly holds customer data; each exclusion prevents a specific
+            future argument. When a client pushes back that everything is
+            fair game, the response is curiosity rather than enthusiasm:
+            who else depends on those systems, and who signs off for them?
+        - type: code
+          language: text
+          code: |
+            Engagement: Meridian Freight, external web assessment
+            window     : 2026-09-07 to 2026-09-11, 08:00-18:00 CEST
+            in scope   : app.meridianfreight.example (52.12.x.x assigned pool)
+                         api.meridianfreight.example v2 only
+                         test accounts: pentest-01..03 (provisioned)
+            excluded   : www blog hosted by agency (contact: their SOC)
+                         payments page (processor-owned)
+                         internal mail (separate engagement Q4)
+            rate limits: no scanning above 20 req/s; no brute force
+
+            reading: each line either permits or forbids exactly one thing;
+            nothing requires interpretation mid-test
+        - type: quiz
+          question_id: sre-scope-purpose
+          question: 'What makes a scope boundary useful during active testing?'
+          options:
+            - id: a
+              text: 'It impresses clients with professional documentation.'
+            - id: b
+              text: 'Any action can be checked against it instantly, before sending traffic.'
+            - id: c
+              text: 'It replaces the need for signed authorization.'
+            - id: d
+              text: 'It guarantees findings will stay within budget.'
+          answer_ids: [b]
+          explanation: >
+            Scope exists to be consulted under pressure, target appears,
+            check list, proceed or stop. Documentation quality matters
+            secondarily; authorization remains separate paperwork, and
+            budgets are commercial concerns outside this decision.
+    - id: roe-anatomy
+      title: 'Anatomy of rules of engagement'
+      blocks:
+        - type: prose
+          markdown: |
+            Rules of engagement convert scope into operating procedure.
+            The document lists permitted technique classes and their
+            conditions, automated scanning allowed against listed hosts but
+            never authenticated, social engineering excluded entirely,
+            physical testing requires escort. It names stop conditions:
+            anything suggesting data exposure, production instability, or
+            contact with real customer records halts that activity pending
+            a client call. It carries the communication contract, who to
+            call, in which order, within what minutes, plus the boring
+            essentials both parties forget until needed, change windows,
+            backup schedules, on-call rotations that might notice the
+            testing.
+
+            Evidence expectations belong here too, since they shape tester
+            behavior from hour one: command logs kept automatically,
+            screenshots timestamped, raw artifacts preserved per the
+            custody habits defensive modules teach. A ROE missing any of
+            these pieces produces friction precisely when friction is most
+            expensive, mid-incident, mid-test, or mid-disagreement.
+        - type: code
+          language: markdown
+          code: |
+            ## Rules of engagement skeleton
+
+            1. authorized techniques
+               unauth web/app testing, API testing vs v2 endpoints
+               credentialed checks ONLY with provided accounts
+            2. prohibited regardless
+               DoS/traffic flooding, social engineering, physical access
+               destructive payloads, real customer data extraction
+            3. stop conditions (pause + call lead immediately)
+               suspected PII exposure; service degradation;
+               finding affects systems beyond declared scope
+            4. contacts (in order): client lead, client security,
+               account manager
+            5. evidence: full command log, UTC timestamps,
+               daily artifact bundle to case directory
+        - type: prose
+          markdown: |
+            Notice what the stop conditions buy: permission to halt without
+            negotiation. When something looks like live customer data, the
+            tester whose ROE lists that condition simply stops and calls,
+            and nobody debates judgment calls over chat while the clock
+            runs. The document does its real work exactly there, in the
+            moments nobody has time to read documents.
+        - type: quiz
+          question_id: sre-stop-condition-value
+          question: 'Mid-test, an endpoint returns what looks like real customer records. What does a strong ROE direct?'
+          options:
+            - id: a
+              text: 'Download everything quickly as proof before telling anyone.'
+            - id: b
+              text: 'Pause that activity, preserve minimal evidence of the observation, call the client contact.'
+            - id: c
+              text: 'Continue testing other areas and mention it in the final report.'
+            - id: d
+              text: 'Post about it in the team channel to decide democratically.'
+          answer_ids: [b]
+          explanation: >
+            Suspected personal data exposure is a canonical stop
+            condition. Bulk downloading creates liability and copies of
+            regulated data; silence defers bad news; group chat is not a
+            notification chain. Pause, preserve minimally, escalate.
+    - id: authorization-before-touching
+      title: 'Authorization before touching anything'
+      blocks:
+        - type: prose
+          markdown: |
+            Authorization means written permission from whoever owns or
+            operates every system your traffic will touch, and the
+            qualification matters more than testers expect. The client
+            signs for their estate; the agency hosting the blog needs its
+            own letter; the cloud platform's acceptable use terms may need
+            review for load testing; the SaaS vendor behind a login page
+            is not covered by the client's signature merely because the
+            client pays them. Third-party gaps end engagements abruptly
+            and occasionally end careers, so verification happens before
+            day one, in writing, with dates matching the engagement window.
+
+            The practical instrument is a pre-flight checklist reviewed
+            with the client: every in-scope hostname mapped to an owner,
+            every owner mapped to a document, expiry dates logged, and
+            emergency contacts confirmed reachable. Where ownership is
+            unclear, the default answer is exclusion until proven otherwise.
+            Nobody has ever been sued successfully for leaving a system
+            out of scope.
+        - type: code
+          language: text
+          code: |
+            pre-flight authorization checklist (all boxes before day 1)
+
+            [x] client signature covering listed assets   exp 2026-10-31
+            [x] agency letter for www blog                n/a (excluded)
+            [x] processor confirmation payments page       n/a (excluded)
+            [x] cloud tenant owner confirms load policy    mail@client
+            [x] test accounts provisioned, no prod data    ticket PLAT-512
+            [ ] SaaS vendor terms for SSO login page       PENDING -> BLOCKS
+
+            reading: one pending box stops the clock; testing starts when
+            paper completes, not when calendars say so
+        - type: callout
+          tone: warning
+          markdown: |
+            Verbal approvals feel binding at the time and evaporate on
+            contact with disagreement. If it changed your authorization
+            surface, it goes in writing, even if the writing is a two-line
+            email reply you screenshot into the case file.
+    - id: evidence-during-ops
+      title: 'Evidence while you operate'
+      blocks:
+        - type: prose
+          markdown: |
+            Testing generates its own evidence requirements, and the habits
+            differ from incident response mainly in tempo. Everything worth
+            reporting must be reproducible later, which argues for
+            automatic capture: terminals running under script or session
+            managers write full transcripts, screenshots land in dated
+            directories, tool outputs save to files rather than scroll
+            away. Timestamps stay UTC throughout. Notes record decisions,
+            why this attack path was abandoned, what the client said on
+            the morning call, because six weeks later the report writes
+            itself from these logs while reconstructed memory argues with
+            itself.
+
+            Organization follows the case-directory pattern: one tree per
+            engagement holding logs, artifacts, notes, and the daily
+            bundles that become handoff material. The payoff arrives at
+            report time and again at retest time, when yesterday's you
+            left exact commands instead of vibes.
+
+            Sensitive material collected mid-test deserves its own rule:
+            proof of access stops at the minimum necessary, samples of
+            personal data stay redacted or hashed in artifacts, and
+            anything showing real records gets flagged for restricted
+            handling immediately. The engagement that documents discipline
+            around client data is the engagement whose technical claims
+            nobody needs to double-check out of fear.
+        - type: code
+          language: bash
+          code: |
+            $ mkdir -p mf-web/{logs,shots,notes,artifacts}
+            $ script -T mf-web/logs/timing.log -a mf-web/logs/day1.session
+            Script started, output log file is mf-web/logs/day1.session
+
+            $ date -u && curl -s -o /dev/null -w '%{http_code}\n' \
+                https://api.meridianfreight.example/v2/orders
+            2026-09-07T06:02:11Z
+            403
+
+            # end of day: bundle artifacts + hash manifest
+            $ find mf-web -type f -newermt 2026-09-07 ! -name '*.sha256' \
+                -exec sha256sum {} \; > mf-web/artifacts/day1.sha256
+        - type: quiz
+          question_id: sre-evidence-habit
+          question: 'Which habit most improves report quality weeks later?'
+          options:
+            - id: a
+              text: 'Relying on memory plus a few memorable screenshots.'
+            - id: b
+              text: 'Automatic session transcripts with UTC timestamps saved into a case directory.'
+            - id: c
+              text: 'Writing findings directly into the final report as discovered.'
+            - id: d
+              text: 'Asking the client what happened during the engagement.'
+          answer_ids: [b]
+          explanation: >
+            Contemporaneous capture beats reconstruction every time it
+            is measured. Writing straight into reports cherry-picks the
+            story early, and outsourcing memory defeats the point of
+            hiring the tester who saw it happen.
+    - id: out-of-scope-discoveries
+      title: 'Out-of-scope discoveries'
+      blocks:
+        - type: prose
+          markdown: |
+            Sooner or later testing brushes against something the contract
+            did not cover: an adjacent server visible in error messages, a
+            forgotten subdomain pointing at a partner's environment, a
+            vulnerability in a library whose dashboard belongs to another
+            business unit. The professional reflex is uniform: do not
+            expand activity to investigate further, document what
+            accidentally appeared, and route it through the agreed channel.
+            Curiosity past the boundary converts a legitimate engagement
+            into unauthorized access with paperwork attached, and courts
+            do not credit good intentions.
+
+            Handling well builds trust that wins future scope. The note
+            goes to the client contact with just enough detail for their
+            decision, what appeared, where, why it looks relevant, and the
+            formal answer comes back as either an addendum expanding scope
+            properly or a referral the client makes internally. Both
+            outcomes leave you clean; improvising leaves nobody clean.
+        - type: callout
+          tone: danger
+          markdown: |
+            Hard rule: discovering a weakness in an out-of-scope system
+            grants zero permission to probe it. One extra request past
+            this line is uninvited testing of someone else's property.
+        - type: quiz
+          question_id: sre-oos-response
+          question: 'Error pages reveal an internal wiki server outside scope. Correct handling?'
+          options:
+            - id: a
+              text: 'Port scan it briefly to assess severity for the client.'
+            - id: b
+              text: 'Record the observation verbatim, stop, notify the client contact through the agreed channel.'
+            - id: c
+              text: 'Ignore it completely and omit it from all records.'
+            - id: d
+              text: 'Test it after hours when nobody is watching.'
+          answer_ids: [b]
+          explanation: >
+            Documentation plus escalation keeps the discovery inside the
+            engagement legally. Scanning without authorization is the
+            violation regardless of motive, omission discards value the
+            client paid near, and after-hours testing is worse than
+            daytime testing by exactly none.
+    - id: cadence-and-deescalation
+      title: 'Cadence and de-escalation'
+      blocks:
+        - type: prose
+          markdown: |
+            Communication rhythm is part of the deliverable. Daily
+            summaries, short, factual, sent at an agreed hour, keep
+            stakeholders from inventing worse stories than reality: what
+            was tested, what stood out, any stop-condition events, next
+            focus. Escalation triggers override the schedule; production
+            impact, suspected data exposure, or contact from an unfamiliar
+            party claiming to detect your activity go up the contact chain
+            immediately, whatever the clock says. Silence reads as trouble
+            in both directions, so even quiet days earn one sentence.
+
+            De-escalation is the craft half. Mid-engagement anxiety makes
+            clients demand scope changes by phone, blame testers for
+            findings, or ask for verbal risk assessments the contract never
+            bought. The steady responses are acknowledgment, return to
+            process, changes in writing, findings in reports, risks rated
+            with the client present. Testers who absorb panic and answer
+            calmly get invited back; testers who match energy get their
+            findings argued line by line.
+        - type: code
+          language: markdown
+          code: |
+            Day 2 summary (sent 17:00 CEST as agreed)
+
+            Tested: auth flows, session handling on app+v2 api
+            Notable: 2 candidate findings held for verification,
+                     no stop conditions triggered
+            Anomaly: none; traffic stayed under agreed rates
+            Next: access control matrix across tenant boundaries
+
+            reading: five lines, zero surprises, stakeholder blood
+            pressure unchanged; this is what good looks like
+        - type: quiz
+          question_id: sre-cadence-trigger
+          question: 'Your scanner slows a staging database noticeably at 15:00. Client engineers look worried. Best move?'
+          options:
+            - id: a
+              text: 'Say nothing and hope staging recovers before the daily summary.'
+            - id: b
+              text: 'Pause the affected activity, tell the client contact now, resume only after agreement.'
+            - id: c
+              text: 'Blame the database team for undersizing hardware.'
+            - id: d
+              text: 'Switch targets silently and mention it in the report.'
+          answer_ids: [b]
+          explanation: >
+            Observable side effects trigger the communication clause,
+            not the reporting schedule. Pausing costs minutes; silent
+            continuation risks the trust the whole engagement trades on.
+  cheat_sheet: |
+    # Scoping and RoE quick reference
+
+    Scope lines:
+        assets, windows, accounts, rates, EXCLUSIONS
+        ambiguity resolves mid-test at worst cost
+
+    ROE contents:
+        permitted techniques + conditions
+        stop conditions: data exposure, instability, scope spillover
+        contact chain + evidence expectations
+
+    Authorization:
+        every touched system needs an owner-signed doc
+        third parties (agency/cloud/SaaS) sign separately
+        pending box = stopped clock
+
+    Ops evidence:
+        script/session logs, UTC everywhere, daily hashed bundles
+        notes record decisions, not just observations
+
+    Out-of-scope finds:
+        observe, document verbatim, escalate via channel
+        never extend probing without written addendum
+
+    Cadence:
+        daily summary, escalation overrides schedule
+        absorb panic; process converts it to paperwork
