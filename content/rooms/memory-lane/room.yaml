@@ -1,0 +1,101 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: memory-lane
+  title: 'Memory Lane'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 45
+  tags: [dfir, memory-forensics, process-analysis, c2, persistence]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    The Meridian Archive imaging rig pulled a memory capture from a
+    suspect workstation before it was reimaged, and the lab reduced it
+    to two artifacts you can read without special tools: a process list
+    snapshot and excerpts of printable strings from the capture. One
+    process does not belong. You will find the impostor running from a
+    path no legitimate binary uses, prove its parent is a ghost that no
+    longer exists in the dump, dig the command and control domain out
+    of the string excerpts, and report all three.
+  objectives:
+    - 'Spot masquerading malware by executable path rather than process name.'
+    - 'Use parent-child relationships inside a process dump to expose dead-parent anomalies.'
+    - 'Aggregate beacon artifacts from strings output to name the C2 domain.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Both evidence files are static synthetic text generated for this room; there is no real memory image, no real malware family, and no network activity behind the beacon strings.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: catch-the-injection
+      title: 'Report the injected process triple'
+      prompt: >-
+        Download both artifacts from the case page:
+        /evidence/processes.txt is a ps-style listing and
+        /evidence/strings-excerpt.txt holds printable strings recovered
+        from the capture. Identify the injected process (it runs from a
+        path no packaged software would use), note its parent PID,
+        which points at a process absent from the dump, and find the C2
+        domain the implant repeats in its beacon headers. Submit the
+        triple by POST /report as JSON with keys process_path,
+        parent_pid, and c2_domain. All three correct returns the FLAG
+        value.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'Trust paths over names. Legitimate system binaries live under /usr, /bin, /sbin or /snap; anything executing out of dot directories in /tmp deserves a hard look.'
+        - cost: 10
+          text: "In the listing every column but the last is fixed width: awk '{print $1}' processes.txt gives PIDs, $2 gives PPIDs. After you pick the suspicious row, check whether its PPID appears anywhere in column 1."
+        - cost: 25
+          text: 'For the beacon, count repeats instead of trusting your eye once: grep ''^Host:'' strings-excerpt.txt | sort | uniq -c. Then curl -s -X POST http://target:8000/report -H ''Content-Type: application/json'' -d ''{"process_path":"...","parent_pid":"...","c2_domain":"..."}''.'
+      solution: |
+        1. Save both artifacts:
+           curl -sO http://target:8000/evidence/processes.txt
+           curl -sO http://target:8000/evidence/strings-excerpt.txt
+        2. Sweep the listing for executables outside standard
+           directories. The fast way is to look at the final column:
+           grep '/tmp/' processes.txt
+           One row survives the filter: PID 6218 running
+           /tmp/.cache/fontconfig/gnome-calc-helper --quiet. Its name
+           borrows a desktop application, but gnome calculator has no
+           business executing from a font cache directory. That full
+           path is answer one.
+        3. Prove the parent anomaly:
+           awk '$1 == 6218 {print $2}' processes.txt
+           prints 3491. Now check whether the parent exists:
+           awk '$1 == 3491' processes.txt
+           returns nothing. Every other daemon on the box shows PPID 1
+           because init adopts orphaned children; a live process whose
+           parent is a PID missing from the snapshot means the parent
+           died or was hidden after spawning it, which is classic
+           injector behavior. Answer two is 3491.
+        4. Mine the strings excerpt for beacon traffic. Implants talk
+           HTTP to their controllers and the Host header survives as
+           printable text:
+           grep '^Host:' strings-excerpt.txt | sort | uniq -c
+           updates-eastward-cdn.net repeats across three separate
+           requests while the one benign mirror domain appears a
+           single time in unrelated noise. Answer three is
+           updates-eastward-cdn.net.
+        5. File the triple:
+           curl -s -X POST http://target:8000/report \
+             -H 'Content-Type: application/json' \
+             -d '{"process_path":"/tmp/.cache/fontconfig/gnome-calc-helper","parent_pid":"3491","c2_domain":"updates-eastward-cdn.net"}'
+           Accepted prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

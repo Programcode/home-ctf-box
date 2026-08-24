@@ -1,0 +1,96 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: web-trail
+  title: 'Web Trail'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 35
+  tags: [investigation, access-log, sqli, credential-stuffing, http]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    One night of front-door traffic from the Meridian Archive storefront
+    survived as a ten-thousand-line access log, and somewhere in it an
+    intruder left footprints: an automated SQL injection sweep, a burst
+    of password guesses, and one quiet administrative login from an
+    address that had never touched the site before. Pull the log apart,
+    answer the three questions on the incident report, and close the
+    case.
+  objectives:
+    - 'Grep a large access log for tool signatures and aggregate attacker source addresses.'
+    - 'Distinguish failed brute force attempts from the single successful scripted login.'
+    - 'File a structured incident report from log-derived evidence.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The access log is generated deterministically at import time inside one Flask process; every address, payload, and user agent is synthetic and nothing performs real attacks.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: name-the-intruder
+      title: 'Answer the incident report'
+      prompt: >-
+        Download /evidence/access.log from the case page and find three
+        facts. First, the source IP that ran the automated SQL injection
+        sweep against product pages. Second, the account name used in
+        the one successful administrative login that followed the noise,
+        visible as a POST to /login answered with a 302 instead of a
+        401. Third, the exact User-Agent string on that successful
+        login line. Submit them by POST /report as JSON with keys
+        sqli_ip, account, and login_agent. All three correct returns the
+        FLAG value.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'Attack tools usually sign their requests. Search the log for tool names before you try anything cleverer.'
+        - cost: 10
+          text: "grep -c sqlmap access.log counts the sweep. Aggregate sources with grep sqlmap access.log | awk '{print $1}' | sort | uniq -c. For the pivot, the only POSTs to /login in this log belong to the attackers."
+        - cost: 25
+          text: 'The success line answers 302 while every guess answers 401: grep ''POST /login'' access.log | grep -v '' 401 ''. Read the user= parameter and the last quoted field for the agent, then POST {"sqli_ip":"...","account":"...","login_agent":"..."} to http://target:8000/report.'
+      solution: |
+        1. Save the evidence locally:
+           curl -sO http://target:8000/evidence/access.log
+           wc -l access.log shows 10000 lines, so eyeballing will not
+           work; filter instead.
+        2. Confirm the injection sweep and its scale:
+           grep -c sqlmap access.log
+           The count lands in the low hundreds, far above anything the
+           baseline contains.
+        3. Name the sweeper:
+           grep sqlmap access.log | awk '{print $1}' | sort -u
+           Exactly one address appears: 203.0.113.77. That is your
+           first answer.
+        4. Find the credential attack around the same window:
+           grep 'POST /login' access.log | head
+           Dozens of 401 guesses cycle the usernames admin, root, and
+           administrator from the same 203.0.113.77, each sent with a
+           scripting library's User-Agent rather than a browser.
+        5. Isolate the one request that got in. A 302 response means
+           the server accepted the password and redirected:
+           grep 'POST /login' access.log | grep -v ' 401 '
+           One line remains, and its source is a second address,
+           198.51.100.23, the intruder moving to fresh infrastructure
+           after the noise. Read the two fields you need straight off
+           the line: user=admin sits in the query string and the final
+           quoted field holds the agent python-requests/2.31.0.
+        6. File the report:
+           curl -s -X POST http://target:8000/report \
+             -H 'Content-Type: application/json' \
+             -d '{"sqli_ip":"203.0.113.77","account":"admin","login_agent":"python-requests/2.31.0"}'
+           All three accepted prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

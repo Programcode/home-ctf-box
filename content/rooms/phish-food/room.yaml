@@ -1,0 +1,85 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: phish-food
+  title: 'Phish Food'
+  version: 1.0.0
+  difficulty: beginner
+  points: 125
+  estimated_minutes: 30
+  tags: [phishing, email-headers, spoofing, soc, lookalike-domains]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    A suspicious message landed in the Meridian Archive operations
+    mailbox and the mail team preserved it as a raw .eml file. You will
+    download the evidence, read the headers the way a parser sees them,
+    separate the display identity from the envelope identity, chase the
+    real destination of the link in the body, and answer the indicator
+    quiz to close the case.
+  objectives:
+    - 'Read raw email headers and tell the From display address apart from Return-Path.'
+    - 'Extract link targets from a message body and name their registrable domain.'
+    - 'Report the three core phishing indicators through the quiz endpoint.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The .eml is a hand-written synthetic file with invented domains; no live links resolve and nothing leaves the lab. Quiz answers are constants inside one Flask process.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: read-the-headers
+      title: 'Name the three phishing indicators'
+      prompt: >-
+        Download /evidence/mail.eml from the case page. Parse it with
+        any tool you like and identify three indicators: the domain in
+        the From header address (what the sender claims), the domain in
+        the Return-Path header (where bounces really go), and the
+        registrable domain of the URL in the body (where the button
+        really leads). Submit all three to POST /quiz as JSON with keys
+        from_domain, return_path_domain, and link_domain. All three
+        correct returns the FLAG value.
+      points: 125
+      hints:
+        - cost: 0
+          text: 'Headers lie on purpose. From is what the sender wants you to see; Return-Path is where the mail infrastructure actually routes bounces. Compare them.'
+        - cost: 10
+          text: 'Python stdlib parses this cleanly: email.message_from_bytes(raw, policy=policy.default) then msg["From"], msg["Return-Path"], and walk msg.walk() for text parts to find the https URL.'
+        - cost: 25
+          text: "The link host embeds the trusted brand as a subdomain: everything before the last two labels of the hostname is decoration. Registrable domain means the last two labels, for example login.evil.example has registrable domain evil.example. Then curl -s -X POST http://target:8000/quiz -H 'Content-Type: application/json' -d '{...}' with the three lowercase domains."
+      solution: |
+        1. Open http://target:8000/ and save the evidence:
+           curl -sO http://target:8000/evidence/mail.eml
+        2. Read the transport headers first:
+           grep -E '^(From|Return-Path|Reply-To):' mail.eml
+           From claims it-servicedesk@meridian-archive.com, the brand
+           the recipient trusts. That address was never authenticated.
+           Return-Path shows bounce@mailer-relay-east.net, an unrelated
+           sending infrastructure. This mismatch between claimed
+           identity and envelope identity is indicator one and two.
+        3. Find the link in the body:
+           grep -oE 'https://[^ ]+' mail.eml
+           The URL host is meridian-archive.com.portal-reset.mailpost-cdn.net.
+           Everything left of the last two labels is a subdomain the
+           attacker controls; the registrable domain that actually
+           receives the connection is mailpost-cdn.net. Indicator three.
+        4. Answer the quiz:
+           curl -s -X POST http://target:8000/quiz \
+             -H 'Content-Type: application/json' \
+             -d '{"from_domain":"meridian-archive.com","return_path_domain":"mailer-relay-east.net","link_domain":"mailpost-cdn.net"}'
+           Domains are compared lowercased without angle brackets or
+           ports. All three correct prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

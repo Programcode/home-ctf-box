@@ -1,0 +1,40 @@
+  PID  PPID USER     %CPU %MEM   RSS ARGS
+    1     0 root      0.0  0.1  20480 /sbin/init splash
+    2     0 root      0.0  0.0      0 [kthreadd]
+    3     2 root      0.0  0.0      0 [rcu_gp]
+    4     2 root      0.0  0.0      0 [rcu_par_gp]
+   11     2 root      0.0  0.0      0 [netns]
+  347     1 root      0.0  0.2  36864 /lib/systemd/systemd-journald
+  381     1 root      0.0  0.1  24576 /lib/systemd/systemd-udevd
+  512     1 systemd+  0.0  0.1  12288 /usr/sbin/thd --triggers /etc/triggerhappy/triggers.d/
+  556     1 root      0.0  0.4  61440 /usr/lib/accountsservice/accounts-daemon
+  602     1 root      0.0  0.3  45056 /usr/lib/openssh/sshd-session -R
+  644     1 root      0.1  0.9 118784 /usr/bin/containerd
+  701     1 root      0.2  1.8 262144 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+  788     1 message+  0.0  0.1  16384 /usr/bin/dbus-daemon --system --address=systemd: --nofork
+  845     1 root      0.0  0.5  90112 /usr/lib/snapd/snapd
+  902     1 root      0.0  0.2  40960 /usr/lib/systemd/systemd-logind
+  967    602 root      0.0  0.2  49152 sshd: deploy [priv]
+ 1044      1 deploy    0.0  0.1  12288 /lib/systemd/systemd --user
+ 1045   1044 deploy    0.0  0.0   8192 (sd-pam)
+ 1180    967 deploy    0.0  0.1  28672 sshd: deploy@pts/0
+ 1181   1180 deploy    0.0  0.1  16384 -bash
+ 1902   1181 deploy    0.1  0.3  57344 /home/deploy/.local/bin/report-gen --weekly
+ 2145      1 postgres  0.3  2.1 348160 /usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main
+ 2156   2145 postgres  0.0  0.4  98304 postgres: checkpointer
+ 2157   2145 postgres  0.0  0.3  90112 postgres: background writer
+ 2388      1 www-data  0.4  1.2 180224 nginx: master process /usr/sbin/nginx -g daemon on;
+ 2389   2388 www-data  0.0  0.4  65536 nginx: worker process
+ 2401   2388 www-data  0.0  0.4  65536 nginx: worker process
+ 3105      1 root      0.0  0.2  32768 /usr/lib/cron/cron -f -P
+ 3340      1 root      0.2  0.8 131072 /usr/bin/python3 /usr/local/bin/metrics-agent
+ 4172   1044 deploy    0.1  0.2  36864 /usr/libexec/gnome-shell-calendar-server
+ 5033   1181 deploy    0.0  0.0   4096 ps -eo pid,ppid,user,%cpu,%mem,rss,args
+ 5488   1181 deploy    0.0  0.1  12288 tail -n 20 /var/log/syslog
+ 6218   3491 deploy   12.4  0.8  24576 /tmp/.cache/fontconfig/gnome-calc-helper --quiet
+ 6350      1 root      0.0  0.1  16384 /usr/lib/policykit-1/polkitd --no-debug
+ 6712   2145 postgres  0.0  0.3  81920 postgres: walwriter
+ 7045      1 redis     0.2  0.5 114688 /usr/bin/redis-server 127.0.0.1:6379
+ 7390   2388 www-data  0.0  0.4  61440 nginx: worker process
+ 7718   1044 deploy    0.0  0.1  20480 /usr/libexec/xdg-desktop-portal
+ 8102   1181 deploy    0.0  0.1  12288 grep --color=auto sshd
