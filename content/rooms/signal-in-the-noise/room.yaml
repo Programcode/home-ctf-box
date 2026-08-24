@@ -1,0 +1,95 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: signal-in-the-noise
+  title: 'Signal in the Noise'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 50
+  tags: [rf, ook, iq-samples, rolling-code, dsp-lite]
+spec:
+  track: crypto-binary
+  type: investigation
+  summary: >-
+    A captured garage remote transmission sits on the evidence shelf as
+    raw complex int16 IQ samples plus a spectrum plot, generated
+    deterministically inside this container with no radio hardware
+    anywhere. The on-off-keyed frames repeat six times carrying a
+    64-bit code whose top half never changes and whose bottom half
+    rolls. You will decode the amplitude bits with nothing but struct
+    and arithmetic, separate the static section from the rolling
+    counter, and submit the static code to the simulated garage opener
+    for your flag.
+  objectives:
+    - 'Parse interleaved int16 IQ data and recover on-off-keyed bits by amplitude threshold.'
+    - 'Use frame repetition to distinguish a static identifier from rolling counter bits.'
+    - 'Replay the recovered static code against a receiver endpoint to complete the investigation.'
+  prerequisites:
+    - packet-diary
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'No RF transmission, SDR hardware, or real garage system participates. The IQ file is written by Python integer math inside one disposable Flask container, modulation is deliberately trivial on-off keying, and the receiver endpoint is part of the simulation.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: decode-and-open
+      title: 'Decode the static code and open the garage'
+      prompt: >-
+        Download the IQ capture from the case page, demodulate the
+        on-off-keyed bits using an amplitude threshold on the I
+        channel, align frames on their repeating preamble, identify the
+        32 bits that stay constant across all six repetitions while the
+        low 32 bits roll, and submit those static bits as eight hex
+        characters to GET /garage/open to receive the flag.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'The capture is interleaved signed 16-bit little-endian pairs, I first. Demodulation here is one comparison: absolute I above 3000 is a one, otherwise zero. Every bit lasts exactly 8 samples, so identical consecutive levels come in multiples of 8.'
+        - cost: 10
+          text: 'Each frame is 72 bits: an 8-bit 0xAA preamble (10101010, most significant bit first), then 32 payload bits, then 32 more. Six frames repeat separated by short silence. Decode run lengths, build the bit string, and split frames wherever 10101010 appears.'
+        - cost: 25
+          text: 'In every frame bits 8..39 are identical while bits 40..71 increment, so the static code is the second 32-bit word of any frame. Format it as eight uppercase hex digits and GET /garage/open?code=<value>. The rolling word is the decoy you discard.'
+      solution: |
+        1. GET http://target:8000/evidence/capture.iq and keep the
+           bytes local. Optionally glance at /evidence/spectrum.png,
+           the envelope plot, to see burst structure before decoding.
+        2. Parse samples with stdlib only:
+           `import struct; vals = struct.unpack(f"<{len(data)//2}h", data)`.
+           Even indices are I, odd are Q. Q carries tiny wobble and
+           never crosses the threshold; only abs(I) matters.
+        3. Slice into bits: walk the I stream, threshold each sample
+           at 3000, and record run lengths of equal level. Divide each
+           run by 8 to get its bit count and alternate writing 1s then
+           0s starting from the level of the first run (silence, so 0).
+        4. Find frames by locating the pattern 10101010 in the decoded
+           bit string. After each match take the next 64 bits as two
+           32-bit words, most significant bit first:
+           `word = int(bits, 2)` style conversion.
+        5. Compare words across all six frames. The first word is
+           identical everywhere; the second increments by one per
+           repetition. This is the de Bruijn-style observation trick
+           the lesson documents: repetition separates identifier from
+           counter without knowing the protocol.
+        6. Submit the static word: GET
+           http://target:8000/garage/open?code=<eight hex digits>,
+           case insensitive. The receiver validates and prints
+           FLAG{...}. Submit it.
+        7. While decoding, keep the mapping honest: real remotes use
+           this exact frame shape with much faster symbol rates and
+           often PWM instead of raw OOK, and fixed-code designs like
+           this one remain common in cheap devices precisely because
+           repetition defeats them.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,100 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: heap-house
+  title: 'Heap House'
+  version: 1.0.0
+  difficulty: insane
+  points: 500
+  estimated_minutes: 90
+  tags: [heap, use-after-free, tcache-poisoning, allocator-internals, simulation]
+spec:
+  track: crypto-binary
+  type: range
+  summary: >-
+    Heap House is a teaching simulator for glibc heap exploitation, not a
+    real binary. A Flask service models a small deterministic bump
+    allocator whose JSON endpoints behave like malloc and free, with an
+    intentional use-after-free bug: freed chunks stay readable and
+    writable. You will free two same-size chunks, abuse the dangling
+    reference to overwrite the simulated tcache fd pointer, force a
+    later allocation to return an attacker-chosen address, and write
+    over the win variable to capture the flag.
+  objectives:
+    - 'Map the allocator state machine through the /api/state dump and identify the use-after-free window.'
+    - 'Poison the simulated tcache fd pointer so a future malloc returns an arbitrary address.'
+    - 'Write the win magic through the forged chunk and explain each step against real glibc behavior.'
+  prerequisites:
+    - signed-twice
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'No real allocator, binary, or memory corruption exists anywhere here. The heap is a Python dictionary inside one disposable Flask container; addresses are sequential integers and every endpoint is documented on the front page. The exercise teaches the state machine of tcache poisoning without any executable exploit.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: poison-and-win
+      title: 'Chain UAF into tcache poisoning and win'
+      prompt: >-
+        Drive the allocator endpoints through the full poisoning chain.
+        Allocate two chunks of the same size class, free them in an
+        order that leaves the right chunk on top of the bin, use the
+        use-after-free write primitive to replace its fd pointer with
+        the address of the win variable, allocate twice so the second
+        allocation hands you the forged address, write the win magic
+        there, and read your flag from the win endpoint.
+      points: 500
+      hints:
+        - cost: 0
+          text: 'GET /api/state shows everything: chunk ids, addresses, bin contents per size class, and whether a write landed on a freed chunk (the service labels those UAF writes). Free order decides which chunk sits on top of the bin.'
+        - cost: 10
+          text: 'Free c2 first, then c1, so c1 lands on top and its fd slot holds the address of c2. The fd lives at data offset 0 of the top chunk. POST /api/write with id=c1, offset 0, value=0x20000 replaces it even though c1 is already freed, because the UAF bug keeps freed chunks writable.'
+        - cost: 25
+          text: 'The next malloc(64) pops c1 and promotes whatever fd says, so the bin head becomes 0x20000. One more malloc(64) returns that forged address as a fresh chunk id. Write value=0xC0FFEE000001 at offset 0 of the forged chunk, then GET /api/win prints the flag. Real glibc would demand a 16-byte aligned fake pointer and would mangle fd with PROTECT_PTR under safe-linking; this simulator documents both checks and enforces only alignment.'
+      solution: |
+        1. Open http://target:8000/ and read the endpoint contract. All
+           numbers are plain hex or decimal integers in JSON.
+        2. Seed the arena: POST /api/malloc {"size": 64} twice. The
+           responses give c1 at 0x10040 and c2 at 0x10080 (the first
+           bump lands after the 0x40-byte base block). Both are size
+           class 64.
+        3. Build the victim bin: POST /api/free {"id": "c2"}, then
+           POST /api/free {"id": "c1"}. The bin for class 64 is now
+           [c2, c1] with c1 on top, and c1's fd slot (data offset 0)
+           holds 0x10080, the address of c2. GET /api/state confirms
+           both chunks show state freed while remaining listed, which
+           is the use-after-free window this room intentionally ships.
+        4. Poison the head: POST /api/write {"id": "c1", "offset": 0,
+           "value": "0x20000"}. The response labels this a uaf-write
+           because c1 is freed. In real glibc this is the moment you
+           overwrite tcache_entry->next; here it edits the bin's next
+           pointer for the top entry. The service rejects values that
+           are not 16-byte aligned, mirroring glibc's alignment check
+           in tcache_get.
+        5. Consume the bin: POST /api/malloc {"size": 64} returns c1
+           and reports promoted_fd=0x20000. POST /api/malloc {"size":
+           64} again returns a forged chunk f1 with addr 0x20000. That
+           is the arbitrary-address allocation.
+        6. Win variable sits at 0x20000 and must equal the magic
+           0xC0FFEE000001. POST /api/write {"id": "f1", "offset": 0,
+           "value": "0xC0FFEE000001"}.
+        7. GET /api/win now reports the magic match and prints
+           FLAG{...}. Submit it.
+        8. Map every step back to glibc as you go: chunk headers vs
+           this room's flat ids, fastbins/tcache LIFO order, why two
+           frees build a predictable bin, what safe-linking's
+           PROTECT_PTR would have done to step 4, and why modern
+           targets need a heap leak before poisoning. The lesson file
+           walks that mapping in detail.
+      validator:
+        type: per_session_flag

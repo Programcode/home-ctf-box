@@ -1,0 +1,85 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: apk-breadcrumbs
+  title: 'APK Breadcrumbs'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 25
+  tags: [android, apk, static-analysis, hardcoded-secrets, zipfile]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    Breadcrumb Labs ships a simulated Android package at /evidence so
+    you can rehearse static analysis without any real app or store.
+    The archive is a normal zip whose classes.dex is replaced by a text
+    manifest describing the smali control flow, so everything unpacks
+    with the Python standard library. Find the production API endpoint
+    and the leftover debug API key in the string resources, then submit
+    both to the verification desk for the flag.
+  objectives:
+    - 'Unpack an APK-style archive and map its manifest, resources, and dex layout.'
+    - 'Extract resource string values that the packaged code consumes at runtime.'
+    - 'Recognize hardcoded debug credentials as a shipping defect worth reporting.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'The APK is a synthetic zip assembled inside the Flask process with deterministic timestamps; classes.dex is a plain-text teaching manifest instead of bytecode, and no real application, signing key, or network endpoint exists anywhere in the room.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: extract-and-verify
+      title: 'Pull the endpoint and debug key from the package'
+      prompt: >-
+        Download app.apk from the case desk, unpack it, read the smali
+        flow notes in the classes.dex stub to learn which resources the
+        sync client actually consumes, then submit the production API
+        endpoint and the debug API key to POST /verify as form fields
+        api_endpoint and api_key.
+      points: 175
+      hints:
+        - cost: 0
+          text: 'An APK is just a zip. `python3 -m zipfile -l app.apk` lists entries and `unzip app.apk` works too. Start with AndroidManifest.xml for identity, then look at res/values/strings.xml where Android string resources live.'
+        - cost: 10
+          text: 'The classes.dex entry here is a readable text stub describing smali flows. It says SyncClient loads api_base_url from resources and DebugGate checks debug_api_key, both defined in res/values/strings.xml. Two URLs are listed there; the flow notes tell you v2 is production and v1 is deprecated.'
+        - cost: 25
+          text: 'Submit exactly: api_endpoint = https://crumb-sync.breadcrumbs-lab.example/api/v2 and api_key = brk-dev-key-7741, as form fields api_endpoint and api_key on POST /verify. A match returns the flag.'
+      solution: |
+        1. GET http://target:8000/evidence/app.apk and keep the file.
+        2. List it: `python3 -m zipfile -l app.apk`. You will see
+           AndroidManifest.xml, classes.dex, res/values/strings.xml,
+           assets/build-info.properties, and META-INF/MANIFEST.MF.
+           Real tooling names: `apktool d app.apk` decodes resources to
+           text, `jadx-gui app.apk` decompiles dex to Java. Here every
+           entry is already readable text by design.
+        3. Read AndroidManifest.xml: package com.breadcrumbs.pantry,
+           debuggable set true, one exported activity. Context only.
+        4. Read the classes.dex stub. It narrates the smali flow:
+           MainActivity calls SyncClient.sync(), which reads the
+           resource named api_base_url, and DebugGate compares a
+           constant against resource debug_api_key. The notes mark
+           https://crumb-api.breadcrumbs-lab.example/api/v1 as
+           deprecated and the v2 crumb-sync host as production.
+        5. Open res/values/strings.xml. Extract
+           api_base_url = https://crumb-sync.breadcrumbs-lab.example/api/v2
+           and debug_api_key = brk-dev-key-7741. In a real assessment
+           these are the two findings: an undocumented production
+           endpoint plus a credential committed into shipped resources.
+        6. POST to http://target:8000/verify with form fields
+           api_endpoint and api_key set to those exact strings. The
+           desk validates both and prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag
