@@ -1,0 +1,85 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: image-issues
+  title: 'Image Issues'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 50
+  tags: [containers, image-analysis, secrets, supply-chain]
+spec:
+  track: defense-cloud
+  type: investigation
+  summary: >-
+    The billing-api production image is pulled from an internal registry
+    mirror and exported for analysis. Its OCI-style manifest and per-layer
+    tar listings are attached as evidence. A developer built the image
+    from a dirty working tree, so one layer carries more than the recipe
+    intended: a live database environment file baked between the
+    dependency layers. Map manifest entries to layer artifacts, extract
+    the credentials, and prove exposure through the admin db console.
+  objectives:
+    - 'Read an image manifest and connect history commands to ordered layer digests.'
+    - 'Inspect layer tar listings to locate files that should never ship in an image.'
+    - 'Recover database credentials from a leaked environment file and verify them.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'All evidence is synthetic text generated inside the Flask target: the manifest, listings, and env file are constants and the admin console compares strings in memory. No container runtime, registry, or database is contacted.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: open-the-db-console
+      title: 'Trace the leaked layer to live db credentials'
+      prompt: >-
+        Download /evidence/app-image-manifest.json and identify which layer
+        was produced by the COPY . . history step. Check that layer's tar
+        listing under /evidence/layers/&lt;digest&gt;/, extract the app/.env
+        file it exposes, and use the database credentials inside at the
+        POST /admin/db endpoint (form fields user and password) to unlock
+        the console and capture the flag.
+      points: 225
+      hints:
+        - cost: 0
+          text: 'Manifest layers are listed bottom up, matching the order of build steps. History entries without a layer field, like CMD lines, produce no filesystem diff.'
+        - cost: 10
+          text: 'The COPY . . layer is the third entry in the layers array. Its listing shows app/.env sitting right beside the harmless app/.env.example; only one of those ships real values.'
+        - cost: 25
+          text: 'GET /evidence/layers/b7d309e54a12cf83e96b41d72c58af60913d7e25cb48f69102ae37d5b6c80f42/fs/app/.env yields DB_USER billing_ro and DB_PASSWORD harbor-lantern-91. POST user=billing_ro&password=harbor-lantern-91 to http://target:8000/admin/db.'
+      solution: |
+        1. Open the case page on http://target:8000/ and download
+           /evidence/app-image-manifest.json.
+        2. Read the config history. COPY requirements.txt . and the pip
+           install each own a layer, then COPY . . owns the third layer
+           entry, digest b7d309e54a12cf83e96b41d72c58af60913d7e25cb48f69102ae37d5b6c80f42.
+           The trailing CMD entry adds metadata only.
+        3. Fetch /evidence/layers/b7d309e5.../tar-listing.txt. Alongside
+           app.py and requirements.txt it lists app/.env at 220 bytes.
+           The dependency layer above it only ever held site-packages, so
+           the env file entered the image here, inside the COPY . .
+           snapshot of a dirty working tree.
+        4. Extract the file itself:
+           GET /evidence/layers/b7d309e5.../fs/app/.env returns
+           DB_HOST=postgres.internal, DB_USER=billing_ro, and
+           DB_PASSWORD=harbor-lantern-91.
+        5. Prove the credentials are live:
+           curl -X POST http://target:8000/admin/db -d user=billing_ro -d password=harbor-lantern-91
+           The console unlocks and prints FLAG{...}. Submit it.
+        6. Defensive reading: images are build artifacts, not secret
+           stores. Use BuildKit secret mounts, multi-stage builds that
+           copy only finished artifacts, and registry scans that fail
+           builds on env-shaped files in any layer.
+      validator:
+        type: per_session_flag
