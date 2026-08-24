@@ -1,0 +1,333 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: cloud-serverless-remediation
+  title: 'Serverless risk models and remediation writing'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - cloud
+    - serverless
+    - least-privilege
+    - technical-writing
+spec:
+  track: defense-cloud
+  summary: >-
+    Serverless removes servers and keeps every decision that matters. This
+    module explains what functions, triggers, and ephemeral execution change
+    about classic assumptions, walks the threat surface from untrusted event
+    input through overbroad execution roles to metadata credential theft,
+    and shows how scoped permissions plus structured observability shrink
+    blast radius before anything breaks. The second half teaches the writing
+    craft: remediations whose fixes developers can apply verbatim, severity
+    rationales that survive argument, and a tracking loop that verifies
+    closure instead of trusting tickets.
+  objectives:
+    - Describe how functions, triggers, and ephemeral execution change classic server assumptions.
+    - Enumerate the serverless threat surface from untrusted event input to metadata theft.
+    - Scope an execution role so one compromised function cannot read the world.
+    - Instrument functions so incidents reconstruct from structured logs, traces, and cost alarms.
+    - Write remediation guidance whose fixes developers apply without translation.
+    - Track remediations to closure with severity rationale and a retest loop.
+  sections:
+    - id: functions-change-assumptions
+      title: 'Functions change assumptions'
+      blocks:
+        - type: prose
+          markdown: |
+            Virtual machines stay resident; functions appear on demand, run
+            one invocation or a burst, then evaporate. Triggers decide when:
+            an HTTP request, an object landing in storage, a queue message,
+            a schedule. The provider patches the runtime underneath you,
+            which retires an entire category of OS maintenance, but the code
+            and dependencies inside the function remain exactly your problem.
+            Filesystem writes land on ephemeral scratch that vanishes with
+            the sandbox, connections pool strangely because instances churn,
+            and cold starts add latency whenever the platform must grow new
+            execution environments.
+
+            Security thinking updates accordingly. Patch cadence anxiety
+            shifts from operating systems to application packages. Perimeter
+            questions become trigger questions: who can enqueue this queue,
+            upload to this bucket, invoke this HTTP endpoint? Since state
+            lives outside the function in databases and object stores, data
+            exposure decisions concentrate there rather than on disks nobody
+            can inspect anyway.
+        - type: prose
+          markdown: |
+            Two operational quirks deserve early respect. Recursive loops
+            happen when a function writes to its own trigger, function
+            processes upload, output lands back in the same bucket, platform
+            spawns more functions, bill climbs quadratically until someone
+            notices or quotas intervene. Cost becomes an availability and
+            integrity concern at once, which is why billing alarms count as
+            security controls in serverless estates rather than finance
+            trivia.
+        - type: callout
+          tone: info
+          markdown: |
+            Labs here simulate function platforms locally, so you can break
+            triggers and roles freely. Nothing you do touches a real cloud
+            account, and every command shape transfers when it does.
+    - id: serverless-threat-surface
+      title: 'The serverless threat surface'
+      blocks:
+        - type: prose
+          markdown: |
+            Event input is untrusted input, full stop. Every trigger carries
+            attacker-influenceable data: query strings and headers on HTTP
+            events, object keys and metadata on uploads, message bodies on
+            queues. Functions that concatenate event fields into queries,
+            shell commands, or file paths reintroduce injection classes the
+            industry spent decades burying, now wearing event-driven hats.
+            Treat event payloads like form submissions from strangers,
+            validate shape, encode contextually, and never let a key name
+            become a filesystem path unexamined.
+
+            Identity flows create the second surface. Functions act through
+            an execution role, and the metadata service hands credentials for
+            that role to any code running inside the sandbox. An SSRF bug
+            letting attacker-controlled URLs reach the link-local metadata
+            address converts a minor web flaw into credential theft, so both
+            egress filtering and metadata v2-style session tokens matter.
+            Secrets injected as plaintext environment variables round out
+            the classic trio, readable by anyone who achieves code execution
+            and frequently copied into builds, logs, and screenshots.
+        - type: code
+          language: text
+          code: |
+            Surface map (audit each row per function)
+              trigger input   query/header/body/key -> validation?
+              execution role  actions + resources -> scoped per function?
+              env secrets     plaintext values -> manager + rotation?
+              egress          can fetch arbitrary URLs -> allowlist?
+              dependencies    versions -> advisory watch?
+              recursion       outputs re-entering triggers -> guard?
+        - type: quiz
+          question_id: slr-event-input-trust
+          question: 'An image-resize function builds shell commands from uploaded filenames like reports;cat etc-passwd.png. Which classification is correct?'
+          options:
+            - id: a
+              text: 'A novel cloud-only vulnerability with no precedent.'
+            - id: b
+              text: 'Classic command injection via untrusted trigger input; same defense as always, avoid shells and validate strictly.'
+            - id: c
+              text: 'Acceptable risk since filenames are metadata.'
+            - id: d
+              text: 'Provider responsibility because the runtime executes the command.'
+          answer_ids: [b]
+          explanation: >
+            Event fields inherit the web's threat model unchanged. Shelling
+            out with interpolated input fails everywhere it is tried;
+            libraries that never spawn shells plus strict filename rules
+            close it permanently.
+    - id: scopes-for-execution-roles
+      title: 'Scopes for execution roles'
+      blocks:
+        - type: prose
+          markdown: |
+            One function, one role, minimum verbs on narrow resources: the
+            sentence is short and the discipline is rare. Convenience breeds
+            shared god-roles stamped onto dozens of functions, so compromising
+            the silliest endpoint yields read across every database and write
+            across every bucket. Scoping reverses that math. The resize
+            function needs get on one incoming prefix and put on one outgoing
+            prefix; it needs no database, no secrets beyond its own, no list
+            across accounts. When each role fits on a screen, review takes
+            minutes and drift announces itself.
+
+            Audit effort drops for the same reason. A reviewer reading twelve
+            small policies finds overbreadth in seconds, while nobody
+            honestly reviews one shared mega-policy beyond its first
+            statement, so scoping improves both security and the humans.
+
+            Conditions tighten further where supported: encryption-context
+            requirements, source restrictions, tag-based access tying
+            permissions to workload identity. Deny statements carve exceptions
+            explicitly, for example blocking access to audit buckets even if
+            some future wildcard sneaks past review.
+        - type: code
+          language: json
+          code: |
+            {
+              "Effect": "Allow",
+              "Action": ["s3:GetObject", "s3:PutObject"],
+              "Resource": [
+                "arn:aws:s3:::img-src-bucket/incoming/*",
+                "arn:aws:s3:::img-dst-bucket/resized/*"
+              ]
+            }
+
+            Screen-sized by construction: two verbs, two prefixes, zero
+            databases. A compromised resize function resizes things; it
+            cannot read customer tables on the way down.
+        - type: quiz
+          question_id: slr-role-scope
+          question: 'Twelve functions share one execution role granting S3 full access because "one of them needs it". What is the sharpest critique?'
+          options:
+            - id: a
+              text: 'Shared roles are fine if the bucket uses encryption.'
+            - id: b
+              text: 'Blast radius multiplies: any function compromise inherits full store access; scope per function to the prefixes each actually touches.'
+            - id: c
+              text: 'S3 permissions do not affect serverless workloads.'
+            - id: d
+              text: 'The fix is rotating the role weekly.'
+          answer_ids: [b]
+          explanation: >
+            Role sharing couples every function's security to the weakest
+            one. Rotation does not fix overbreadth, and encryption protects
+            confidentiality at rest, not unauthorized authorized access.
+    - id: observability-for-incidents
+      title: 'Observability for incidents'
+      blocks:
+        - type: prose
+          markdown: |
+            Ephemeral compute makes post-hoc reconstruction entirely dependent
+            on what you emitted while running. Structured logs win over
+            formatted strings: JSON lines carrying request identifiers,
+            trigger metadata, outcome codes, and durations join across
+            invocations and answer questions with queries instead of eyeballs.
+            Distributed tracing stitches the journey end to end, HTTP gateway
+            to function to database call, exposing where latency and failures
+            concentrate. Metrics cover the fleet view: error rates, throttle
+            counts, concurrency ceilings, duration percentiles.
+
+            Alarms convert telemetry into page-or-sleep decisions, and two
+            belong in every baseline regardless of business domain. Error-rate
+            alarms catch broken deployments and exploitation noise alike;
+            cost and concurrency alarms catch recursive loops, runaway
+            retries, and crypto-mining freeloaders within minutes instead of
+            invoice shock at month end.
+        - type: code
+          language: json
+          code: |
+            {"ts":"2026-08-21T02:14:09Z","level":"info",
+             "req":"a9f3c1","fn":"resize","trigger":"s3:incoming/",
+             "key":"reports;cat.png","verdict":"rejected",
+             "reason":"filename failed charset rule","ms":4}
+
+            One rejected line documents an attack attempt with evidence:
+            payload shape, decision, rule name. Multiply by ten thousand and
+            querying the incident becomes trivial.
+        - type: prose
+          markdown: |
+            Log discipline includes restraint. Emitting full event bodies
+            into logs copies potentially sensitive payloads into systems
+            with different retention and access rules, turning an observability
+            stack into a shadow data lake. Record shapes, hashes, and
+            identifiers; leave bulk content in the store it already lives in.
+    - id: remediation-anatomy
+      title: 'Remediation anatomy'
+      blocks:
+        - type: prose
+          markdown: |
+            Findings change nothing; applied fixes change things, and the gap
+            between is mostly writing quality. A remediation a developer can
+            execute without a meeting contains fixed parts: the asset and
+            location down to line or resource identifier, evidence including
+            request identifiers or policy excerpts, impact phrased in business
+            consequences rather than CVE poetry, root cause stated plainly,
+            and the fix itself as concrete diff, configuration snippet, or
+            exact console path. Verification instructions follow, telling the
+            fixer how to prove the hole closed, because self-verifying
+            remediations survive handoffs.
+
+            Severity rationale earns trust by showing arithmetic: likelihood
+            times consequence with the assumptions visible. "High because the
+            exposed role can read the customers table and the endpoint accepts
+            anonymous triggers" argues better than a bare number ever will.
+
+            Keep past remediations somewhere searchable, because reused
+            structure compounds: the tenth report written from a good
+            template takes minutes and reads like the work of a larger team,
+            while template-free writing reinvents format on every finding.
+        - type: code
+          language: markdown
+          code: |
+            ## REM-0142 - resize function reads entire img-src bucket
+
+            asset   fn:resize (repo api-media, handler.py:88), role fn-resize-role
+            evidence  trail req a9f3c1..a9f3d7 show GetObject beyond /incoming/
+            impact   compromise of one public-trigger function exposes all
+                     raw media incl. pre-public uploads (est. 1.2M objects)
+            cause    role grants s3:GetObject on bucket-wide wildcard
+            fix     scope role to arn:...:img-src-bucket/incoming/* (diff attached)
+            verify   replay probe GetObject on /archive/x.jpg -> expect denied;
+                     run resize happy-path -> still passes CI job #4412
+            severity HIGH: anonymous trigger x broad read, exploit cost ~zero
+        - type: quiz
+          question_id: slr-remediation-anatomy
+          question: 'Which addition most increases the chance a remediation actually gets applied this sprint?'
+          options:
+            - id: a
+              text: 'A longer essay on the history of the vulnerability class.'
+            - id: b
+              text: 'A ready-to-apply diff plus a verification step the developer can run immediately.'
+            - id: c
+              text: 'Raising the severity number without new evidence.'
+            - id: d
+              text: 'CCing more executives on the ticket.'
+          answer_ids: [b]
+          explanation: >
+            Application friction dominates outcomes. Fix-plus-verify packages
+            reduce the task to review and merge, while escalation theater
+            adds pressure without reducing effort.
+    - id: landing-the-fixes
+      title: 'Landing the fixes'
+      blocks:
+        - type: prose
+          markdown: |
+            Remediation ends when verified, not when filed. Tracking gives
+            every finding an owner, a due date proportionate to severity, and
+            a status reviewed by a human weekly; aging items escalate
+            automatically rather than marinating. Retesting closes the loop
+            with fresh evidence from the same probes that found the issue,
+            ideally scripted so retests cost minutes and regressions announce
+            themselves when someone reopens the old wildcard next quarter.
+
+            Post-fix reviews feed prevention upstream. If three findings in a
+            quarter involved roles copied from templates, fix the template
+            and the fourth finding never exists. That habit, converting
+            recurring causes into platform defaults, is where security
+            engineering stops being ticket processing and starts compounding.
+
+            Measure closure velocity honestly as well. Median days from
+            finding to verified fix tells leadership where friction actually
+            lives, and the number moves only when someone owns removing the
+            friction rather than renaming tickets. Celebrate closed items
+            visibly; pipelines of unfinished security work teach everyone
+            that filing equals done.
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep a remediation template in the repo beside the code it
+            governs. Fixes written where developers live get merged; fixes
+            living in a distant wiki get admired.
+  cheat_sheet: |
+    # Serverless + remediation quick reference
+
+    Assumption swaps:
+        patch focus: OS -> your deps; perimeter -> trigger ACLs
+        state lives outside; scratch FS dies with invocation
+        cost alarms = security controls (loops, miners)
+
+    Surface checklist per function:
+        trigger input validated | role scoped one-function-one-role |
+        secrets via manager not env | egress allowlisted |
+        deps watched | recursion guarded
+
+    Role scoping:
+        min verbs, prefix resources, conditions where supported,
+        explicit denies for crown jewels
+
+    Observability:
+        structured logs w/ request ids; traces stitch journeys;
+        alarm on error rate + concurrency/cost
+
+    Remediation template:
+        asset+location, evidence(ids), business impact, cause,
+        fix(diff/snippet), verify step, severity w/ rationale,
+        owner + due date, retest evidence on close

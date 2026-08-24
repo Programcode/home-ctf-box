@@ -1,0 +1,352 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: threat-hunting-hypotheses
+  title: 'Threat hunting: hypotheses before queries'
+  version: 0.1.0
+  difficulty: medium
+  points: 160
+  estimated_minutes: 75
+  tags:
+    - soc
+    - threat-hunting
+    - detection-engineering
+    - analytics
+spec:
+  track: defense-cloud
+  summary: >-
+    Alerts find what rules expect; hunts go looking for everything else.
+    This module trains the hunt loop end to end. You learn why hunting and
+    alert triage reward opposite instincts, how to turn threat intel and
+    technique catalogs into candidate ideas, and how to write a hypothesis
+    specific enough to fail. Then you practice the analysis itself, stacking
+    process and network telemetry into frequency tables that make outliers
+    glow, converting results into tuned detections or justified suppressions,
+    and documenting every dead end so the next hunter starts where you
+    stopped instead of where you started.
+  objectives:
+    - Contrast hunting with alert triage and justify why hunts assume a rule missed something.
+    - Turn threat intel reports and technique catalogs into candidate hunt ideas.
+    - Write testable hypotheses with explicit data sources, observations, and falsification terms.
+    - Run frequency and stacking analyses over telemetry to surface outliers worth investigation.
+    - Convert hunt outcomes into tuned detections or justified suppressions with measured noise rates.
+    - Document hunts so findings, coverage gaps, and dead ends survive staff turnover.
+  sections:
+    - id: hunting-not-triage
+      title: 'Hunting is not triage'
+      blocks:
+        - type: prose
+          markdown: |
+            Triage starts with a claim somebody else made: a rule fired, your
+            job is deciding whether it was right. Hunting inverts the premise.
+            Nobody fired anything. You start from an assumption that matters:
+            something bad could be happening right now that no rule in the
+            building knows how to see, and if you want it found you must go
+            look on purpose. The instinct flip is real. Triage rewards fast
+            verdicts; hunting rewards slow curiosity and tolerates hours that
+            end with nothing, because proving a clean estate is also output.
+
+            Teams hunt for concrete reasons. A new technique appeared in a
+            report about your industry and no detection covers it yet. An
+            incident elsewhere made you wonder whether the same trick would
+            have slipped past your stack. Quarterly metrics show alert volume
+            concentrated on two data sources while ten more sit unexamined.
+            All three convert directly into hunt sessions with defined scope,
+            which is exactly what separates hunting from doom-scrolling logs.
+        - type: callout
+          tone: info
+          markdown: |
+            The honest unit of hunting progress is not "malware found". It is
+            a question answered with evidence: this technique, this dataset,
+            this time window, result recorded. Most sessions answer clean.
+            Write those down too, because documented clean sweeps are how
+            auditors and future incidents know where visibility actually ends.
+    - id: from-intel-to-ideas
+      title: 'From intel to hunt ideas'
+      blocks:
+        - type: prose
+          markdown: |
+            Raw intel rarely arrives as a query, and pasting vendor hashes
+            into a search box is not hunting. The conversion step turns
+            narrative material into candidate questions by extracting the
+            behavior underneath the story. A report describing attackers who
+            renamed their tool to imitate updates contains a behavior:
+            binaries masquerading under trusted names. Technique catalogs
+            such as MITRE ATT&CK help here, because each entry describes a
+            generic pattern (masquerading, scheduled task persistence,
+            credential dumping) independent of any single group's cosmetics.
+
+            Keep an idea backlog rather than hunting whatever you read last.
+            One line per idea is enough at capture time: behavior, suspected
+            data source, why now. Weekly, rank the list by two axes, how much
+            damage the behavior could do in your environment and how likely
+            your current detections would notice it. Ideas scoring high on
+            both become this month's sessions. The discipline sounds dull
+            precisely because it works; inspiration remains welcome but no
+            longer load-bearing.
+        - type: code
+          language: text
+          code: |
+            Intel note -> behavior -> candidate hunt
+
+            "APT-41 used renamed 7z.exe to stage archives"
+              -> binary masquerade via renaming trusted tools
+              -> stack all process names against known-good baselines;
+                 flag executables whose names match system tools but whose
+                 paths or hashes do not
+
+            "Ransom crew moved laterally during backup windows"
+              -> abuse of maintenance schedules as cover
+              -> compare interactive logons against backup job calendars;
+                 investigate logons inside windows nobody should work in
+        - type: prose
+          markdown: |
+            Notice what both candidates share: neither mentions an indicator
+            of compromise you could paste anywhere. They name observable
+            behavior plus the dataset that would reveal it. That shape is the
+            raw material of hypotheses, and the next section gives it exact
+            grammar so queries can be judged before they are written.
+    - id: testable-hypotheses
+      title: 'Testable hypotheses'
+      blocks:
+        - type: prose
+          markdown: |
+            A hunt hypothesis is a claim about your environment specific
+            enough that evidence could prove it wrong. Three parts do the
+            work. The data part names sources and time bounds: endpoint
+            process events, thirty days. The observation part states what
+            would appear if the suspicion were true: service binaries running
+            from user-writable paths. The falsification part defines failure
+            honestly: after stacking every service path, none resolve outside
+            system directories, so the hypothesis dies and the session closes
+            with a negative result worth recording.
+
+            Vague hypotheses waste sessions because anything can count as a
+            hit. "Maybe we have malware" matches every log line ever; "service
+            executables living outside trusted paths" matches perhaps a dozen
+            rows, each checkable in minutes. Precision is generosity toward
+            your future self.
+
+            Write the hypothesis before touching data, never after.
+            Hypotheses composed mid-query drift toward whatever the query
+            already found, and a hunt that cannot fail cannot teach anyone
+            anything either.
+        - type: code
+          language: text
+          code: |
+            Hypothesis template, filled:
+
+              BECAUSE     industry reporting shows masquerade-heavy intrusions
+              I BELIEVE   some long-running processes in our fleet may live
+                          outside trusted executable locations
+              DATA        EDR process inventory, last 30 days, all hosts
+              OBSERVATION process images resolving under /tmp, /home,
+                          C:\Users\*, or C:\Windows\Temp\*
+              FALSIFIED   stacked image paths show zero entries outside
+                          trusted prefixes after deduplication
+              NEXT IF HIT pull lineage per hit; classify admin tooling vs
+                          unknown; open case per unknown
+        - type: quiz
+          question_id: thh-hypothesis-testability
+          question: 'Which rewrite turns "hunt for weird PowerShell" into a testable hypothesis?'
+          options:
+            - id: a
+              text: 'Search all logs for the string powershell and review everything.'
+            - id: b
+              text: 'Check whether any 4104 script block events reference public IP download URLs, over 30 days of endpoint logs; zero hits falsifies it.'
+            - id: c
+              text: 'Ask the EDR vendor whether PowerShell looks suspicious lately.'
+            - id: d
+              text: 'Wait for an antivirus alert mentioning PowerShell.'
+          answer_ids: [b]
+          explanation: >
+            Testability needs named data, bounded scope, an expected
+            observation, and a condition that kills the hypothesis. Option b
+            carries all four; the others are searches, opinions, or waiting.
+    - id: running-the-hunt
+      title: 'Running the hunt'
+      blocks:
+        - type: prose
+          markdown: |
+            Analysis begins with counting, not with genius. Frequency
+            analysis, sometimes called stacking, groups events by a field and
+            sorts by count, exploiting the fact that legitimate estates are
+            repetitive. Ten thousand processes and nine thousand nine hundred
+            share forty names; the interesting rows sit in the tail where
+            counts equal one or two. Outliers are leads, not verdicts. Each
+            one earns a short investigation: pull lineage, check signature
+            and path, ask whether any business function explains it, then
+            classify known-benign, unknown, or malicious.
+
+            Stack different fields until one frame makes sense. Process names
+            catch masquerades; parent-child pairs catch abused trust; command
+            line verbs catch collection behaviors like whoami followed by net
+            group; destination ports catch beaconing shapes. Two frames in
+            agreement promote a lead quickly, which is why analysts keep a
+            small notebook of pairings that worked before.
+        - type: code
+          language: bash
+          code: |
+            $ jq -r 'select(.event.action=="process_start") | .process.name' \
+                edr-week.jsonl | sort | uniq -c | sort -rn | tail -6
+               2 rundll32.exe
+               2 wscript.exe
+               1 msbuild.exe
+               1 regsvr32.exe
+               1 installutil.exe
+               1 certutil.exe
+
+            # same frame, parent-aware: pairs beat names
+            $ jq -r 'select(.event.action=="process_start") |
+                [.process.parent_name, .process.name] | @tsv' edr-week.jsonl \
+                | sort | uniq -c | sort -rn | awk '$1<=2'
+              1 winword.exe	rundll32.exe
+              1 w3wp.exe	certutil.exe
+        - type: prose
+          markdown: |
+            Both tails earned attention, but only the paired view told a
+            story: a web server process invoking certificate tooling smells
+            like archive extraction or exfiltration staging, while office
+            spawning rundll32 repeats the document-lure pattern from the
+            telemetry module. Follow each lead to its lineage, record the
+            classification, and move on without ceremony. Speed comes from
+            deciding quickly which ninety percent is furniture.
+        - type: quiz
+          question_id: thh-stack-count-value
+          question: 'During stacking, why do rows with tiny counts deserve first attention?'
+          options:
+            - id: a
+              text: 'Small counts indicate logging errors that must be fixed immediately.'
+            - id: b
+              text: 'Legitimate fleets are repetitive, so rarity marks behavior your baseline cannot explain yet.'
+            - id: c
+              text: 'Attack tools always run thousands of times per hour.'
+            - id: d
+              text: 'Rare events compress better for storage.'
+          answer_ids: [b]
+          explanation: >
+            Stacking exploits repetition: normal business produces tall bars.
+            Rarity is not malice but it is cheap curiosity, and rare-plus-
+            suspicious-pair is the classic promotion criterion.
+    - id: tuning-from-results
+      title: 'Tuning from results'
+      blocks:
+        - type: prose
+          markdown: |
+            Hunts pay rent twice. First, a hit may become an incident. Second,
+            and far more often, the session teaches you how your own noise is
+            manufactured, and that knowledge feeds detection engineering. When
+            a hypothesis surfaces recurring benign activity, say backup agents
+            spawning archive tools nightly, you hold three options. Write a
+            detection that fires only when context differs from the learned
+            norm. Suppress the specific pattern with an owner and expiry
+            attached. Or accept it and record why. Choosing deliberately is
+            the whole craft; drifting accidentally is how SOCs drown.
+
+            Measure the outcome or the tuning never improves. Before and after
+            numbers turn arguments into arithmetic: false positives per week
+            for this rule, minutes per alert, hits retained. A suppression
+            without a review date is a promise to forget, so every quieted
+            pattern gets revisited when its context changes, and suppressed
+            volume gets reported alongside detection volume so nobody mistakes
+            silence for safety.
+        - type: code
+          language: text
+          code: |
+            Rule R-118 "archive tool spawned by server role", 4 weeks:
+              before tuning : 212 firings, 209 benign backup runs, 0 hits
+              change        : require absence of backup-agent parent within
+                              the same process tree AND weekday != nightly window
+              after tuning  : 11 firings, 8 reviewed benign (ad-hoc zips),
+                              3 escalated, 1 confirmed staging for exfil
+
+            Suppression ledger entry:
+              pattern       : parent=backupd child=(tar|7z|zip)
+              justification : nightly job, ticket OPS-4412
+              owner         : j.reyes
+              expiry        : 2027-02-01, re-review with backup migration
+        - type: quiz
+          question_id: thh-suppression-vs-detection
+          question: 'A hunt finds developers occasionally run port scanners on production subnets during approved drills. What is the strongest outcome?'
+          options:
+            - id: a
+              text: 'Suppress all port scanning alerts permanently.'
+            - id: b
+              text: 'Tune detection to fire when scans occur outside drill windows or without a matching approval record.'
+            - id: c
+              text: 'Delete the detection since scanners are obviously normal.'
+            - id: d
+              text: 'Fire the alert at every scan and triage manually forever.'
+          answer_ids: [b]
+          explanation: >
+            Context-aware logic keeps true coverage while deleting measured
+            noise. Blanket suppression hides real attacks, blanket alerting
+            burns analysts, and the middle path encodes what the hunt learned.
+    - id: documenting-hunts
+      title: 'Documenting hunts'
+      blocks:
+        - type: prose
+          markdown: |
+            Undocumented hunting evaporates. Six months later nobody recalls
+            which techniques were checked, which datasets supported them, or
+            why a strange suppression exists, and new analysts redo finished
+            work blind. The fix costs fifteen minutes per session: a hunt log
+            entry with fixed fields, stored wherever the team already reads.
+            Fill it even when the answer was boring, especially then, because
+            negative results define the actual boundary of your visibility
+            and feed compliance conversations you cannot yet imagine.
+
+            Good entries read like experiment notes rather than diaries. State
+            the question, the data, the method, the outcome, and the follow-up
+            decision with dates and owners. Link artifacts, saved queries,
+            dashboards, tickets, so the next person reproduces in minutes
+            instead of archaeology. Over a quarter the log itself becomes a
+            map of coverage, and gaps between entries advertise where hunting
+            has never reached, which conveniently writes next month's plan.
+
+            Review the log quarterly during detection engineering syncs so
+            stale queries retire and repeated findings graduate into
+            permanent dashboards rather than living as one-off scripts.
+        - type: code
+          language: markdown
+          code: |
+            ## Hunt H-2026-031 - masqueraded service binaries
+            date        2026-08-19 (4h)  analyst m.okafor
+            hypothesis  long-running services may run from user-writable paths
+            data        edr process inventory 30d, 1,942 hosts
+            method      stack Image paths; diff vs trusted prefix list v4
+            outcome     2 hits -> both internal tooling, ticket CHG-881;
+                        0 malicious; hypothesis falsified for this window
+            outputs     saved query svc-stack-v2; dashboard fleet-exec-paths
+            decisions   add prefix drift detection (DET-204), owner d.kim,
+                        due 2026-09-15
+            gaps        network appliances lack process telemetry entirely
+        - type: callout
+          tone: tip
+          markdown: |
+            End every entry with one sentence starting "next time". Sessions
+            chain into investigations across months, and the sentence is the
+            handle tomorrow's you will grab first.
+  cheat_sheet: |
+    # Threat hunting quick reference
+
+    Hypothesis grammar:
+        BECAUSE <trigger: intel, incident, gap metric>
+        I BELIEVE <specific suspicion about THIS environment>
+        DATA <source(s)> + <time bounds>
+        OBSERVATION <what a hit looks like>
+        FALSIFIED <what result kills it>
+
+    Stacking kit:
+        jq -r '<field>' events.jsonl | sort | uniq -c | sort -rn
+        jq -r '[parent, child] | @tsv' ... | sort | uniq -c | sort -rn
+        stack: process names, parent pairs, cmdline verbs, dst ports
+
+    Outcome menu:
+        hit        -> case + lineage capture
+        benign     -> tune detection OR suppress w/ owner + expiry
+        nothing    -> record coverage claim anyway
+
+    Hunt log fields:
+        id, date/analyst, hypothesis, data, method, outcome,
+        outputs (queries/dashboards), decisions w/ owners, gaps

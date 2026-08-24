@@ -1,0 +1,349 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: dependency-risk-sbom
+  title: 'Dependencies, SBOMs, and provenance'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - devsecops
+    - dependencies
+    - sbom
+    - slsa
+    - provenance
+spec:
+  track: defense-cloud
+  summary: >-
+    Most of every modern application is code nobody on the team wrote, and
+    that is fine until you cannot answer questions about it. This module
+    quantifies dependency risk and its classic failure modes from typosquats
+    to hijacked maintainers, then teaches lockfile discipline with integrity
+    hashes so identical inputs stay identical. You learn what software bills
+    of materials contain and how SPDX and CycloneDX differ, why signed build
+    provenance beats trusting artifacts on faith, and how to triage a new
+    advisory using reachability and VEX-style status instead of panic
+    patching everything at midnight.
+  objectives:
+    - Quantify dependency dominance in application code and name the recurring failure modes.
+    - Pin builds using lockfiles and integrity hashes so resolution stays reproducible.
+    - Generate a machine-readable SBOM and describe what SPDX and CycloneDX capture.
+    - Explain how attestations bind artifacts to builds and why verification beats blind trust.
+    - Triage advisories using reachability analysis and VEX-style statuses.
+    - Run a safe dependency update loop with grouped bumps, test gates, and staged rollout.
+  sections:
+    - id: most-of-your-code-is-someone-elses
+      title: 'Most of your code is someone else'
+      blocks:
+        - type: prose
+          markdown: |
+            Count honestly and humility follows: typical applications carry
+            hundreds of direct dependencies and thousands of transitive ones,
+            frequently outweighing first-party code by ratios of ten to one
+            or worse. Each of those packages is a stranger with commit access
+            to your runtime. Most strangers behave; the failure modes repeat
+            often enough to name. Typosquatting counts on tired fingers
+            typing cross-env versus crossenv. Maintainer hijacks take over
+            legitimate names through stolen accounts or abandoned ownership,
+            then ship a malicious update that auto-installs everywhere.
+            Protestware and broken releases prove availability risk needs no
+            attacker at all.
+
+            Install scripts deserve special respect in JavaScript ecosystems:
+            postinstall hooks execute arbitrary code during npm install,
+            meaning the compromise lands before any of your code runs. The
+            defense inventory follows directly: pin what you can, restrict
+            scripts, watch what you already run, verify where things came
+            from, and keep an inventory so answering "are we affected"
+            takes minutes rather than days.
+        - type: quiz
+          question_id: dep-transitive-share
+          question: 'Your app has 40 direct dependencies. Why does patching only those leave most supply-chain risk untouched?'
+          options:
+            - id: a
+              text: 'Transitive dependencies usually outnumber direct ones by an order of magnitude and share the same runtime.'
+            - id: b
+              text: 'Transitive dependencies execute on different machines.'
+            - id: c
+              text: 'Direct dependencies never contain vulnerabilities.'
+            - id: d
+              text: 'Package managers auto-patch transitive trees nightly.'
+          answer_ids: [a]
+          explanation: >
+            The tree beneath your manifest carries most third-party code.
+            Risk lives wherever code executes, which includes every level of
+            the graph, not just the top.
+    - id: lockfiles-and-integrity
+      title: 'Lockfiles and integrity'
+      blocks:
+        - type: prose
+          markdown: |
+            Manifests express intentions; lockfiles pin outcomes. Version
+            ranges in package manifests resolve freshly on machines without
+            locks, and resolution drift means two builds of one commit can
+            contain genuinely different code, one clean and one poisoned.
+            Committing lockfiles converts that lottery into a contract: every
+            environment installs exactly the versions recorded, including
+            the full transitive closure nobody reviews manually.
+
+            Integrity hashes complete the guarantee. Lockfiles record content
+            hashes per package, installers verify them, and stricter setups
+            refuse any package lacking a hash or force hash-checking across
+            the resolve. Registry-side mirrors and private proxies add
+            allowlisting between your builds and the public internet, turning
+            dependency confusion attacks into connection errors instead of
+            incidents. Disabling lifecycle scripts where practical closes the
+            postinstall door; where packages genuinely need builds, run them
+            under review with an explicit allowlist rather than by default.
+        - type: code
+          language: text
+          code: |
+            $ git diff package-lock.json | grep -A2 '"node-fetch"'
+                "node-fetch": {
+                  "version": "2.6.1",
+                  "integrity": "sha512-aBcD..."
+            -
+            -           "version": "2.7.0",
+            -           "integrity": "sha512-9XyZ..."
+
+            A lockfile diff is a security decision rendered in text: version
+            moved AND integrity changed, reviewable like any other change.
+
+            $ pip install --require-hashes -r requirements.txt
+            ERROR: package requests==2.31.0 has no hash -- aborting
+        - type: prose
+          markdown: |
+            Treat lockfile changes as first-class pull request content.
+            Reviews glancing past thousands of generated lines miss exactly
+            where supply-chain attacks live, so tooling helps here: bots that
+            annotate dependency diffs, checks that fail on new postinstall
+            scripts, and CI jobs verifying lockfile-manifest agreement all
+            convert silent drift into visible conversation.
+    - id: inventories-you-can-query
+      title: 'Inventories you can query'
+      blocks:
+        - type: prose
+          markdown: |
+            An SBOM answers one question mechanically: what exactly is inside
+            this artifact? Formats standardize the answer. SPDX, born in
+            licensing circles, models packages, versions, checksums, license
+            expressions, and relationships such as depends-on and
+            is-a-plugin-for. CycloneDX grew from security needs and pairs the
+            component inventory with vulnerability and provenance hooks,
+            making it convenient for pipeline consumption. Either beats
+            tribal knowledge, because the alternative to a machine-readable
+            bill is a shell script archaeology project running during your
+            next incident.
+
+            Generation belongs in the pipeline, attached to whatever you
+            build: containers scanned as images, applications scanned from
+            source plus lockfiles, binaries from installed evidence. Publish
+            SBOMs alongside artifacts with the same retention, since last
+            year's release deserves last year's inventory. Consumers range
+            from advisory matching to license compliance to due diligence,
+            but the killer use case is incident response speed, measured in
+            the gap between an advisory dropping and knowing whether you
+            ship the affected component.
+        - type: code
+          language: bash
+          code: |
+            # generate once per build (tool examples: syft, cdxgen)
+            $ syft packages dir:app -o cyclonedx-json > sbom.cdx.json
+
+            $ jq -r '.components | length' sbom.cdx.json
+            412
+
+            $ jq -r '.components[] | "\(.name)@\(.version)"' sbom.cdx.json \
+                | sort | head -3
+            lodash@4.17.20
+            minimist@1.2.5
+            node-fetch@2.7.0
+
+            Four hundred twelve components inventoried in seconds. When
+            CVE-2026-XXXX lands against node-fetch <3, "are we exposed?"
+            becomes one jq query instead of a weekend.
+        - type: callout
+          tone: info
+          markdown: |
+            An SBOM is an inventory, not a security control by itself. Value
+            arrives when something consumes it automatically: advisory feeds,
+            policy gates, incident queries. Generate-and-ignore produces
+            stale paperwork with extra steps.
+    - id: provenance-beats-blind-trust
+      title: 'Provenance beats blind trust'
+      blocks:
+        - type: prose
+          markdown: |
+            Knowing what is inside still leaves who built it and how.
+            Provenance closes that gap with signed statements binding an
+            artifact to its origin: which repository at which commit, which
+            builder ran it, what inputs went in. Attestations generalize the
+            idea to arbitrary claims, test results and scan verdicts included,
+            each signed by the system making it. Verification then happens at
+            deploy time: policy asks for proof, the artifact presents
+            signatures, and unproven builds fail closed instead of shipping
+            on vibes.
+
+            Frameworks like SLSA describe maturity levels along a ladder:
+            from documented builds, through tamper-resistant automated
+            builders, toward hermetic environments where provenance is
+            non-falsifiable because nothing else could have produced the
+            bytes. Few estates need the top immediately; nearly everyone
+            benefits from the middle, where CI signs what it built and
+            registries reject unsigned pushes. The pattern mirrors TLS
+            history perfectly, trust migrating from network location toward
+            cryptographic identity.
+
+            Start with release artifacts only, since extending attestation to
+            every pull-request build can wait until the signing habit holds
+            under real release pressure.
+        - type: code
+          language: bash
+          code: |
+            # deploy gate (tools: cosign et al.)
+            $ cosign verify-attestation \
+                --type https://slsa.dev/provenance/v1 \
+                --policy prod-policy.yaml registry.local/app@sha256:9f8e...
+            Verification succeeded for image reference
+              registry.local/app@sha256:9f8e...
+              predicate: builder id github.com/our-org/.github/workflows/release.yml@refs/tags/v3.2.1
+              subject  : sha256:9f8e... matches attestation signature
+
+            Policy satisfied: built by our release workflow, from a tag,
+            signed by the builder key. Anything else fails closed.
+        - type: quiz
+          question_id: dep-provenance-purpose
+          question: 'What does a verified provenance attestation tell you that a checksum alone cannot?'
+          options:
+            - id: a
+              text: 'That the software contains no vulnerabilities.'
+            - id: b
+              text: 'Which builder and source produced these exact bytes, signed, so trust rests on process identity rather than possession.'
+            - id: c
+              text: 'That licenses permit commercial use.'
+            - id: d
+              text: 'That the artifact will pass staging tests.'
+          answer_ids: [b]
+          explanation: >
+            Checksums prove integrity given prior knowledge of the true
+            value. Provenance proves origin cryptographically, answering how
+            these bytes came to exist, which is the question checksums were
+            never designed to answer.
+    - id: advisories-without-panic
+      title: 'Advisories without panic'
+      blocks:
+        - type: prose
+          markdown: |
+            Advisory day produces two kinds of organizations: those who query
+            their inventory and those who rebuild everything while hoping.
+            Structured triage starts with identification, matching affected
+            package ranges against your SBOMs, then escalates to the harder
+            and more honest question: does our usage reach the vulnerable
+            code? Reachability separates libraries merely present from paths
+            actually invoked, import graphs and call analysis providing
+            evidence either way. A vulnerable function never called by your
+            code paths justifies waiting for a scheduled update; a hot path
+            touching attacker input justifies emergency rollout tonight.
+
+            VEX-style statuses give the conversation vocabulary: affected,
+            not_affected with justification, fixed, under_investigation.
+            Publishing such statuses upstream and consuming them downstream
+            shrinks industry-wide panic loops, because downstream consumers
+            stop rebuilding over components they never invoke. Internally,
+            record the same reasoning per finding so auditors see judgment
+            rather than absence. Time-to-verdict matters as much as the
+            verdict itself, so keep the matching queries scripted and
+            rehearsed before the next advisory lands.
+        - type: code
+          language: bash
+          code: |
+            # 1) who ships it?
+            $ jq -r '.components[] | select(.name=="node-fetch") | .version' \
+                sbom.cdx.json
+            2.7.0
+
+            # 2) do we reach it?
+            $ rg -l "from ['\"]node-fetch|require\(['\"]node-fetch" src/ | head
+            src/lib/http.ts
+
+            $ rg -n "node-fetch" src/lib/http.ts | head -2
+            14:import fetch from "node-fetch";
+            88:  return fetch(webhookUrl, opts);   # webhook URL = user input
+
+            Present AND reachable AND touches user-controlled URLs:
+            this triage ends with a same-day upgrade, not a ticket queue.
+        - type: quiz
+          question_id: dep-vex-reachability
+          question: 'An advisory flags a parser bug in a library your service includes but never imports anywhere. What is the defensible VEX-style status?'
+          options:
+            - id: a
+              text: 'Affected, because presence equals exposure.'
+            - id: b
+              text: 'Not_affected with justification: component unused, no execution path reaches the flawed parser; scheduled upgrade anyway.'
+            - id: c
+              text: 'Fixed, since updating is easy.'
+            - id: d
+              text: 'Under investigation forever.'
+          answer_ids: [b]
+          explanation: >
+            Statuses must reflect evidence about execution paths. Unused
+            components justify documented non-impact plus routine upgrade
+            hygiene, converting panic-driven rebuilds into reasoned tickets.
+    - id: update-discipline
+      title: 'Update discipline'
+      blocks:
+        - type: prose
+          markdown: |
+            Safe updating is a loop, not an event. Automation proposes bumps
+            continuously, grouped sensibly: minor and patch waves ride normal
+            trains while major versions get individual attention with
+            changelogs read. Every proposal passes identical gates, full test
+            suites plus integration checks, and merges land behind staged
+            rollout with rollback rehearsed rather than assumed. The rhythm
+            matters more than any single version: teams updating weekly
+            absorb small diffs cheaply, while annual upgrades confront
+            months of entangled changes at maximum stress precisely when
+            an advisory demands speed. Version discipline extends here as
+            well: bumps arrive as single-purpose changes, never bundled with
+            feature work that complicates rollback or blame assignment.
+
+            Emergency bumps deserve their own playbook, exercised calmly
+            during drills: identify affected services from inventory, apply
+            the patched version with expedited review, verify via the same
+            gates, document deviation rationale, and schedule the follow-up
+            that returns to normal cadence. Teams holding this loop respond
+            to advisory day with a shrug and a merge, which is the entire
+            aspiration of DevSecOps expressed as calendar hygiene.
+        - type: callout
+          tone: tip
+          markdown: |
+            Track two numbers per service: time from advisory publication
+            to inventory verdict, and time from verdict to deployed fix.
+            Improving both beats arguing about severity scores forever.
+  cheat_sheet: |
+    # Dependencies + SBOM + provenance quick reference
+
+    Failure modes to know:
+        typosquat, maintainer hijack, abandoned dep, protestware,
+        dependency confusion (internal name on public registry),
+        postinstall script execution
+
+    Reproducibility kit:
+        commit lockfiles; integrity hashes verified on install
+        --require-hashes / strict engines fail on hashless packages
+        review lockfile diffs as real PR content
+
+    SBOM:
+        SPDX (licensing heritage) vs CycloneDX (security heritage)
+        generate per build; attach + retain with artifacts
+        incident question = one query: jq select(.name==...)
+
+    Provenance ladder (SLSA-flavored):
+        documented -> automated signed builders -> hermetic/non-falsifiable
+        deploy-time verify-attestation; unsigned fails closed
+
+    Advisory triage:
+        match range via SBOM -> reachability (imports/call paths) ->
+        VEX-ish status w/ justification -> scheduled or emergency path
+        track: time-to-verdict + time-to-fix

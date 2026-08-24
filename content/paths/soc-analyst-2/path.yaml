@@ -1,0 +1,32 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: soc-analyst-2
+  title: 'SOC Analyst II'
+  version: 0.1.0
+  difficulty: medium
+  points: 470
+  estimated_minutes: 220
+  tags:
+    - soc
+    - threat-hunting
+    - endpoint
+    - dfir
+    - detection-engineering
+spec:
+  track: defense-cloud
+  summary: >-
+    The intermediate defensive track, for analysts who already triage alerts
+    and now want to work cases like an investigator. You learn which endpoint
+    event sources prove what, practice turning intel into testable hunting
+    hypotheses whose results tune tomorrow's detections, and pick up the
+    memory and disk artifact basics that turn a mystery host into a dated
+    narrative. Every module ends in hands-on sweeps with stock tooling, and
+    the path closes in the quiet-persistence room, where four planted
+    artifacts wait for exactly the habits these modules build.
+  modules:
+    - slug: endpoint-telemetry-foundations
+    - slug: threat-hunting-hypotheses
+    - slug: memory-disk-artifact-basics
+  capstones:
+    - quiet-persistence
