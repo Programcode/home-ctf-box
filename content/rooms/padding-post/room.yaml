@@ -1,0 +1,92 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: padding-post
+  title: 'Padding Post'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 45
+  tags: [aes, cbc, padding-oracle, cryptography]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    Postmaster's delivery API decrypts AES-CBC envelopes and reports only
+    whether the padding was well formed. That single boolean is a
+    Vaudenay padding oracle. You will craft modified ciphertexts, read
+    the server's yes or no like a side channel, and decrypt the flag one
+    byte at a time without ever holding the key.
+  objectives:
+    - 'Explain how PKCS#7 padding validity leaks plaintext through CBC decryption.'
+    - 'Implement the byte-at-a-time CBC padding oracle attack from scratch.'
+    - 'Decrypt the per-session flag blocks using only oracle booleans.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Isolated Flask target on the room network. The decrypt endpoint is deliberately not rate limited so the adaptive oracle attack stays teachable; egress is default-deny and the service holds only synthetic data.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: strip-the-padding
+      title: 'Decrypt the envelope through the oracle'
+      prompt: >-
+        Fetch the sealed envelope from GET /api/message, then use POST
+        /api/decrypt (it answers only with valid_padding true or false)
+        to run the classic byte-at-a-time CBC padding oracle attack.
+        Recover the envelope plaintext and submit the FLAG value inside.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'The oracle checks only the final block of what you submit. Send a forged block R followed by an original data block Cn and the answer tells you about R xor D(Cn).'
+        - cost: 10
+          text: 'For each target block, forge the tail so decrypted padding equals j bytes of value j, starting at j=1. When R[16-j] makes it valid, D[16-j] = R[16-j] xor j.'
+        - cost: 25
+          text: 'Plaintext of the block is then P[16-j] = D[16-j] xor Cprev[16-j], where Cprev is the preceding ciphertext block. Here ct block 0 hides the known banner, so attack blocks 1 and 2 and chain each against its preceding ct block. Verify ambiguous hits by flipping R[15-j] and re-querying.'
+      solution: |
+        1. GET http://target:8000/api/message returns iv_hex and ct_hex.
+           The plaintext is a 16-byte banner block ("PADDINGPOST-V1::")
+           followed by the PKCS#7-padded flag, three AES blocks total.
+        2. Understand the oracle. POST /api/decrypt {"ct": hex} runs AES-CBC
+           decryption under the fixed session key and IV and answers
+           {"valid_padding": bool} based on the PKCS#7 bytes of the last
+           decrypted block. Nothing else is revealed. This is the
+           Vaudenay setup: a correctness check that becomes a decryption
+           side channel.
+        3. For each data block C_n (blocks 1 and 2), recover its
+           intermediate value D = AES_decrypt(C_n) byte by byte from the
+           right:
+           a. Keep an array R of 16 bytes. Positions 16-j+1..15 are set
+              so the forged tail decrypts to j repeated: R[k] = D[k] xor j
+              for already-known k.
+           b. Try all 256 values g at position 16-j, query oracle(R || C_n),
+              until valid_padding is true. At that moment the last j
+              decrypted bytes equal j...j, so
+              D[16-j] = g xor j.
+           c. For j == 1 disambiguate accidental longer paddings: flip
+              R[14] (xor 0xFF) and re-query. A genuine 0x01 pad stays
+              valid because byte 14 is outside a 1-byte pad; a lucky
+              0x02 0x02 breaks. Undo the flip before continuing.
+        4. Convert intermediates to plaintext: P_n[i] = D[i] xor C_{n-1}[i],
+           chaining each data block against the ct block before it (block
+           1 chains against ct block 0). If you also crack block 0 with
+           the IV as its predecessor you will recover the banner.
+        5. Concatenate P_1 and P_2, strip the PKCS#7 padding (the tail is
+           0x06 * 6 for a 26-byte flag), and read FLAG{...}. Submit it.
+        6. Sanity check: attack block 0 against the IV first if you want
+           to see PADDINGPOST-V1:: come back before trusting the flag
+           blocks, or simply verify your recovered flag matches the FLAG
+           shape.
+      validator:
+        type: per_session_flag

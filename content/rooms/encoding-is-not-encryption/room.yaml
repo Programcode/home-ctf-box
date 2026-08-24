@@ -1,0 +1,75 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: encoding-is-not-encryption
+  title: 'Encoding Is Not Encryption'
+  version: 1.0.0
+  difficulty: beginner
+  points: 75
+  estimated_minutes: 20
+  tags: [encoding, base64, hex, rot13, hashing]
+spec:
+  track: crypto-binary
+  type: guided
+  summary: >-
+    The Meridian Archive training desk wraps its practice secret in a
+    stack of reversible encodings. You will peel base64 and hex layers,
+    undo a rot13 pass with plain Python tooling, use a hash identifier
+    to tell digest formats apart, and learn why none of these steps are
+    encryption.
+  objectives:
+    - 'Peel a layered base64, hex, rot13 chain down to the plaintext flag.'
+    - 'Identify MD5, SHA-1, and SHA-256 digests by length and character set.'
+    - 'Explain why encodings and hashes are not encryption.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Flask training service on the room network; every exercise is offline decoding against data it serves itself.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: peel-the-layers
+      title: 'Decode the sealed archive blob'
+      prompt: >-
+        Fetch the sealed blob from the training desk at GET /api/archive,
+        peel each encoding layer in the right order until plaintext falls
+        out, and submit the FLAG value hidden inside.
+      points: 75
+      hints:
+        - cost: 0
+          text: 'Work from the outside in. The manifest names each layer; the outermost one is applied last, so you undo it first.'
+        - cost: 10
+          text: 'In Python: base64.b64decode(blob) gives hex text, bytes.fromhex(...) gives more base64, then b64decode again, then codecs.decode(s, "rot13").'
+        - cost: 25
+          text: 'Full chain in one line after fetching blob: codecs.decode(base64.b64decode(bytes.fromhex(base64.b64decode(blob).decode())).decode(), "rot13") prints FLAG{...}.'
+      solution: |
+        1. GET http://target:8000/api/archive. The JSON carries "blob"
+           (the sealed value) plus a manifest naming the four layers as
+           rot13 -> base64 -> hex -> base64, outermost last.
+        2. Undo layer 4 (base64):
+           python3 -c "import sys,base64;print(base64.b64decode(sys.argv[1]))" <blob>
+           The result is a long lowercase hex string.
+        3. Undo layer 3 (hex): bytes.fromhex(that string) yields ASCII
+           that is visibly another base64 alphabet run.
+        4. Undo layer 2 (base64): base64.b64decode(...).decode(). The
+           output still reads like gibberish because layer 1 scrambled
+           the letters.
+        5. Undo layer 1 (rot13): codecs.decode(s, "rot13"). rot13 maps
+           each letter to the letter 13 places on (A<->N, B<->O), so
+           applying it twice returns the original text and digits and
+           braces pass through untouched. FLAG{...} appears.
+        6. Submit the decoded FLAG value. It matches this session's flag
+           exactly; nothing was ever encrypted, only dressed up.
+      validator:
+        type: per_session_flag
