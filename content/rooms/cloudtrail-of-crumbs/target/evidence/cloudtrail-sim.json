@@ -1,0 +1,238 @@
+{
+  "logName": "sim-cloudtrail/nimbus-prod",
+  "caseId": "IR-2026-08-19-04",
+  "disclosure": "Deterministic simulated audit log for training. Event names, ARNs, and the sim.* namespace imitate cloud audit trail conventions; no real cloud account exists here.",
+  "events": [
+    {
+      "eventId": "ev-0001",
+      "eventTime": "2026-08-18T21:04:11Z",
+      "eventName": "list_objects",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": { "bucket": "nimbus-prod-backups" },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0002",
+      "eventTime": "2026-08-18T21:06:40Z",
+      "eventName": "get_object",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "nightly/nightly-2026-08-18.tar.gz"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0003",
+      "eventTime": "2026-08-18T21:31:02Z",
+      "eventName": "put_object",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "nightly/manifest-2026-08-18.json"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0004",
+      "eventTime": "2026-08-19T01:58:27Z",
+      "eventName": "list_objects",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": { "bucket": "nimbus-prod-backups" },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0005",
+      "eventTime": "2026-08-19T02:47:03Z",
+      "eventName": "get_object",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "203.0.113.66",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "nightly/nightly-2026-08-19.tar.gz"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0006",
+      "eventTime": "2026-08-19T02:49:56Z",
+      "eventName": "assume_role",
+      "eventSource": "sim.iam",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "203.0.113.66",
+      "requestParameters": {
+        "roleArn": "arn:sim:iam::111122223333:role/log-archive-reader",
+        "roleSessionName": "logsync-2211"
+      },
+      "responseElements": {
+        "assumedRoleUser": "arn:sim:iam::111122223333:assumed-role/log-archive-reader/logsync-2211",
+        "credentials": { "accessKeyId": "ASIMSIMPTEMP2211", "type": "session" }
+      }
+    },
+    {
+      "eventId": "ev-0007",
+      "eventTime": "2026-08-19T02:52:19Z",
+      "eventName": "create_access_key",
+      "eventSource": "sim.iam",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "sessionIssuerUserName": "ci-deployer",
+        "invokedBy": "logsync-2211",
+        "accessKeyId": "ASIMSIMPTEMP2211"
+      },
+      "sourceIPAddress": "203.0.113.66",
+      "requestParameters": { "userName": "backup-archiver" },
+      "responseElements": {
+        "accessKey": {
+          "accessKeyId": "AKIASIMPERSIST77",
+          "status": "Active",
+          "userName": "backup-archiver",
+          "createDate": "2026-08-19T02:52:19Z"
+        }
+      }
+    },
+    {
+      "eventId": "ev-0008",
+      "eventTime": "2026-08-19T02:55:44Z",
+      "eventName": "get_object",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "backup-archiver",
+        "accessKeyId": "AKIASIMPERSIST77"
+      },
+      "sourceIPAddress": "203.0.113.66",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "db/postgres-snapshot-latest.dump"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0009",
+      "eventTime": "2026-08-19T02:57:30Z",
+      "eventName": "put_bucket_policy",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "AssumedRole",
+        "sessionIssuerUserName": "ci-deployer",
+        "invokedBy": "logsync-2211",
+        "accessKeyId": "ASIMSIMPTEMP2211"
+      },
+      "sourceIPAddress": "203.0.113.66",
+      "requestParameters": { "bucket": "nimbus-prod-backups" },
+      "responseElements": {
+        "policy": {
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": ["sim.storage:GetObject", "sim.storage:ListObjects"],
+              "Resource": ["arn:sim:s3:::nimbus-prod-backups/*"]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "ev-0010",
+      "eventTime": "2026-08-19T03:02:08Z",
+      "eventName": "get_object",
+      "eventSource": "sim.storage",
+      "userIdentity": { "type": "Anonymous" },
+      "sourceIPAddress": "198.51.100.23",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "nightly/nightly-2026-08-18.tar.gz"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0011",
+      "eventTime": "2026-08-19T03:40:12Z",
+      "eventName": "get_object",
+      "eventSource": "sim.storage",
+      "userIdentity": { "type": "Anonymous" },
+      "sourceIPAddress": "198.51.100.23",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "db/postgres-snapshot-latest.dump"
+      },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0012",
+      "eventTime": "2026-08-19T05:00:00Z",
+      "eventName": "list_objects",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": { "bucket": "nimbus-prod-backups" },
+      "responseElements": null
+    },
+    {
+      "eventId": "ev-0013",
+      "eventTime": "2026-08-19T05:14:47Z",
+      "eventName": "console_login_failed",
+      "eventSource": "sim.console",
+      "userIdentity": { "type": "Unknown", "userName": "backup-archiver" },
+      "sourceIPAddress": "198.51.100.23",
+      "requestParameters": null,
+      "responseElements": { "status": "Failure", "reason": "badPassword" }
+    },
+    {
+      "eventId": "ev-0014",
+      "eventTime": "2026-08-19T06:30:00Z",
+      "eventName": "put_object",
+      "eventSource": "sim.storage",
+      "userIdentity": {
+        "type": "IAMUser",
+        "userName": "ci-deployer",
+        "accessKeyId": "AKIASIMDEPLOY01"
+      },
+      "sourceIPAddress": "10.44.0.15",
+      "requestParameters": {
+        "bucket": "nimbus-prod-backups",
+        "key": "nightly/manifest-2026-08-19.json"
+      },
+      "responseElements": null
+    }
+  ]
+}

