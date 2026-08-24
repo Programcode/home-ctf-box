@@ -1,0 +1,94 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: share-and-share-alike
+  title: 'Share and Share Alike'
+  version: 1.0.0
+  difficulty: beginner
+  points: 125
+  estimated_minutes: 25
+  tags: [windows-concepts, samba, smb-shares, simulation]
+spec:
+  track: windows-ad
+  type: guided
+  summary: >-
+    Windows networks move files through SMB shares, and this room runs
+    a real Samba server on Linux to demonstrate the mechanics,
+    plainly labeled where simulation ends. The public share is
+    browseable by anyone and its meeting notes leak the existence of a
+    hidden dev$ share plus working credentials for it. Because the lab
+    workstation image ships without an SMB client, a small HTTP mirror
+    of the same directories stands in for smbclient; the lesson shows
+    the real commands you would run outside the lab.
+  objectives:
+    - 'Browse an SMB-style public share through its HTTP mirror.'
+    - 'Recognize how hidden (browseable=no) shares stay reachable when named directly.'
+    - 'Reuse leaked credentials against the hidden share and capture the flag file.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+      - 'smb://target:445'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Real smbd binds privileged port 445 and performs its standard
+      setuid-based privilege separation for guest and authenticated
+      sessions, so the elevated profile is required; capabilities are
+      bounded to the server profile set. Shares are read-only, backed
+      by files owned root:sharegrp mode 640, and the learner-facing
+      surface is read-only browsing. The HTTP mirror serves the same
+      directories with its own basic-auth check mirroring the valid
+      users directive.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [8000, 445]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: reach-dev-share
+      title: 'From public gossip to the hidden share'
+      prompt: >-
+        Open the share mirror at http://target:8000 and read what the
+        public share holds. One document gossips about a hidden
+        development share and the service account that reaches it.
+        Address that hidden share by name with those credentials,
+        find the release verification token inside it, and submit the
+        FLAG value.
+      points: 125
+      hints:
+        - cost: 0
+          text: >-
+            Start at http://target:8000/ and open every listed file;
+            meeting notes are where people accidentally publish other
+            teams' secrets.
+        - cost: 10
+          text: >-
+            Hidden SMB shares never appear in browse lists but answer
+            perfectly well when addressed by name: \\SIMFILE01\dev$
+            becomes /browse/dev$/ on the mirror, using the leaked
+            credentials from the note.
+        - cost: 25
+          text: >-
+            Fetch /browse/dev$/ with basic auth as smbuser using the
+            password from the meeting notes, open deploy-notes.txt
+            from the listing, and FLAG{...} is printed on the page.
+      solution: |
+        1. GET http://target:8000/ to list the public share mirror.
+        2. Read each file. meeting-notes.txt names \\SIMFILE01\dev$
+           and leaks the pair: user smbuser pass SpringSim26.
+        3. Request the hidden share by exact name with basic auth:
+           GET http://target:8000/browse/dev$/ authenticated as
+           smbuser / SpringSim26. Hidden only removes a share from
+           listings; it never removes access control or reachability.
+        4. The listing shows deploy-notes.txt; fetch it at
+           /files/dev$/deploy-notes.txt with the same credentials.
+        5. The page prints FLAG{...}. Submit the value.
+      validator:
+        type: per_session_flag

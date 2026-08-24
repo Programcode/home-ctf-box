@@ -1,0 +1,32 @@
+[
+  {
+    "name": "SimEventLog",
+    "displayName": "Simulation Event Log",
+    "description": "Records simulated service and security events.",
+    "state": "Running",
+    "startMode": "Auto",
+    "account": "LocalSystem",
+    "binPath": "C:\\Windows\\System32\\simeventlog.exe",
+    "linux_sim_path": "/opt/services/bin/simeventlog.sh"
+  },
+  {
+    "name": "UpdateHelperSvc",
+    "displayName": "Contoso Update Helper",
+    "description": "Checks the internal update mirror and applies helper tasks.",
+    "state": "Running",
+    "startMode": "Auto",
+    "account": "LocalSystem",
+    "binPath": "C:\\Program Files\\Update Helper\\uhelper.exe",
+    "linux_sim_path": "/opt/services/updater/bin/uhelper.sh"
+  },
+  {
+    "name": "NightlyBackup",
+    "displayName": "Nightly Backup Agent",
+    "description": "Copies profile data to the backup share after hours.",
+    "state": "Stopped",
+    "startMode": "Manual",
+    "account": "LocalSystem",
+    "binPath": "C:\\Program Files\\Backup Agent\\backup.exe",
+    "linux_sim_path": "/opt/services/bin/nightlybackup.sh"
+  }
+]

@@ -1,0 +1,95 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: registry-keys
+  title: 'Registry Keys'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 30
+  tags: [windows-concepts, registry, credential-storage, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Windows keeps its configuration in the registry, and one infamous
+    corner of HKLM stores automatic logon settings, historically
+    including the account's password in cleartext. This room simulates
+    that concept on Linux with plainly labeled plain-text hive files
+    under /opt/registry. You will explore the simulated HKLM and HKCU
+    trees, find the Winlogon autologon values, and reuse the exposed
+    password against the administrator-sim account to read its flag.
+  objectives:
+    - 'Navigate a simulated registry tree and understand what HKLM and HKCU represent.'
+    - 'Locate autologon credentials under the Winlogon key equivalent.'
+    - 'Reuse discovered credentials to authenticate as adminsim and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Linux-hosted Windows-concepts simulation; the registry is a tree
+      of plain-text files, no real hive parsing or Windows code exists.
+      sshd requires setuid and DAC overrides for privilege separation
+      and both learner shells; capabilities are bounded to the ssh
+      server profile. Sessions run as unprivileged accounts (uid 1000+).
+      The intended action is reading this container's own flag file
+      with credentials the room itself exposes.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: autologon-reuse
+      title: 'Let autologon tell you the password'
+      prompt: >-
+        Log in as learner with password learner and explore the
+        simulated registry at /opt/registry, where plain-text .hiv
+        files stand in for Windows hives. The Winlogon equivalent under
+        the simulated HKLM holds automatic logon settings that name an
+        account and, in this lab, its password. Authenticate as that
+        account over SSH (or su from your session) and read the flag
+        waiting in its home directory. Submit the FLAG value.
+      points: 175
+      hints:
+        - cost: 0
+          text: >-
+            The simulated registry root is /opt/registry with HKLM and
+            HKCU subtrees. Try grep -ri autoadminlogon /opt/registry
+            to jump straight to the interesting key.
+        - cost: 10
+          text: >-
+            Real Windows stored DefaultUserName and DefaultPassword in
+            plaintext under HKLM\SOFTWARE\Microsoft\Windows
+            NT\CurrentVersion\Winlogon when autologon was enabled. The
+            simulated Winlogon.hiv mirrors those exact value names.
+        - cost: 25
+          text: >-
+            The hive names account adminsim with password
+            RustyLantern26. Run su adminsim from your session or SSH
+            back in as adminsim@target, then cat
+            /home/adminsim/flag.txt for FLAG{...}.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Explore the layout: `find /opt/registry -name '*.hiv'`
+           shows the simulated HKLM and HKCU keys.
+        3. Narrow to autologon: `grep -ril autoadminlogon
+           /opt/registry` points at the Winlogon.hiv equivalent under
+           HKLM/SOFTWARE/Microsoft/Windows NT/CurrentVersion/.
+        4. `cat` that file. AutoAdminLogon=1 plus DefaultUserName and
+           DefaultPassword mirror the real values administrators have
+           leaked for decades by enabling convenience logon.
+        5. Reuse the pair: `su adminsim` (enter the DefaultPassword
+           value) or open a second SSH session as adminsim.
+        6. `cat /home/adminsim/flag.txt` prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

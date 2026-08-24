@@ -1,0 +1,8 @@
+[HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon]
+AutoAdminLogon=1
+DefaultDomainName=SIMDOMAIN
+DefaultUserName=adminsim
+DefaultPassword=RustyLantern26
+Shell=explorer.exe
+Userinit=C:\Windows\system32\userinit.exe
+LegalNoticeText=

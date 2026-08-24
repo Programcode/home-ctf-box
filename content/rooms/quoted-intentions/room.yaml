@@ -1,0 +1,94 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: quoted-intentions
+  title: 'Quoted Intentions'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 20
+  tags: [windows-concepts, service-paths, reasoning, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    When a Windows service path contains spaces and no surrounding
+    quotes, CreateProcess resolves it by walking prefixes from the
+    left, trying an executable at every space boundary before reaching
+    the real binary. This pure-reasoning lab shows you the output of a
+    simulated service enumerator, asks you to compute the exact search
+    order for its one unquoted entry, and rewards the correct ordered
+    chain with the flag from a checker endpoint.
+  objectives:
+    - 'Recognize an unquoted service path in enumerator output.'
+    - 'Derive the ordered executable-search chain Windows would follow.'
+    - 'Submit the chain to the checker and capture the returned flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Pure reasoning room on a locked Flask container (no privilege, no
+      escalation, no privesc executed anywhere). The enumerator is a
+      static page simulating sc qc output; the checker validates an
+      ordered list of path strings entirely in-process. Nothing runs
+      binaries, nothing touches real Windows, and egress stays inside
+      the lab network.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: order-the-chain
+      title: 'Compute the search order, claim the flag'
+      prompt: >-
+        Open the simulated service enumerator at http://target:8000 and
+        find the one entry whose binPath has spaces but no surrounding
+        quotes. Work out, in order, every executable location Windows
+        would try before reaching the recorded binary, ending with the
+        real one. Submit those paths, one per line and in order, as
+        the chain field to /check; the checker returns the flag only
+        for the exact full chain. Submit that FLAG value.
+      points: 150
+      hints:
+        - cost: 0
+          text: >-
+            The UpdateHelperSvc binPath lacks quotes around a path with
+            spaces. Windows cannot know where the program name ends,
+            so it resolves greedily from the left.
+        - cost: 10
+          text: >-
+            Resolution walks every space boundary: append .exe to each
+            growing prefix first, and only after all shorter candidates
+            fail does the full recorded path run. Order matters more
+            than the set.
+        - cost: 25
+          text: >-
+            The chain is three lines: C:\Program.exe, then C:\Program
+            Files\Unquoted.exe, then C:\Program Files\Unquoted
+            Helper\helper.exe. POST them in that order to /check as
+            field chain and read FLAG{...} from the response.
+      solution: |
+        1. GET http://target:8000/ and read the enumerator table. Two
+           entries are quoted and safe; UpdateHelperSvc records
+           C:\Program Files\Unquoted Helper\helper.exe bare.
+        2. Apply CreateProcess resolution to the unquoted string:
+           candidate 1 takes everything before the first space plus
+           .exe, giving C:\Program.exe; candidate 2 extends through
+           the next space boundary, giving C:\Program Files\Unquoted.exe;
+           candidate 3 is the full path itself.
+        3. POST to /check with the three paths in resolution order:
+           curl -s -X POST http://target:8000/check \
+             --data-urlencode $'chain=C:\\Program.exe\nC:\\Program Files\\Unquoted.exe\nC:\\Program Files\\Unquoted Helper\\helper.exe'
+        4. The checker returns the success page containing FLAG{...}.
+           Submit the value.
+      validator:
+        type: per_session_flag
