@@ -1,0 +1,9 @@
+{
+  "domain": "LAB-SIM",
+  "groups": ["DOMAIN USERS-SIM", "BACKUP OPERATORS-SIM"],
+  "integrity_level": "medium",
+  "kind": "service-sim",
+  "user": "svc-backup",
+  "version": 1,
+  "checksum": "sha256:325b688d335d9099ef7b9eb86d8863c3038132eab63addecb5af76c8460697dc"
+}

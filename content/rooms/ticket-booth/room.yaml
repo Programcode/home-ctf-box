@@ -1,0 +1,111 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: ticket-booth
+  title: 'Ticket Booth'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 50
+  tags: [windows-concepts, kerberoasting, known-plaintext, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Kerberoasting lets any domain user ask for a service ticket whose
+    encrypted part is keyed by the service account's password, then
+    crack it offline at leisure. This room simulates the full arc with
+    an honest toy cipher: a Flask KDC issues JSON tickets whose enc-part
+    is XOR against sha256(service-account-password), with a documented
+    48-byte constant preamble as known plaintext. Request SPN tickets
+    with the provided stdlib client, run the wordlist crack, and use the
+    recovered svc_sql credential on the admin console for your flag.
+  objectives:
+    - 'Explain why service tickets are crackable offline and who can request them.'
+    - 'Request every registered SPN ticket with the provided getuserspns.py-equivalent client.'
+    - 'Execute the known-plaintext wordlist crack against the XOR-SIM keystream.'
+    - 'Reuse the cracked service-account credential to open the admin console flag page.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted Kerberoasting SIMULATION. The crypto here is
+      deliberately toy XOR with a sha256-derived keystream, NOT RC4-HMAC
+      or AES, chosen for determinism and legality; nothing speaks real
+      Kerberos and no real credentials exist. Plain Flask app on a
+      disposable python:3.12-alpine container under the locked privilege
+      profile (cap_drop ALL, no-new-privileges), running as uid 10001.
+      Tickets are deterministic base64 blobs over documented plaintext;
+      cracking runs against this room's own published wordlist.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: roast-and-enter
+      title: 'Roast the service tickets, enter the console'
+      prompt: >-
+        Open http://target:8000 and read /kdc/docs first: the toy cipher,
+        its exact preamble bytes, and the crack recipe are all disclosed.
+        List the registered SPNs, request each ticket using the provided
+        /tools/getuserspns.py client, and crack the enc-parts offline
+        with the starter wordlist from /tools/wordlist.txt. One account
+        falls, one does not. Sign in to /kdc/admin with the cracked
+        svc_sql credential and submit the FLAG value shown there.
+      points: 275
+      hints:
+        - cost: 0
+          text: >-
+            Fetch /kdc/docs before anything else. Every ticket begins
+            with the same 48-byte preamble, so the keystream is fully
+            recoverable from known plaintext; the crack is a wordlist
+            loop over sha256 candidates, not math you must invent.
+        - cost: 10
+          text: >-
+            Run `python3 getuserspns.py --kdc http://target:8000` after
+            downloading it from /tools/. Each printed enc_part is
+            base64 of (preamble + spn) XORed with the repeating
+            sha256(password) keystream.
+        - cost: 25
+          text: >-
+            For each candidate compute ks=sha256(word).digest(), decrypt
+            ct[:16], and test for the magic prefix b"KDCSIM-TGS-V1".
+            SQLservice2019 unlocks svc_sql; the web account's long
+            random password is absent from the list on purpose. Then
+            GET /kdc/admin with Basic auth svc_sql:SQLservice2019.
+      solution: |
+        1. GET http://target:8000/kdc/docs. Note the disclosure: the
+           enc-part is XOR-SIM-v1, deliberately not RC4-HMAC, with
+           plaintext = 48-byte constant preamble followed by the SPN,
+           and keystream = repeating sha256(service-account password).
+        2. Download tooling: save /tools/getuserspns.py and
+           /tools/wordlist.txt locally.
+        3. Run `python3 getuserspns.py --kdc http://target:8000`. It
+           lists MSSQLSvc/sql01.lab.local:1433 under svc_sql and
+           HTTP/intranet.lab.local under svc_web, printing each
+           ticket's base64 enc_part.
+        4. Decode each enc_part. For every wordlist candidate compute
+           ks = sha256(candidate).digest() and check whether
+           bytes(ct[i] ^ ks[i%32] for i in range(14)) == b"KDCSIM-TGS-V1"
+           (or verify the full 48-byte preamble). Exactly one candidate
+           per crackable ticket reproduces the magic.
+        5. svc_web's ticket matches nothing: its password is long and
+           random and absent from the wordlist, which is the lesson
+           about strong service-account passwords.
+        6. The svc_sql ticket yields SQLservice2019. Confirm by
+           decrypting the whole blob; the trailing bytes read as the
+           requested SPN.
+        7. GET http://target:8000/kdc/admin with HTTP Basic auth
+           username svc_sql and password SQLservice2019. The console
+           page prints FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

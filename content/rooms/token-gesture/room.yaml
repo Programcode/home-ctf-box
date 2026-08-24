@@ -1,0 +1,120 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: token-gesture
+  title: 'Token Gesture'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 40
+  tags: [windows-concepts, tokens, seimpersonate, simulation, sudo]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    A Linux-hosted simulation of Windows token abuse concepts. This box
+    keeps a plainly labeled token store at /opt/tokens where JSON files
+    stand in for captured logon tokens, each carrying integrity and group
+    fields plus a self-describing checksum. A root helper called
+    tokentool can act in the name of any stored token it finds, but the
+    cache directory it consults first is world-writable. You will study
+    the token format, forge a high-integrity administrator-sim token,
+    plant it where the helper looks first, and let the helper perform a
+    privileged read on your behalf.
+  objectives:
+    - 'Read the simulated token schema and understand what integrity level and group membership stand in for.'
+    - 'Recognize why internal checksum validity says nothing about who placed a token or where.'
+    - 'Forge a token with high integrity and DOMAIN ADMINS-SIM membership into the world-writable cache.'
+    - 'Make the root tokentool assume your forged identity and capture the flag it reads.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted Windows-concept simulation of SeImpersonate-style
+      abuse; no Windows code, token objects, or handle duplication exists
+      here. Tokens are plain JSON under /opt/tokens with documented fields.
+      sshd requires setuid and DAC overrides for privilege separation;
+      capabilities are bounded to the ssh server profile. The single sudo
+      grant is /usr/local/bin/tokentool inside this disposable container
+      only, and the intended abuse is one privileged read of this room's
+      own flag file by that helper. Sessions run as unprivileged learner
+      (uid 1000).
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: forge-and-assume
+      title: 'Feed the root helper a forged token'
+      prompt: >-
+        Log in as learner with password learner. Study the simulated
+        tokens in /opt/tokens and the README there; note how each file's
+        checksum is computed over its own body. Run `sudo -n tokentool
+        --list` to see the root helper enumerate them. The cache
+        directory /var/cache/tokentool is world-writable and the helper
+        trusts a verifiable token found there on next invocation. Forge
+        a token named adm-sim whose identity carries high integrity and
+        DOMAIN ADMINS-SIM membership, compute a valid checksum for it,
+        then run `sudo -n tokentool --assume adm-sim`. Submit the FLAG
+        value the helper prints.
+      points: 250
+      hints:
+        - cost: 0
+          text: >-
+            Start with `sudo -n tokentool --list` and `cat
+            /opt/tokens/README.txt`. The README documents the exact
+            checksum recipe: sha256 over the JSON body without the
+            checksum key, sorted keys, no whitespace.
+        - cost: 10
+          text: >-
+            The helper grants the privileged read only when BOTH fields
+            qualify: integrity_level "high" AND the group
+            "DOMAIN ADMINS-SIM". Notice tsvc-nightly has high integrity
+            but the wrong group, so assuming it performs nothing.
+        - cost: 25
+          text: >-
+            Build adm-sim.json with user adm-sim, groups ["DOMAIN
+            ADMINS-SIM"], integrity_level high, then append the checksum
+            you compute with json.dumps(body, sort_keys=True,
+            separators=(",",":")). Drop it in /var/cache/tokentool and
+            run `sudo -n tokentool --assume adm-sim`.
+      solution: |
+        1. SSH in as learner (password learner). Read /etc/motd and the
+           banner text: everything here simulates token concepts on
+           Debian; no real Windows identity machinery exists.
+        2. Inspect the store: `ls -la /opt/tokens` and read README.txt.
+           Each token is JSON with version, kind, user, domain, groups,
+           integrity_level, and a checksum field holding
+           "sha256:<hex>" computed over the canonical body (all keys
+           except checksum, sorted, compact separators).
+        3. Confirm the helper works and shows sources: `sudo -n
+           tokentool --list`. Output marks each token trusted or cache.
+        4. Note the trust gap: --assume prefers /var/cache/tokentool,
+           which is mode 777, and accepts anything whose declared
+           checksum verifies. Internal consistency is not provenance.
+        5. Forge the token locally, for example with python3:
+           build the body dict {version:1, kind:"forged-sim",
+           user:"adm-sim", domain:"LAB-SIM", groups:["DOMAIN
+           ADMINS-SIM"], integrity_level:"high"}, compute chk =
+           hashlib.sha256(json.dumps(body, sort_keys=True,
+           separators=(",",":")).encode()).hexdigest(), write the body
+           plus {"checksum":"sha256:"+chk} to
+           /var/cache/tokentool/adm-sim.json.
+        6. Verify placement with `tokentool --list` as learner (cache
+           entry appears), then run `sudo -n tokentool --assume
+           adm-sim`. The helper sees high integrity plus DOMAIN
+           ADMINS-SIM membership and performs the privileged read of
+           /root/flag.txt on the assumed identity's behalf.
+        7. Submit the FLAG{...} value from the output.
+      validator:
+        type: per_session_flag

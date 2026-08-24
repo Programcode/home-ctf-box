@@ -1,0 +1,9 @@
+{
+  "domain": "LAB-SIM",
+  "groups": ["SERVICE OPS-SIM"],
+  "integrity_level": "high",
+  "kind": "service-sim",
+  "user": "tsvc-nightly",
+  "version": 1,
+  "checksum": "sha256:feb041b359112ea55fda74f3a5092aabf9c411dc786d4e72f12402195e08a05a"
+}

@@ -1,0 +1,102 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: spray-day
+  title: 'Spray Day'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 30
+  tags: [windows-concepts, password-spraying, lockout, enumeration, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    A controlled password-spraying lab hosted as a fictional staff
+    portal. The sign-in policy locks any account for 90 seconds after
+    three failed attempts, so brute-forcing one user is a losing game.
+    You will enumerate which directory addresses are real mailboxes with
+    the reset oracle, assemble the single seasonal password from two
+    separate hint artifacts, and spray it across confirmed accounts one
+    attempt each until a session opens. Every person and credential here
+    is fictional simulation data.
+  objectives:
+    - 'Explain why password spraying defeats per-account lockout counters while brute force does not.'
+    - 'Separate real mailboxes from published decoys using the reset form behavior.'
+    - 'Assemble the seasonal password from the policy page and the facilities memo.'
+    - 'Spray one candidate across accounts without triggering a single lockout.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Plain Flask app on a disposable python:3.12-alpine container under
+      the locked privilege profile (cap_drop ALL, no-new-privileges),
+      running as uid 10001. All staff, mailboxes, and passwords are
+      fictional in-memory training data; no identity provider, mail
+      server, or real credential exists anywhere in this room. The only
+      network exposure is port 8000 inside the lab network.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: disciplined-spray
+      title: 'Spray one password across live accounts'
+      prompt: >-
+        Open the portal at http://target:8000. Read the sign-in policy,
+        then use the reset form to work out which directory addresses
+        are genuine mailboxes. Two unrelated pages hold halves of the
+        season's password: the policy page names the scheme and its
+        theme word, and the facilities memo holds the mascot and
+        building number. Assemble the exact password, confirm your
+        mailbox list, then spray it one attempt per account. Submit the
+        FLAG value from the signed-in page.
+      points: 150
+      hints:
+        - cost: 0
+          text: >-
+            The reset form answers differently for real and fictional
+            mailboxes. Feed it every address from /directory and keep the
+            ones that say a reset was queued.
+        - cost: 10
+          text: >-
+            The scheme on /policy is ThemeWord + MascotWord + two-digit
+            building number with no separators, capitalized exactly as
+            printed. The policy page ends by naming this season's theme
+            word; /memo names the mascot and the building number.
+        - cost: 25
+          text: >-
+            The assembled password is Riverbank + Otter + 07 =
+            RiverbankOtter07. Try it against each confirmed mailbox once;
+            the first success prints FLAG{...}.
+      solution: |
+        1. GET http://target:8000/ and note the simulation banner: all
+           staff and credentials are fictional.
+        2. Read /policy. Lockout fires after 3 consecutive failures per
+           account, so guessing many passwords against one user would
+           lock them long before success. Spraying one password across
+           many users stays far from that limit.
+        3. Read /directory and collect all eleven addresses.
+        4. POST each address to /forgot. Real mailboxes answer "Reset
+           link queued"; decoys answer "No such mailbox". Seven
+           addresses survive.
+        5. Assemble the password: /policy gives the scheme plus the
+           theme word Riverbank; /memo gives mascot Otter and building
+           number 07. Concatenated with no separators:
+           RiverbankOtter07.
+        6. Spray: POST username=<confirmed mailbox> with password=
+           RiverbankOtter07 to /login, one attempt per account. The
+           first hit returns the welcome page containing FLAG{...}.
+           Note that zero lockouts were needed or triggered.
+        7. Submit the flag value.
+      validator:
+        type: per_session_flag
