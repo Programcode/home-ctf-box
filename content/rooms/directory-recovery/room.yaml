@@ -1,0 +1,111 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: directory-recovery
+  title: 'Directory Recovery'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 50
+  tags: [blue-team, ad-recovery, forensics, tabletop]
+spec:
+  track: windows-ad
+  type: investigation
+  summary: >-
+    Ransomware hit the simulated domain controller overnight and left a
+    payment demand. Paying is not the plan; rebuilding is. The evidence
+    pack contains an ntds-sim directory dump split into two fragments,
+    the ransom note that timestamps the compromise, and an inventory of
+    surviving backups. You will reconstruct what the intruders touched,
+    pick restore media that actually predates the incident and was
+    verified offline, and drive the recovery sequence through /recover
+    until the simulated domain controller comes back clean and pays out
+    the flag.
+  objectives:
+    - 'Use the ransom note to fix the compromise window, then diff directory objects against it.'
+    - 'Distinguish trustworthy restore media from snapshots that may be encrypted or tampered.'
+    - 'Execute the incident-response sequence in the order that preserves evidence and restores service.'
+  prerequisites: [windows-welcome]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container disclosure: there is no real ransomware anywhere
+      in this image. The evidence pack is static JSON plus one text note
+      served by a locked Flask container; nothing encrypts, nothing
+      executes payloads, and the /recover API does deterministic string
+      checks against a fixed answer key before returning the flag.
+      Unprivileged app user, capabilities dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: recover-domain
+      title: 'Rebuild the simulated domain'
+      prompt: >-
+        Read the evidence pack at http://target:8000/evidence: the
+        ransom note fixes the compromise window, the two ntds-sim dump
+        fragments list directory accounts with their creation and change
+        times, and the backups inventory lists candidate restore media.
+        Identify every account created or modified after the compromise
+        began, choose the one backup that is both pre-compromise and
+        verified offline, then POST a JSON recovery plan to
+        http://target:8000/recover shaped as {"rogue_accounts": [...],
+        "restore_source": "...", "sequence": [...]} using only step ids
+        from /recover/menu. A fully correct plan restores the simulated
+        DC and returns the FLAG value.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'The ransom note states when encryption began. Treat that timestamp as T0: any directory object with whenCreated or whenChanged after T0 was written by the intruders or during the incident window.'
+        - cost: 10
+          text: 'The dump arrives as two fragments; merge them before filtering. For restore media you need both properties at once: taken before T0 and verified offline. Snapshots on live storage fail the second test even when their date looks fine.'
+        - cost: 25
+          text: 'Plan: rogue_accounts [helpdesk-t2, svc_backup_restore, fscan-admin]; restore_source B-0818-full; sequence [isolate-network, preserve-forensics, rebuild-dc-from-clean-media, restore-selected-backup, reset-compromised-credentials, verify-services-and-monitor]. The verified reply carries FLAG{...}.'
+      solution: |
+        1. Open http://target:8000/ and read the tabletop brief, then
+           fetch /evidence/ransom-note.txt. The note claims encryption
+           started 2026-08-20T02:47:00Z; call that T0.
+        2. Fetch both /evidence/ntds-sim-dump-part1.json and part2.json.
+           Concatenate the account arrays; the split simulates a
+           recovered dump arriving in fragments.
+        3. Filter for accounts whose whenCreated >= T0 or whenChanged
+           >= T0. Three surface: helpdesk-t2 (password changed 03:15),
+           svc_backup_restore (created 03:22, member of Domain Admins
+           sim, adminCount raised), and fscan-admin (created 04:05,
+           member of the Backup Operators sim group).
+        4. Fetch /evidence/backups-inventory.json. B-0820-snap was taken
+           after T0 and lives on live storage, so assume encrypted.
+           B-0819-inc predates T0 but was never verified offline, so it
+           could be tampered. Only B-0818-full is both pre-T0 and
+           verified offline; that is the restore source.
+        5. Fetch /recover/menu and compose the plan from principle:
+           contain first (isolate-network), preserve evidence
+           (preserve-forensics), never trust compromised OS media so
+           rebuild-dc-from-clean-media, then restore-selected-backup,
+           then reset-compromised-credentials covering every rogue and
+           exposed account, then verify-services-and-monitor. Distractor
+           steps about paying the ransom stay out of the sequence.
+        6. POST the plan to /recover:
+           python3 -c "import json,urllib.request; req=urllib.request.
+           Request('http://target:8000/recover', data=json.dumps({
+           'rogue_accounts':['helpdesk-t2','svc_backup_restore',
+           'fscan-admin'],'restore_source':'B-0818-full',
+           'sequence':['isolate-network','preserve-forensics',
+           'rebuild-dc-from-clean-media','restore-selected-backup',
+           'reset-compromised-credentials','verify-services-and-monitor']
+           }).encode(), headers={'Content-Type':'application/json'});
+           print(urllib.request.urlopen(req).read().decode())". The reply
+           reads status restored and includes FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

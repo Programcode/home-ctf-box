@@ -1,0 +1,106 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: blue-screenplay
+  title: 'Blue Screenplay'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 35
+  tags: [blue-team, windows-event-logs, forensics, investigation]
+spec:
+  track: windows-ad
+  type: investigation
+  summary: >-
+    A simulated estate of three Windows hosts was hit overnight, and the
+    exported event logs hold the whole story. The Security channel shows
+    authentication noise, a brute-force burst, and the logons that
+    followed it onto other machines; the System channel records services
+    dying in sequence as the intrusion progressed. You will pull the two
+    evtx-sim JSON exports from /evidence, build a timeline, answer three
+    questions an incident lead would ask, and file them to /report. A
+    fully correct report verifies and pays out the flag.
+  objectives:
+    - 'Parse exported Windows-style event logs in JSON and separate attack traffic from business-as-usual noise.'
+    - 'Correlate failed logons, subsequent successes, and cross-host authentications into a single intrusion narrative.'
+    - 'Report precise findings through the verification endpoint.'
+  prerequisites: [windows-welcome]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container disclosure: no Windows kernel exists here. The
+      Security and System channels are static JSON documents shaped like
+      evtx exports, generated deterministically at each boot inside one
+      locked Flask container. The report API does exact string checks and
+      returns the flag only on a complete match. Unprivileged app user,
+      capabilities dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: incident-report
+      title: 'File the verified incident report'
+      prompt: >-
+        Fetch the evidence index at http://target:8000/evidence and read
+        both exported channels. Determine which account was successfully
+        logged into after the brute-force burst from an outside address,
+        which service crashed first according to the System channel,
+        and which internal source IP carried the account onto other
+        hosts during lateral movement. POST your three answers as JSON
+        to http://target:8000/report in the shape
+        {"answers": {"compromised_account": "...",
+        "first_failed_service": "...", "lateral_source_ip": "..."}}
+        and submit the FLAG value from the verified reply.
+      points: 250
+      hints:
+        - cost: 0
+          text: 'Start from the Security channel. A cluster of 4625-sim failures sharing one external source IP and one target account is your entry point; the 4624-sim success from the same pair moments later is the compromise.'
+        - cost: 10
+          text: 'The asset inventory maps hostnames to addresses. After the initial success, the same account keeps logging in on other hosts; whatever internal IP sits in front of those logons is doing the lateral movement, and it belongs to the first victim host.'
+        - cost: 25
+          text: 'Answers: compromised_account svc_backups, first_failed_service SimDefenderAV (earliest 7031-sim), lateral_source_ip 10.20.0.41. POST them to /report exactly as specified; the verified reply carries FLAG{...}.'
+      solution: |
+        1. Open http://target:8000/ and read the incident brief. The
+           evidence index links security.evtx-sim.json,
+           system.evtx-sim.json, and asset-inventory.json.
+        2. Download the Security export and filter for 4625-sim events.
+           Seven failures share source 198.51.100.23 targeting account
+           svc_backups on WIN-SIM01 between 03:10 and 03:14, followed by
+           a 4624-sim success from the same source at 03:16. That makes
+           svc_backups the compromised account.
+        3. Download asset-inventory.json. It maps WIN-SIM01 to
+           10.20.0.41, WIN-SIM02 to 10.20.0.42, WIN-SIM03 to 10.20.0.43.
+        4. Filter the Security export again for later 4624-sim events
+           involving svc_backups. At 03:58 and 04:01 the account logs in
+           on WIN-SIM02 and WIN-SIM03 with source_ip 10.20.0.41, which
+           is WIN-SIM01 itself. The intruder is riding the first victim
+           box across the estate, so 10.20.0.41 is the lateral movement
+           source. Business-hours 4624-sim rows from 10.20.0.9 are the
+           admin jump host and unrelated noise.
+        5. Sort the System export by timestamp and look at 7031-sim
+           service-crash entries. SimDefenderAV dies at 04:02, before
+           BackupExecAgent at 04:19 and Spooler at 04:47, so the first
+           failed service is SimDefenderAV.
+        6. File the report:
+           python3 -c "import json,urllib.request; req=urllib.request.
+           Request('http://target:8000/report',
+           data=json.dumps({'answers':{'compromised_account':
+           'svc_backups','first_failed_service':'SimDefenderAV',
+           'lateral_source_ip':'10.20.0.41'}}).encode(),
+           headers={'Content-Type':'application/json'});
+           print(urllib.request.urlopen(req).read().decode())".
+           The reply reads status verified and includes FLAG{...}.
+           Submit it.
+      validator:
+        type: per_session_flag

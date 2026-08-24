@@ -1,0 +1,97 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: forest-footpath
+  title: 'Forest Footpath'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 45
+  tags: [active-directory, trust, token-chaining, api]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Two simulated domains, child.corp and parent.corp, run as separate JSON
+    APIs behind one front controller. The child publishes its trust
+    relationship on /trusts, and the document admits what seasoned AD
+    operators already know: a child domain admin is functionally an
+    enterprise admin because forest trusts are transitive. You will
+    authenticate to the child domain API, read the trust documentation,
+    then chain the child-issued token through the parent's exchange
+    endpoint and use the resulting parent token to reach the enterprise
+    scope where the flag waits.
+  objectives:
+    - 'Read a trust document and reason about direction and transitivity instead of trusting domain labels.'
+    - 'Authenticate to the child domain API and obtain its session token.'
+    - 'Chain the child token through the parent exchange endpoint and pull the flag from enterprise scope.'
+  prerequisites: [windows-welcome]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container disclosure: there is no real Active Directory here.
+      child.corp and parent.corp are two small Flask JSON APIs bound to
+      distinct loopback ports inside one disposable container, reached only
+      through one front controller on port 8000 that routes by Host header,
+      the way a reverse proxy fronts several sites. Tokens are HMAC labels,
+      not Kerberos tickets, and nothing leaves the container. Locked profile:
+      unprivileged app user, capabilities dropped.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: parent-enterprise-flag
+      title: 'Walk the child-to-parent trust path'
+      prompt: >-
+        Both domain APIs answer at http://target:8000; select each with a
+        Host header of child.corp or parent.corp. Read /trusts on the child
+        to confirm how the domains relate. Authenticate as learner with
+        password learner on the child API to mint its token, exchange that
+        token at the parent's documented exchange endpoint, then call the
+        parent's enterprise path with the parent token. Submit the FLAG
+        value it returns.
+      points: 300
+      hints:
+        - cost: 0
+          text: "The front controller routes by Host header, so curl -H 'Host: child.corp' http://target:8000/trusts reaches the child domain API. Its landing page also documents every route."
+        - cost: 10
+          text: '/trusts states the link to parent.corp is forest-transitive, which is why child Domain Admins inherit enterprise reach. POST learner/learner to child /auth for a token; the parent exposes /trust-exchange exactly for such tokens.'
+        - cost: 25
+          text: 'Chain it: take the child token, POST {"child_token": "..."} to parent.corp /trust-exchange to receive a parent token, then GET /enterprise/path with header Authorization: Bearer <parent token>. The JSON carries FLAG{...}.'
+      solution: |
+        1. Probe the front controller at http://target:8000 with no Host
+           override. The landing page discloses that this single container
+           simulates both domains and lists the two vhost names.
+        2. Ask the child about its relationship:
+           `curl -H 'Host: child.corp' http://target:8000/trusts`.
+           The JSON shows trusted_domains including parent.corp,
+           transitive: true, and explains that child Domain Admins get a
+           documented path into enterprise scope across the forest trust.
+        3. Authenticate to the child API:
+           `curl -H 'Host: child.corp' -H 'Content-Type: application/json'
+           -d '{"user":"learner","password":"learner"}'
+           http://target:8000/auth`. The reply carries a childtok-... token
+           and your DA-child group membership.
+        4. Exchange it at the parent, which honors inbound child tokens
+           because of the trust:
+           `curl -H 'Host: parent.corp' -H 'Content-Type: application/json'
+           -d '{"child_token":"childtok-..."}'
+           http://target:8000/trust-exchange`. The reply carries a
+           parenttok-... token scoped enterprise-sim.
+        5. Redeem the parent token against the enterprise path:
+           `curl -H 'Host: parent.corp' -H 'Authorization: Bearer
+           parenttok-...' http://target:8000/enterprise/path`. The JSON
+           contains FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag
