@@ -8,7 +8,13 @@ or a CI run you can re-check. Phase summaries use four labels:
 
 Plan of record:
 `.hermes/plans/2026-08-22_224809-open-cyber-range-platform.md`.
-Last updated 2026-08-24 at main commit `b4a9e8c` (PR #27).
+Last updated 2026-08-24 at main commit `ddbc21e` (PR #54).
+
+CI note that colors every run citation below: the last green CI run on
+main is 32709414616 (success, 2026-08-24 09:02 UTC). Every later ci and
+content run on main fails with zero steps executed in every job, which
+points at the Actions runner never starting rather than at any test
+failure. Local proof numbers from this machine are cited alongside.
 
 ## Phase summary
 
@@ -21,7 +27,7 @@ Last updated 2026-08-24 at main commit `b4a9e8c` (PR #27).
 | 4     | Catalog and discovery                | core-done |
 | 5     | Content SDK and content format       | done      |
 | 6     | Lab orchestrator and isolation       | core-done |
-| 7     | Lab gateway and terminal             | core-done |
+| 7     | Lab gateway and terminal             | done      |
 | 8     | Learning engine                      | core-done |
 | 9     | Scoring and competition              | core-done |
 | 10    | Content Studio                       | core-done |
@@ -29,7 +35,7 @@ Last updated 2026-08-24 at main commit `b4a9e8c` (PR #27).
 | 12    | Community, support, notifications    | core-done |
 | 13    | Observability and operations         | core-done |
 | 14    | Security engineering                 | partial   |
-| 15    | Packaging and deployment             | todo      |
+| 15    | Packaging and deployment             | core-done |
 
 ## Phase 0: governance, licensing, baseline preservation
 
@@ -48,18 +54,20 @@ Remaining: enable branch protection on main.
 
 ## Phase 1: monorepo, quality system, developer experience
 
-| Item                                                                                                                                        | Status   | Evidence                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| pnpm + Turborepo + uv workspaces                                                                                                            | verified | `package.json`, `pnpm-workspace.yaml`, `turbo.json`, root `pyproject.toml`, `uv.lock`      |
-| ruff lint/format, strict mypy, prettier, pre-commit                                                                                         | verified | `make check` recipe (`Makefile:20`); CI `ci.yml` node job runs `pnpm exec turbo run check` |
-| Compose profiles core/dev/runner/gateway/observability/legacy-v0                                                                            | verified | `infra/compose/*.yml`; root compose includes core+dev                                      |
-| Make targets bootstrap/check/test/test-integration/test-content/test-solvers/up/down/reset-demo/backup/restore/clean-install/backup-restore | verified | `Makefile`; `tests/install/compose-clean-install.sh`, `tests/install/backup-restore.sh`    |
-| Latest main CI green                                                                                                                        | verified | run 32680234417, success, 2026-08-24 (`gh run list -b main`)                               |
+| Item                                                                                                                                                                               | Status   | Evidence                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| pnpm + Turborepo + uv workspaces                                                                                                                                                   | verified | `package.json`, `pnpm-workspace.yaml`, `turbo.json`, root `pyproject.toml`, `uv.lock`      |
+| ruff lint/format, strict mypy, prettier, pre-commit                                                                                                                                | verified | `make check` recipe (`Makefile:21`); CI `ci.yml` node job runs `pnpm exec turbo run check` |
+| Compose profiles core/dev/runner/gateway/observability/production/legacy-v0                                                                                                        | verified | `infra/compose/*.yml`; root compose includes core+dev                                      |
+| Make targets bootstrap/check/test/test-integration/test-content/test-solvers/up/down/reset-demo/backup/restore/clean-install/backup-restore/build-images/push-images/release-check | verified | `Makefile`; `tests/install/compose-clean-install.sh`, `tests/install/backup-restore.sh`    |
+| Local unit suite green on this machine, 2026-08-24                                                                                                                                 | verified | `uv run pytest -m "not integration and not e2e and not slow"`: 49 passed                   |
 
-Remaining: `make test-contract`, `test-e2e`, `test-a11y`, `test-security`, and
-`test-load` are still placeholders that print and exit 1 (`Makefile:35`,
-`Makefile:47`, `Makefile:50`, `Makefile:53`, `Makefile:56`). Each is tracked
-under its owning phase below.
+Remaining: `make test-contract`, `test-e2e`, `test-a11y`, `test-security`,
+and `test-load` are still placeholders that print and exit 1
+(`Makefile:35`, `Makefile:47`, `Makefile:50`, `Makefile:53`,
+`Makefile:56`). Each is tracked under its owning phase below. Main CI has
+failed since 10:00 UTC on 2026-08-24 for environmental reasons (see the
+note at the top); local runs are the current proof of record.
 
 ## Phase 2: API foundation, database, authentication
 
@@ -81,11 +89,11 @@ Remaining: exercise OIDC against a real provider before any hosted launch.
 
 Status: core-done.
 
-| Item                                             | Status      | Evidence                                                                                              |
-| ------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------- |
-| Design-system package with tokens and components | verified    | `packages/ui/src/tokens.css`, `packages/ui/src/components/`, stories under `packages/ui/src/stories/` |
-| Learner web app routes                           | verified    | `apps/web/app/catalog`, `dashboard`, `labs`, `login`, `register`, `profile` (PR #5)                   |
-| Playwright e2e specs                             | in-progress | `apps/web/tests/e2e/a11y.spec.ts`, `keyboard-journey.spec.ts` exist; nothing runs them                |
+| Item                                             | Status      | Evidence                                                                                                                                                                                                                                          |
+| ------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Design-system package with tokens and components | verified    | `packages/ui/src/tokens.css`, `packages/ui/src/components/`, stories under `packages/ui/src/stories/`                                                                                                                                             |
+| Learner web app routes                           | verified    | `apps/web/app/catalog`, `dashboard`, `labs`, `login`, `register`, `profile` (PR #5); learning view, challenge board, terminal page, and notifications inbox added by PR #54 under `apps/web/app/learn`, `challenges`, `terminal`, `notifications` |
+| Playwright e2e specs                             | in-progress | `apps/web/tests/e2e/a11y.spec.ts`, `keyboard-journey.spec.ts` exist; nothing runs them                                                                                                                                                            |
 
 Remaining:
 
@@ -97,13 +105,15 @@ Remaining:
 
 Status: done.
 
-| Item                                                             | Status   | Evidence                                                                                                                                          |
-| ---------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bundle schema (room/module/path) with generated JSON Schemas     | verified | `packages/content-sdk/src/openrange/content/models.py`, schema check via `cyberrange schemas --check-diff` in `.github/workflows/content.yml`     |
-| cyberrange CLI (lint, solve_all, schemas)                        | verified | `packages/content-sdk/src/openrange/content/cli.py`, `solve_all.py`                                                                               |
-| Lint engine incl. path/module ref resolution and capstone checks | verified | `packages/content-sdk/src/openrange/content/linting/`; PR #11 fixed module-ref resolution                                                         |
-| Solver protocol, Docker harness, reset/idempotency proof         | verified | `packages/content-sdk/src/openrange/content/solver/`, `packages/content-sdk/src/openrange/content/harness/`; elevated SSH target profile in PR #8 |
-| All 50 room bundles pass lint + solver shards in CI              | verified | `.github/workflows/content.yml` runs `cyberrange lint` plus 4 solver shards; latest green content run on main: 32680139689, success, 2026-08-24   |
+| Item                                                             | Status   | Evidence                                                                                                                                               |
+| ---------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bundle schema (room/module/path) with generated JSON Schemas     | verified | `packages/content-sdk/src/openrange/content/models.py`, schema check via `cyberrange schemas --check-diff` in `.github/workflows/content.yml`          |
+| cyberrange CLI (lint, solve_all, schemas)                        | verified | `packages/content-sdk/src/openrange/content/cli.py`, `solve_all.py`                                                                                    |
+| Lint engine incl. path/module ref resolution and capstone checks | verified | `packages/content-sdk/src/openrange/content/linting/`; PR #11 fixed module-ref resolution                                                              |
+| Solver protocol, Docker harness, reset/idempotency proof         | verified | `packages/content-sdk/src/openrange/content/solver/`, `packages/content-sdk/src/openrange/content/harness/`; elevated SSH target profile in PR #8      |
+| external_image wrapper support with digest-pinned upstream refs  | verified | schema field at `models.py:123`, harness pull path at `harness/__init__.py:249` and `:307`, lint rules for static-answer rooms, four shipped bundles   |
+| Localization framework with protected spans                      | verified | `packages/content-sdk/src/openrange/content/i18n.py`, `docs/i18n.md`, Hungarian sample validated by `packages/content-sdk/tests/test_i18n.py` (PR #52) |
+| All 109 room bundles pass lint on this machine, 2026-08-24       | verified | programmatic `lint_room` pass over `content/rooms/*`: 109 bundles, 0 errors, 0 warnings                                                                |
 
 Remaining: none blocking phase scope; per-room review state is tracked in
 `docs/content/catalog-status.md`.
@@ -122,42 +132,52 @@ Status: core-done.
 Remaining: chaos drill that kills a worker mid-transition and proves
 reconciliation. Planned since the first version of this file, still absent.
 
-## Phase 7: lab gateway, terminal
+## Phase 7: lab gateway, terminal, desktop
 
-Status: core-done.
+Status: done.
 
-| Item                                                 | Status   | Evidence                                                                        |
-| ---------------------------------------------------- | -------- | ------------------------------------------------------------------------------- |
-| Authenticated gateway with HTTP proxy to lab targets | verified | `apps/lab-gateway/`; `apps/lab-gateway/tests/test_proxy.py` (12 test functions) |
-| Browser SSH terminal                                 | verified | `apps/lab-gateway/tests/test_terminal.py` (13 test functions)                   |
-| Gateway tokens and health endpoints                  | verified | `test_tokens.py` (11), `test_health.py` (4)                                     |
-| Gateway compose service                              | verified | `infra/compose/gateway.yml`                                                     |
+| Item                                                 | Status   | Evidence                                                                                                                                                       |
+| ---------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authenticated gateway with HTTP proxy to lab targets | verified | `apps/lab-gateway/`; `apps/lab-gateway/tests/test_proxy.py` (12 test functions)                                                                                |
+| Browser SSH terminal                                 | verified | `apps/lab-gateway/tests/test_terminal.py` (13 test functions)                                                                                                  |
+| Browser desktop bridge for GUI content               | verified | WebSocket-to-RFB bridge in `apps/lab-gateway/src/openrange/gateway/desktop.py`; `test_desktop.py` (15 tests)                                                   |
+| Gateway tokens and health endpoints                  | verified | `test_tokens.py` (11), `test_health.py` (4)                                                                                                                    |
+| Gateway compose service                              | verified | `infra/compose/gateway.yml`                                                                                                                                    |
+| VPN device lifecycle documented and wired            | verified | `apps/api/src/openrange/api/vpn/routes.py` (5 endpoints incl. config QR and status), `docs/contracts/vpn-api.md`, gateway heartbeat client inside `desktop.py` |
 
-Remaining: browser desktop for GUI-designated content; documented VPN/manual
-connection path (plan section 4 item 6).
+Remaining: a WireGuard peer watcher that feeds the heartbeat endpoint;
+the client ships, the watcher does not exist yet.
 
 ## Phase 8: learning engine
 
 Status: core-done.
 
-| Item                                                               | Status   | Evidence                                                                                                                  |
-| ------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Enrollment, progress, section completion, notes/bookmarks surfaces | verified | `apps/api/src/openrange/api/learning/` (15 route handlers); `apps/api/tests/test_learning.py`, `test_learning_content.py` |
-| Catalog query API backing the web catalog                          | verified | same package; consumed by `apps/web/app/catalog`                                                                          |
+| Item                                                               | Status   | Evidence                                                                                                                                                           |
+| ------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Enrollment, progress, section completion, notes/bookmarks surfaces | verified | `apps/api/src/openrange/api/learning/` (15 route handlers); `apps/api/tests/test_learning.py`, `test_learning_content.py`                                          |
+| Catalog query API backing the web catalog                          | verified | same package; consumed by `apps/web/app/catalog`                                                                                                                   |
+| Learning view in the web app                                       | verified | `apps/web/app/learn/page.tsx` plus per-path route under `apps/web/app/learn/[pathSlug]` (PR #54)                                                                   |
+| Streaks with timezone safety, freezes, healthy milestones          | verified | `apps/api/src/openrange/api/streaks/engine.py` (pure function of injected date, timezone, freeze days), `routes.py` (3 endpoints); `test_streaks.py` (17) (PR #53) |
+| Locale-aware content delivery                                      | verified | i18n validation and locale negotiation per `docs/i18n.md`; `apps/api/tests/test_learning_i18n.py` (PR #52)                                                         |
 
-Remaining: recommendations, streaks, achievements. Grep for these in
-`apps/api/src/openrange/api/learning/` returns nothing today.
+Remaining: recommendations. Achievements ship through scoring
+(`GET /api/scoring/me/achievements`) and reach the notification feed.
 
 ## Phase 9: scoring, progression, competition
 
 Status: core-done.
 
-| Item                                                     | Status   | Evidence                                                                                                                                         |
-| -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Scoring engine: flag submission, first-blood, projection | verified | `apps/api/src/openrange/api/scoring/` (8 route handlers, `projection.py`); tests `test_scoring_api.py` (10) and `test_scoring_projection.py` (7) |
-| Leaderboards incl. monthly periods                       | verified | `GET /leaderboards/{scope}` in `apps/api/src/openrange/api/scoring/routes.py`                                                                    |
+| Item                                                                                   | Status   | Evidence                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Scoring engine: flag submission, first-blood, projection                               | verified | `apps/api/src/openrange/api/scoring/` (8 route handlers, `projection.py`); tests `test_scoring_api.py` (10) and `test_scoring_projection.py` (7)                                     |
+| Leaderboards incl. monthly periods                                                     | verified | `GET /leaderboards/{scope}` in `apps/api/src/openrange/api/scoring/routes.py`                                                                                                        |
+| Jeopardy challenges: containerless tasks, attachments, files portal, submissions audit | verified | `apps/api/src/openrange/api/challenges/routes.py` (7 endpoints incl. `GET /{slug}/files/{file_id}`), category enum incl. osint at `routes.py:32`; `test_challenges.py` (15) (PR #43) |
+| Dynamic scoring in two places                                                          | verified | linear decay in `apps/api/src/openrange/api/challenges/service.py` (`validate_decay`, floors after `solves_to_floor`); CTFd-style decay in `events/service.py:70`                    |
+| Teams with invites and member roles                                                    | verified | `apps/api/src/openrange/api/teams/routes.py` (7 endpoints); `test_teams.py` (7) (PR #39)                                                                                             |
+| Events builder with frozen scoreboards                                                 | verified | `apps/api/src/openrange/api/events/routes.py` (7 endpoints incl. scoreboard refresh); `test_events.py` (8) (PR #39)                                                                  |
 
-Remaining: teams, events, transcripts, certificates.
+Remaining: learner transcripts, team-vs-team red/blue objective split,
+king-of-the-hill mode (see the gap list below).
 
 ## Phase 10: Content Studio
 
@@ -183,12 +203,14 @@ Remaining: instructor dashboards in the web app.
 
 Status: core-done.
 
-| Item                                                                        | Status   | Evidence                                                                                                                             |
-| --------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Announcements, per-user preferences, notification feed, email outbox worker | verified | `apps/api/src/openrange/api/notifications/` (routes 9 handlers, `email.py`, `worker.py`); `apps/api/tests/test_notifications.py` (7) |
-| Dev mail sink                                                               | verified | Mailpit service in `infra/compose/dev.yml`                                                                                           |
+| Item                                                                        | Status   | Evidence                                                                                                                                                  |
+| --------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Announcements, per-user preferences, notification feed, email outbox worker | verified | `apps/api/src/openrange/api/notifications/` (routes 9 handlers, `email.py`, `worker.py`); `apps/api/tests/test_notifications.py` (7)                      |
+| Notifications inbox in the web app                                          | verified | `apps/web/app/notifications/page.tsx` plus `apps/web/components/NotificationsView.tsx` covering achievement, assignment, and announcement events (PR #54) |
+| Community events                                                            | verified | events builder listed under phase 9 (PR #39)                                                                                                              |
+| Dev mail sink                                                               | verified | Mailpit service in `infra/compose/dev.yml`                                                                                                                |
 
-Remaining: community events and support flows beyond notifications.
+Remaining: support flows beyond notifications and events.
 
 ## Phase 13: observability, reliability, operations
 
@@ -223,19 +245,63 @@ Remaining:
 
 ## Phase 15: packaging and deployment
 
-Status: todo.
+Status: core-done.
 
-Nothing shipped yet beyond `cliff.toml`. No release workflow exists
-(`ls .github/workflows` shows only `ci.yml`, `content.yml`, `security.yml`).
-Remaining: release pipeline, image publishing, versioned release notes,
-install docs for single-node and clustered deployment.
+| Item                                              | Status      | Evidence                                                                                           |
+| ------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| Production images for api, web, gateway           | verified    | `docker/Dockerfile.api`, `docker/Dockerfile.web`, `docker/Dockerfile.gateway`; `make build-images` |
+| Production compose stack with ops profile         | verified    | `infra/compose/production.yml`; compose validation runs inside `make release-check`                |
+| Tag-triggered release pipeline publishing to GHCR | verified    | `.github/workflows/release.yml` (`on: push: tags: ['v*']`, build then push matrix)                 |
+| Install and upgrade documentation                 | verified    | `docs/deployment.md` (fresh install, upgrade, rollback, TLS, sizing)                               |
+| First tagged release published                    | in-progress | pipeline exists but no `v*` tag has been pushed (`git tag` is empty)                               |
+
+Remaining: cut the first tagged release so the pipeline proves itself end
+to end; cluster-mode deployment story stays blocked behind phase 14
+hardening and the external review.
 
 ## Launch content program (plan sections 8 and 9)
 
 Live numbers live in `docs/content/catalog-status.md`. Headline as of
-2026-08-24: 50 of 100 rooms authored and gate-green (tracks A and B complete,
-C 5 of 20, D and E empty), 12 of 20 paths, 36 modules, 216 sections,
-115 scored questions, 36 cheat sheets, 11 capstone references.
+2026-08-24 at `ddbc21e`: 109 room bundles authored and gate-green
+(tracks A through F complete plus four external-image wrappers),
+18 of 20 paths, 54 modules, 324 sections, 181 scored questions,
+54 cheat sheets, 13 capstone references across 10 paths.
+
+## Remaining known gaps
+
+Carried from `docs/platforms/integration-matrix.md` minus everything
+closed by the last two days of merges:
+
+1. Attack-defense king-of-the-hill mode (echoCTF.RED, FBCTF). No shared
+   cohort-facing target or capture timer exists anywhere in apps or content.
+2. Achievement toast and badge shelf. Achievements land in the notification
+   feed, but nothing fires an earn-time toast and the profile page has no
+   badge shelf.
+3. Randomized per-instance vulnerable apps (SecGen). The runner builds
+   exactly what each bundle ships; there is no randomization manifest.
+4. Network-capture replay labs (CyberDefenders). No room replays a capture
+   as live traffic.
+5. Crackme-style reverse boards (Crackmes.one). Narrowed: jeopardy
+   attachments plus `file_hash` validators exist; binaries embedding a
+   per-session flag do not.
+6. Learner-facing code-review challenges (Code Review Lab). No code-review
+   validator type exists in the bundle schema.
+7. Team-vs-team red/blue scoring split (echoCTF.RED, FBCTF, VulnArena).
+   Narrowed: teams, events, and frozen scoreboards ship; role-based
+   red/blue objectives do not.
+
+Closed since the matrix was written: hint economy (costed hint tiers in
+room bundles, spends recorded as hint events and surfaced as
+`hint_cost_total` in transcripts), challenge file downloads
+(`GET /api/challenges/{slug}/files/{file_id}`), dynamic score decay (two
+implementations cited under phase 9), OSINT category (accepted enum value
+in the jeopardy challenge schema at `challenges/routes.py:32`), and the
+wrapper-bundle mechanism itself (external_image support, phase 5).
+
+Also open, outside the matrix: branch protection on main (repo-admin
+action), e2e and accessibility gates, chaos drill, load soaks, first
+tagged release, recommendations, transcripts, studio version history,
+and authoring UIs for studio and org admins.
 
 ## Human decisions pending (plan section 15)
 
@@ -249,6 +315,41 @@ Unchanged and still blocking public release only:
 6. External security review.
 
 ## Changelog
+
+### 2026-08-24, second wave (evening)
+
+Twenty-one PRs merged between `b4a9e8c` and head `ddbc21e`, covering
+#34 through #54:
+
+- #54 web: learning view, jeopardy board UI, terminal embed, notifications
+  inbox.
+- #53 streaks with timezone safety, freezes, healthy milestones.
+- #52 localization framework with protected spans and Hungarian sample.
+- #51 rooms 076-080, track D finale.
+- #50 rooms 051-055, active directory concepts batch 2.
+- #49 CI fix: retry pip-audit on transient PyPI advisory API failures.
+- #48 rooms 101-105, classic vulnerable machine boxes, new track F.
+- #47 platform integration matrix covering 54 CTF/lab platforms
+  (`docs/platforms/integration-matrix.md`).
+- #46 rooms 096-100, enterprise capstone finale.
+- #45 rooms 091-095, devsecops and supply chain.
+- #44 external OSS lab wrappers: Juice Shop, DVWA, WebGoat, WrongSecrets,
+  digest-pinned official images (`docs/labs-external.md`).
+- #43 jeopardy challenges with attachments, files portal, dynamic scoring,
+  submissions audit.
+- #42 rooms 086-090, cloud and k8s concepts track E batch 2.
+- #41 rooms 081-085, soc and dfir foundations track E batch 1.
+- #40 lint fix: drop unused noqa on loopback placeholder.
+- #39 teams, events builder, frozen scoreboards (phase 9 remainder).
+- #38 rooms 071-075, reversing and binary foundations track D batch 2.
+- #37 rooms 061-065, track C finale including crown jewels capstone.
+- #36 rooms 056-060, advanced AD concepts batch 3.
+- #35 curriculum wave 6: DFIR, kubernetes container security, and
+  professional engagement paths.
+- #34 rooms 066-070, crypto attacks track D batch 1.
+
+One unnumbered commit also landed: `c4b8214`, gateway test skip when the
+host already occupies port 5900.
 
 ### 2026-08-24
 
