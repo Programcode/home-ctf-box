@@ -24,6 +24,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
         response.headers.setdefault("x-content-type-options", "nosniff")
+        response.headers.setdefault("x-frame-options", "DENY")
         response.headers.setdefault("referrer-policy", "strict-origin-when-cross-origin")
         response.headers.setdefault(
             "content-security-policy", "default-src 'none'; frame-ancestors 'none'"
