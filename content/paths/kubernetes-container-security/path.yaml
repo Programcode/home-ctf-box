@@ -1,0 +1,38 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: kubernetes-container-security
+  title: 'Kubernetes and container security'
+  version: 0.1.0
+  difficulty: medium
+  points: 450
+  estimated_minutes: 200
+  tags:
+    - kubernetes
+    - containers
+    - rbac
+    - network-policy
+    - runtime-security
+spec:
+  track: defense-cloud
+  summary: >-
+    The cloud-native track, built on one honest premise: containers share
+    a kernel, so security comes from knowing exactly what separates them.
+    You open the hood first, namespaces as filtered views and cgroups as
+    ration books, then climb to images, where layered builds keep every
+    instruction forever and hygiene means minimal bases, pinned digests,
+    and honest scan triage. Identity follows: service account tokens,
+    RBAC roles and bindings audited with kubectl impersonation, and
+    secrets delivered through read-only file mounts instead of leaky
+    environments. Network policy closes lateral doors with fail-closed
+    rollouts proven by test matrices, and runtime detection teaches you
+    to read audit logs and sensor signals for exec sessions, secret
+    reads, and escape attempts. The path ends in container-window, where
+    a trust relationship rendered in miniature rewards every habit from
+    least-privilege reading to containment ordering.
+  modules:
+    - slug: container-internals-image-hygiene
+    - slug: pod-identity-rbac-secrets
+    - slug: network-policies-runtime-detection
+  capstones:
+    - container-window

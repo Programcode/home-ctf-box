@@ -1,0 +1,403 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: evidence-handling-chain-of-custody
+  title: 'Evidence handling and chain of custody'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - dfir
+    - evidence
+    - chain-of-custody
+    - acquisition
+spec:
+  track: defense-cloud
+  summary: >-
+    Investigations are decided by the quality of their evidence, and the
+    quality of evidence is decided before any analysis starts. This module
+    teaches the handling discipline that keeps findings defensible months
+    later, in front of auditors, courts, or simply a skeptical colleague.
+    You learn why volatile data goes first, how to acquire disks and
+    directories with cryptographic proof that nothing changed, and how to
+    write custody records that survive review. Then comes the working
+    discipline: sealed originals, verified copies, packaged artifacts with
+    manifests, and handoffs that leave no gaps. The module closes with the
+    classic failure modes, so you can recognize a broken custody chain in
+    someone else's case file and make sure it never describes your own.
+  objectives:
+    - Explain why collection order protects volatile evidence from decay.
+    - Acquire images with cryptographic integrity proofs recorded up front.
+    - Write chain of custody records complete enough to withstand review.
+    - Analyze verified working copies while originals stay sealed and untouched.
+    - Package evidence with manifests and controlled access for storage and handoff.
+    - Recognize custody mistakes that can render findings unusable.
+  sections:
+    - id: evidence-first-thinking
+      title: 'Evidence decays, so order matters'
+      blocks:
+        - type: prose
+          markdown: |
+            Every artifact you might collect has a clock running on it.
+            Running memory holds process lists and network tables that
+            vanish at power off. Log buffers flush on rotation schedules.
+            Disk contents linger longest but change every second the system
+            stays up, because even idle machines write. Collection therefore
+            follows the order of volatility: capture what dies fastest
+            first, then work toward the stable. An analyst who pulls the
+            drive from a live database server to preserve it has just
+            destroyed the most valuable evidence on the box, the picture of
+            what it was doing right then, to save the least perishable
+            part.
+
+            The habit that separates professionals is deciding the plan
+            before touching anything. Which systems, which artifacts, which
+            order, who photographs the screen before anyone moves the
+            mouse. Ten minutes of planning prevents the classic accident,
+            where a well-meant reboot erases the intrusion's memory
+            footprint and the timeline loses its sharpest anchor points.
+        - type: code
+          language: text
+          code: |
+            Order of volatility, practical edition:
+
+              1. registers, running memory          seconds to minutes
+              2. swap, temporary file caches        until reclaimed
+              3. network state and sessions         until connection ends
+              4. active process and login state     until logout/reboot
+              5. disk: filesystem metadata, files   hours to forever
+              6. backups, archives, cold storage    effectively permanent
+
+            Rule: never take an action that destroys a faster-decaying
+            source in order to reach a slower one.
+        - type: callout
+          tone: info
+          markdown: |
+            Photograph or screenshot the live state before collection
+            begins. Screen contents, clock, visible connections. It costs
+            thirty seconds and answers the reviewer's first question,
+            which is always what did the box look like before you touched
+            it.
+        - type: quiz
+          question_id: evh-collection-order
+          question: 'You land on a live, compromised server. Which sequence preserves the most evidence?'
+          options:
+            - id: a
+              text: 'Power off immediately, image the disk in the lab, then review logs.'
+            - id: b
+              text: 'Capture memory, note live state, then image disk while the system runs.'
+            - id: c
+              text: 'Delete attacker tools first so they cannot trigger again, then image.'
+            - id: d
+              text: 'Reboot into safe mode to freeze processes, then collect everything.'
+          answer_ids: [b]
+          explanation: >
+            Volatility ordering puts memory ahead of disk because power
+            actions destroy it. Deleting tools alters the crime scene, and
+            safe-mode reboots clear exactly the state investigators pay to
+            see. Option b collects fast-decaying sources before slow ones.
+    - id: acquiring-with-integrity
+      title: 'Acquisition with integrity proofs'
+      blocks:
+        - type: prose
+          markdown: |
+            Integrity means being able to prove, later, that the evidence
+            you analyzed matches the evidence you collected. Cryptographic
+            hashes do that cheaply. Hash the source before copying when the
+            source allows it, copy with a forensic imager or a byte-for-byte
+            tool, then hash the result. If both digests agree, the copy is
+            faithful. Record the hash values, the algorithm, the tool and
+            its version, the time in UTC, and who ran it. Those five facts
+            turn a file on disk into evidence.
+
+            Tool choice follows the situation. Dedicated imagers handle
+            write blocking and error recovery on physical drives. On cloud
+            volumes or mounted shares, ordinary copy tools plus hashes are
+            often the honest option, and saying so in the custody record is
+            better than pretending otherwise. What matters legally and
+            professionally is not owning exotic gear, it is being able to
+            show your numbers.
+        - type: code
+          language: bash
+          code: |
+            # acquire a partition image on the response workstation
+            $ sudo dc3dd ifs=/dev/nvme0n1p3 of=evidence-web03.img hash=sha256 log=acq.log
+            245039104 sectors copied in 1421s
+            245239/245039104 sectors skipped (unreadable)
+            sha256 hash of source : 9f2c41ab77e0c5d3f81b64aa20cf7e51...
+            sha256 hash of target : 9f2c41ab77e0c5d3f81b64aa20cf7e51...
+
+            $ sha256sum evidence-web03.img | tee evidence-web03.img.sha256
+            9f2c41ab77e0c5d3f81b64aa20cf7e51d84b02a6ce91f3ba7450d8c1ee92ab04f  evidence-web03.img
+
+            reading: source and target digests match, copy is faithful
+        - type: prose
+          markdown: |
+            Note what the transcript documents beyond the hash: sector
+            count, duration, unreadable sectors, tool name. Unreadable
+            sectors deserve special attention, because a sloppy imager
+            papers over them with zeros while a forensic one records where
+            they were. A reviewer comparing your acquisition log against
+            the final analysis can then distinguish damage that existed
+            before collection from damage introduced afterward. That
+            distinction has ended arguments in real cases.
+        - type: quiz
+          question_id: evh-hash-when
+          question: 'Why hash evidence both at acquisition and again before analysis begins?'
+          options:
+            - id: a
+              text: 'Hashes compress the image so analysis tools run faster.'
+            - id: b
+              text: 'The second hash proves the copy stayed unchanged between acquisition and analysis.'
+            - id: c
+              text: 'Two hashes are required so antivirus cannot quarantine the file.'
+            - id: d
+              text: 'The first hash encrypts the image and the second decrypts it.'
+          answer_ids: [b]
+          explanation: >
+            Hashes are integrity seals, not compression or encryption. The
+            pair brackets a time interval, so any alteration between
+            collection and examination shows up as a mismatch and gets
+            investigated rather than ignored.
+    - id: custody-records
+      title: 'Chain of custody records'
+      blocks:
+        - type: prose
+          markdown: |
+            Chain of custody is a boring ledger answering one question:
+            who had this evidence, when, and what did they do with it.
+            Every entry carries the item identifier, the exact hash, the
+            person, the timestamp in UTC, the purpose, and the location or
+            system where the item sat. Transfers get two signatures, one
+            releasing and one receiving. Gaps are the killer. A night
+            nobody can account for turns strong technical findings into a
+            conversation about competence, because if you cannot show who
+            held the disk, nobody has to believe what you say was on it.
+
+            Digital evidence makes the ledger easier, not harder. Copies
+            inherit integrity from hashes rather than locked cabinets, so
+            the chain tracks derivations: this working copy came from that
+            image, verified against this digest. Write entries as you work,
+            never reconstructed afterward from memory, and keep them with
+            the case file where the next person inherits them.
+        - type: code
+          language: markdown
+          code: |
+            ## Case IR-2026-081 custody ledger (UTC)
+
+            | seq | item                    | sha256 (first 16) | action  | by       |
+            |-----|-------------------------|-------------------|---------|----------|
+            | 1   | web03.img               | 9f2c41ab77e0c5d3  | acquire | j.reyes  |
+            | 2   | web03.img               | 9f2c41ab77e0c5d3  | seal    | j.reyes  |
+            | 3   | web03-work.img          | 5ad07be19c33f284  | derive  | m.okafor |
+            | 4   | web03-work.img          | 5ad07be19c33f284  | analyze | m.okafor |
+
+            entry 3 derivation note: copied from item 1 via read-only loop
+            mount, digest verified before analysis, original resealed.
+        - type: prose
+          markdown: |
+            Two details in that ledger repay attention. First, the working
+            copy carries its own hash, so analysis machines can reverify it
+            at any point without touching the sealed original. Second, the
+            derivation note explains the relationship between items, which
+            is what reviewers actually reconstruct. A pile of hashes with
+            no narrative forces every reader to redo your bookkeeping; a
+            one-line note per entry lets them trust it in seconds.
+    - id: working-copies-only
+      title: 'Originals stay sealed, copies do the work'
+      blocks:
+        - type: prose
+          markdown: |
+            Analysis happens on working copies, always. Originals get
+            hashed, logged, and sealed, ideally stored somewhere they will
+            not be touched again unless a court or a director asks. The
+            reasons stack up. Tools crash and corrupt what they open.
+            Mounting a filesystem read-write updates access times and
+            journal data, quietly rewriting the history you were hired to
+            read. And if a dispute arises years later, the untouched
+            original is the referee: rederive a fresh copy, compare hashes,
+            and your conclusions stand on ground nobody can accuse you of
+            farming.
+
+            Software safeguards come close to hardware write blockers for
+            image files. Loop mounts in read-only mode refuse writes at the
+            kernel layer, and most analysis suites verify integrity on
+            load. Make the verification step explicit and log its output;
+            an assertion in a procedure document proves nothing, a captured
+            checksum comparison proves everything.
+        - type: code
+          language: bash
+          code: |
+            # verify the working copy, then mount it strictly read-only
+            $ sha256sum -c web03-work.img.sha256
+            web03-work.img: OK
+
+            $ sudo mount -o ro,loop,offset=$((2048*1050624)) web03-work.img /mnt/work
+            $ mount | grep /mnt/work
+            /dev/loop7 on /mnt/work type ext4 (ro,relatime)
+
+            # attempt a write to prove the mount refuses it
+            $ touch /mnt/work/probe 2>&1
+            touch: cannot touch '/mnt/work/probe': Read-only file system
+        - type: callout
+          tone: warning
+          markdown: |
+            If you ever find yourself mounting an original image read-write
+            because a tool demands it, stop and make a fresh working copy
+            instead. The tool does not get to rewrite your custody story.
+        - type: quiz
+          question_id: evh-working-copy
+          question: 'An analyst must recover deleted files from a suspect image today. Which workflow keeps the evidence defensible?'
+          options:
+            - id: a
+              text: 'Mount the original read-write for speed, note it in the report afterwards.'
+            - id: b
+              text: 'Verify a working copy hash, mount the copy read-only, recover from the copy.'
+            - id: c
+              text: 'Email the original to a teammate so two people share responsibility.'
+            - id: d
+              text: 'Rename the original with a .bak extension so tools treat it gently.'
+          answer_ids: [b]
+          explanation: >
+            Defensibility comes from verified derivation plus read-only
+            handling. Writing to originals contaminates them, sharing
+            custody informally creates gaps, and renaming changes nothing
+            about write protection.
+    - id: packaging-and-handoff
+      title: 'Packaging, storage, and handoff'
+      blocks:
+        - type: prose
+          markdown: |
+            Evidence outlives the investigation's hot phase, sometimes by
+            years, and packaging decides whether future-you can use it.
+            Each case gets a container, a logical archive or a dedicated
+            encrypted volume, holding the images, the exports, the logs,
+            and a manifest listing every file with its hash and a one-line
+            description. Permissions stay restrictive from birth: readable
+            by the case team, writable by nobody after sealing. Encryption
+            protects confidentiality in storage and transit, but the key
+            itself becomes an evidence item with its own custody entries.
+
+            Handoffs transfer the whole package, not loose files. The
+            receiver verifies hashes against the manifest before signing
+            the ledger entry, because accepting a package you have not
+            checked makes you custodian of whatever is actually inside.
+            This ritual feels heavy on small cases; it is exactly what
+            makes large ones survivable.
+
+            Retention completes the picture. Case policy decides how long
+            originals live and when working copies may be destroyed, and
+            disposal gets its own ledger entries recording what was
+            deleted, on whose authority, and what remains. An evidence
+            program without an end-of-life story eventually drowns in
+            unmanaged copies scattered across analyst laptops, which is
+            precisely the state the whole discipline exists to prevent.
+        - type: code
+          language: bash
+          code: |
+            # build the manifest, then seal the case package
+            $ cd case-IR-2026-081 && find . -type f ! -name MANIFEST.sha256 \
+                -exec sha256sum {} \; | sort -k2 > MANIFEST.sha256
+            $ head -3 MANIFEST.sha256
+            5ad07be19c33f284a91c0d6b47e2f810...  ./images/web03-work.img
+            9f2c41ab77e0c5d3f81b64aa20cf7e51...  ./images/web03.img
+            3c88d0fa62be71c95af04d217eb58c33...  ./notes/acq.log
+
+            $ sudo chown -R root:case-081 . && sudo chmod -R g-w,o-rwx .
+            $ ls -ld images
+            dr-xr-x--- 2 root case-081 4096 Aug 21 14:02 images
+        - type: quiz
+          question_id: evh-handoff-manifest
+          question: 'A teammate takes over your case halfway through. What completes a proper evidence handoff?'
+          options:
+            - id: a
+              text: 'A chat message pointing at a shared folder, trusting the platform history.'
+            - id: b
+              text: 'Package with a hash manifest; receiver verifies hashes, then signs the ledger.'
+            - id: c
+              text: 'Send the largest files only; logs can be regenerated if needed.'
+            - id: d
+              text: 'Copy everything to the team drive and mark the old copies for deletion.'
+          answer_ids: [b]
+          explanation: >
+            Verification before signature is the heart of custody
+            transfer. Chat pointers leave gaps, partial packages break
+            derivations, and duplicate copies multiply surfaces that must
+            stay accounted for.
+    - id: custody-failure-modes
+      title: 'How custody chains break'
+      blocks:
+        - type: prose
+          markdown: |
+            Broken cases rarely fail on exotic technique; they fail on
+            bookkeeping. The recurring patterns are worth memorizing,
+            because each one is cheap to prevent and expensive to explain.
+            Time gaps where nobody can say who held an item. Analysis run
+            directly on originals, discovered when access timestamps
+            disagree with the ledger. Hashes recorded from memory hours
+            after acquisition instead of captured at copy time. Clocks set
+            to local time with no zone noted, so two logs argue about the
+            same minute. And the quietest killer, undocumented derivative
+            work, where a copy exists on an analysis workstation that no
+            ledger entry acknowledges.
+
+            Audits catch these because auditors ask simple questions: show
+            me every copy of this image, show me who touched it, show me
+            the clock settings. Answering those questions in seconds is
+            what the discipline buys. When a gap does appear, disclose it
+            in the report with an assessment of impact; a documented,
+            bounded flaw damages a case far less than one discovered by
+            the other side.
+        - type: callout
+          tone: tip
+          markdown: |
+            Adopt one rule and let it carry you: write the custody entry
+            at the moment you touch the evidence, not at the end of the
+            day. Reconstructed records read like reconstructions, and
+            everyone can tell.
+        - type: quiz
+          question_id: evh-custody-gap
+          question: 'Review finds an analysis workstation holds an image copy absent from the custody ledger. What is the correct response?'
+          options:
+            - id: a
+              text: 'Delete the stray copy quickly so the ledger and reality match.'
+            - id: b
+              text: 'Add a retroactive entry claiming the copy was authorized all along.'
+            - id: c
+              text: 'Document the gap, assess whether integrity was affected, disclose it in the report.'
+            - id: d
+              text: 'Ignore it; workstation caches do not count as evidence holdings.'
+          answer_ids: [c]
+          explanation: >
+            Destruction and backdating compound the problem and are the
+            two things that genuinely sink credibility. Honest disclosure
+            with an integrity assessment keeps the rest of the case
+            trustworthy, which is the entire point of custody discipline.
+  cheat_sheet: |
+    # Evidence handling quick reference
+
+    Order of volatility:
+        memory -> swap/network state -> live processes -> disk -> backups
+
+    Acquisition:
+        dc3dd/dd + hash at BOTH ends, record tool, time UTC, operator
+        sha256sum img | tee img.sha256     (seal at birth)
+
+    Custody entry fields:
+        item id, hash, person, UTC time, purpose, location
+        transfers: release signature + receive signature
+
+    Working discipline:
+        originals sealed; analyze copies only
+        sha256sum -c before use; mount -o ro,loop
+        probe with a write attempt to confirm refusal
+
+    Packaging:
+        manifest: find . -type f -exec sha256sum {} \; | sort -k2
+        restrictive perms, encrypt, key gets its own entries
+        handoff: receiver verifies hashes THEN signs
+
+    Failure modes:
+        time gaps, rw mounts on originals, late hashes, local-time clocks,
+        unledgered copies -> prevent by writing entries as you work

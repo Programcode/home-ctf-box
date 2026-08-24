@@ -1,0 +1,418 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: pod-identity-rbac-secrets
+  title: 'Pod identity, RBAC, and secrets handling'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - kubernetes
+    - rbac
+    - service-accounts
+    - secrets
+spec:
+  track: defense-cloud
+  summary: >-
+    Compromise a pod and the next question decides the blast radius: who
+    is this pod to the cluster, and what may it do? This module teaches
+    you to answer that question precisely and then shrink it. You learn
+    how pods receive identity through service accounts and mounted
+    tokens, how RBAC composes roles and bindings into effective
+    permissions, and how to audit both with kubectl impersonation instead
+    of guesswork. The secrets half dismantles the base64 misconception,
+    shows where environment variables leak, and builds the case for file
+    mounts with tightly scoped read access. It ends with an identity
+    review cadence that keeps standing privilege from regrowing quietly.
+    These are exactly the moves the shared-secrets room rehearses with
+    stale credentials and the container-window room rewards under
+    pressure.
+  objectives:
+    - Trace how service accounts give pods verifiable cluster identity.
+    - Map roles and bindings into effective permission sets.
+    - Audit live permissions using kubectl auth and impersonation.
+    - Explain what Secret objects protect and what they never did.
+    - Deliver secrets through files with narrowly scoped read access.
+    - Run recurring identity reviews that retire unused privilege.
+  sections:
+    - id: pods-get-identity
+      title: 'Every pod wears a badge'
+      blocks:
+        - type: prose
+          markdown: |
+            Pods are not anonymous. Each runs as a service account, default
+            unless someone chose better, and the API server issues that
+            account a signed token projected into the filesystem at a
+            fixed path. Any process inside the pod can read its own token
+            and present it to the Kubernetes API, where signature and
+            claims decide what comes back. Identity in this world is
+            possession plus verification; there is no password prompt
+            anywhere. That design makes permissions the entire security
+            story, because whoever controls the pod controls the badge.
+
+            Two details reward attention. Tokens carry audience and expiry
+            claims these days, limiting reuse across contexts and time.
+            And since the token lives on a mounted volume, anyone who can
+            exec or read files inside the pod holds the credential, which
+            reframes every container escape discussion as an identity
+            theft discussion first.
+        - type: code
+          language: bash
+          code: |
+            $ kubectl exec deploy/payments-api -- ls \
+                /var/run/secrets/kubernetes.io/serviceaccount
+            ca.crt   namespace   token
+
+            $ kubectl exec deploy/payments-api -- sh -c \
+                'cat /var/run/secrets/kubernetes.io/serviceaccount/token' \
+                | cut -d. -f2 | base64 -d 2>/dev/null | jq .
+            {
+              "iss": "kubernetes/serviceaccount",
+              "kubernetes.io": {
+                "namespace": "payments",
+                "serviceaccount": { "name": "payments-api" }
+              },
+              "aud": ["https://kubernetes.default.svc"]
+            }
+        - type: callout
+          tone: info
+          markdown: |
+            Workloads that never talk to the API should say so:
+            automountServiceAccountToken: false removes the badge entirely.
+            Defaulting mounts to absent is safer than remembering to
+            unmount later.
+    - id: rbac-mechanics
+      title: 'RBAC mechanics'
+      blocks:
+        - type: prose
+          markdown: |
+            Authorization reduces to three object kinds. A Role lists
+            verbs over resources within one namespace; get, list, watch
+            secrets, for example. A ClusterRole says the same but ranges
+            across the whole cluster, including non-namespaced objects
+            like nodes. Bindings attach those definitions to subjects,
+            users, groups, or service accounts, and only bindings grant;
+            an unwritten role is shelfware. Rules are additive, so
+            effective permission equals the union of everything bound,
+            and subtracting requires editing rules rather than adding
+            exceptions.
+
+            Wildcards deserve suspicion wherever they appear. apiGroups
+            with asterisks and verbs reading everything turn a convenience
+            into a standing invitation, and most real-world cluster
+            incidents involve some binding far wider than its author
+            remembered. Reading a Role means asking what the workload
+            genuinely does against the API; anything beyond that list is
+            risk carried for no benefit.
+
+            Namespacing is the other structural lever. Roles confined to
+            one namespace cannot leak into neighbors, so platform teams
+            reserve ClusterRoles for genuinely cluster-wide duties such
+            as node operations, and everything workload-shaped stays
+            local. When a team asks for cross-namespace reads, the
+            reviewable answer is a per-namespace Role plus bindings,
+            because the grant then names exactly where it reaches instead
+            of quietly spanning the estate.
+        - type: code
+          language: yaml
+          code: |
+            kind: Role
+            metadata: { name: payments-api-reader, namespace: payments }
+            rules:
+              - apiGroups: [""]
+                resources: ["configmaps"]
+                verbs: ["get", "list"]
+              - apiGroups: [""]
+                resources: ["secrets"]
+                resourceNames: ["payments-db"]
+                verbs: ["get"]
+        - type: code
+          language: text
+          code: |
+            $ kubectl describe role payments-api-reader -n payments
+            Name:         payments-api-reader
+            PolicyRule:
+              Resources  Non-Resource URLs  Resource Names  Verbs
+              ---------  -----------------  --------------  -----
+              configmaps.*  []               []              [get list]
+              secrets.*     []               [payments-db]   [get]
+
+            reading: reads any configmap, but exactly one named secret;
+            resourceNames is the least-privilege lever people forget
+        - type: quiz
+          question_id: prs-binding-grants
+          question: 'A Role exists granting secret reads, yet a pod cannot read secrets. What is missing?'
+          options:
+            - id: a
+              text: 'The role needs its verbs capitalized.'
+            - id: b
+              text: 'No binding attaches that role to the pod service account.'
+            - id: c
+              text: 'Secrets cannot be accessed by workloads at all.'
+            - id: d
+              text: 'The namespace must be restarted after role creation.'
+          answer_ids: [b]
+          explanation: >
+            Roles define, bindings grant. Without a RoleBinding naming
+            the service account as subject, the definition affects
+            nobody. This separation is deliberate: definitions describe
+            capability sets while bindings assign them per subject.
+    - id: auditing-permissions
+      title: 'Auditing real permissions'
+      blocks:
+        - type: prose
+          markdown: |
+            Effective permissions beat intended permissions, so audits run
+            against the live authorization layer. kubectl auth can-i asks
+            it directly: does this subject hold this verb over this
+            resource. The --list form dumps the full effective set for an
+            account, which is the fastest way to discover that your
+            deployment's service account can delete deployments. Impersonation
+            flags, --as and --as-group, let administrators run those checks
+            as any subject, verifying the view from inside someone else's
+            badge without borrowing their credentials.
+
+            The audit habit scales through scripts: enumerate service
+            accounts, pull each effective set, diff against expectation.
+            Surprises cluster around two findings, default accounts holding
+            inherited power nobody assigned recently, and cluster-admin
+            group membership granted during an incident and never revoked.
+            Both belong on the retirement list the final section builds.
+
+            Record the audit itself as an artifact. Save command output
+            with dates, note the expectation each account was checked
+            against, and mark every deviation resolved or open. Audits
+            that leave no trail get rerun from scratch by the next
+            skeptical reviewer, while documented ones accumulate into a
+            history showing privilege shrinking on purpose rather than
+            drifting upward by accident.
+        - type: code
+          language: bash
+          code: |
+            $ kubectl auth can-i --list --as=system:serviceaccount:payments:payments-api \
+                -n payments | head -12
+            Resources                                       Non-Resource URLs  Verbs
+            configmaps                                      []                 [get list]
+            secrets/payments-db                             []                 [get]
+            selfsubjectrulesreviews.authorization.k8s.io    []                 [create]
+
+            $ kubectl auth can-i delete deployments --as=system:serviceaccount:payments:payments-api -n payments
+            no
+        - type: quiz
+          question_id: prs-impersonation-purpose
+          question: 'Why prefer auth can-i with --as over logging in as the workload identity?'
+          options:
+            - id: a
+              text: 'Impersonation skips RBAC entirely for faster results.'
+            - id: b
+              text: 'It queries the same authorization layer without extracting or sharing credentials.'
+            - id: c
+              text: 'Service account tokens expire too quickly to use.'
+            - id: d
+              text: 'Only cluster admins may possess tokens.'
+          answer_ids: [b]
+          explanation: >
+            Impersonation answers authorization questions through the
+            server while leaving credentials untouched. Extracting and
+            reusing workload tokens creates exactly the custody problems
+            the rest of this module works to eliminate.
+    - id: what-secrets-are
+      title: 'What Secrets actually are'
+      blocks:
+        - type: prose
+          markdown: |
+            A Secret is an object holding small amounts of sensitive
+            material, and the misconceptions around it cause real harm.
+            Base64 encoding dominates the stored representation, and
+            encoding is not encryption; anyone with read access sees
+            plaintext immediately. What Secrets provide is structure and
+            gating: defined consumption patterns, lifecycle separated from
+            consuming pods, and RBAC deciding who reads. Encryption at
+            rest exists as a cluster configuration the operator must turn
+            on, storing values encrypted in etcd rather than plaintext,
+            and assuming it without checking has embarrassed many teams.
+
+            The honest mental model treats Secrets as access-controlled
+            plaintext with good plumbing. Their value arrives from the
+            surrounding discipline: narrow read grants via resourceNames,
+            audit logging on secret access, rotation schedules that make
+            leaked values worthless quickly. A perfect vault holding a
+            password that rotates never protects a system whose database
+            accepts the old value forever.
+
+            Where secrets belong instead deserves one paragraph. Workload
+            identity, service account tokens exchanged for short-lived
+            cloud credentials through the token request API, removes
+            stored passwords entirely for platforms that support it.
+            External secret managers with rotation built in cover the
+            remainder, syncing into native Secret objects so consumption
+            patterns stay standard. Native Secrets remain the baseline
+            everywhere else, which is why their honest limits matter to
+            know rather than excuse.
+        - type: code
+          language: bash
+          code: |
+            $ kubectl create secret generic payments-db \
+                --from-literal=PGPASSWORD='demo-only-not-real' -n payments
+            secret/payments-db created
+
+            $ kubectl get secret payments-db -n payments \
+                -o jsonpath='{.data.PGPASSWORD}' | base64 -d
+            demo-only-not-real
+
+            reading: decode required nothing but read access; base64 is
+            transport packaging, protection lives entirely in RBAC and
+            etcd encryption settings
+        - type: quiz
+          question_id: prs-base64-misconception
+          question: 'A teammate calls Secret storage encrypted because values appear scrambled. What corrects this?'
+          options:
+            - id: a
+              text: 'Scrambled values prove AES encryption happened.'
+            - id: b
+              text: 'Base64 decodes trivially; encryption at rest is separate cluster config.'
+            - id: c
+              text: 'Secrets are hashed, so originals cannot be recovered.'
+            - id: d
+              text: 'Only etcd administrators could ever decode them.'
+          answer_ids: [b]
+          explanation: >
+            Anyone holding read access reproduces plaintext with one
+            command. Real protection layers sit elsewhere: RBAC grants,
+            audit logs watching reads, optional etcd encryption enabled
+            deliberately by operators.
+    - id: consuming-secrets-safely
+      title: 'Consuming secrets with minimal exposure'
+      blocks:
+        - type: prose
+          markdown: |
+            Delivery choice shapes leak surface. Environment variables feel
+            convenient and leak constantly: they appear in crash dumps and
+            debug endpoints, inherit into every child process, and print in
+            more frameworks than anyone audits. File mounts keep values out
+            of process metadata; the application opens a path when needed,
+            volumes update on rotation without restarts, and accidental
+            echo-through-logging disappears as a class. Projection plus
+            restrictive mode bits round out the picture.
+
+            Pair delivery with scope. The service account should read
+            exactly the secrets it consumes, by name, through resourceNames
+            as earlier sections showed. Applications then need one small
+            loader path, and the combination survives the standard failure
+            drill: compromise a pod, dump its env, find nothing worth
+            having because nothing sensitive ever lived there.
+        - type: code
+          language: yaml
+          code: |
+            spec:
+              containers:
+                - name: api
+                  volumeMounts:
+                    - { name: dbcreds, mountPath: /var/run/creds, readOnly: true }
+              volumes:
+                - name: dbcreds
+                  secret:
+                    secretName: payments-db
+                    items: [{ key: PGPASSWORD, path: pgpass, mode: 0400 }]
+        - type: code
+          language: text
+          code: |
+            $ kubectl exec deploy/payments-api -- ls -l /var/run/creds
+            -r-------- 1 root root  18 Aug 21 09:14 pgpass
+
+            $ kubectl exec deploy/payments-api -- env | grep -i pass || echo clean
+            clean
+
+            reading: credential reachable only as a 0400 file; process
+            environment carries nothing sensitive to leak onward
+        - type: callout
+          tone: tip
+          markdown: |
+            Rotation testing belongs in staging: rotate the secret, watch
+            the mounted file update, confirm the app reconnects. Rotation
+            nobody tested is downtime scheduled for the worst night.
+    - id: identity-review-cadence
+      title: 'Identity reviews that stick'
+      blocks:
+        - type: prose
+          markdown: |
+            Privilege regrows like ivy: each incident, migration, and
+            quick fix adds a binding, and none announce their own decay.
+            Reviews push back on a schedule rather than on inspiration.
+            Quarterly works for most clusters. The pass itself is short:
+            list service accounts and their automount choices, dump each
+            effective permission set, compare against what the workload's
+            current behavior requires, and produce two artifacts, removals
+            with owners and dates, and risks accepted explicitly with
+            review dates attached.
+
+            Metrics keep the cadence honest. Count wildcards in roles,
+            count accounts able to read all secrets, count cluster-admin
+            binders outside platform team membership, and graph them over
+            quarters. Numbers moving the wrong way trigger conversation
+            before incidents do. The end state is boring: every
+            workload holding a handful of named gets, no defaults wearing
+            inherited crowns, and documentation matching reality because
+            reality got checked recently.
+
+            Assign the review an owner who is not the person requesting
+            grants. Self-review drifts toward approval because context
+            always sounds sufficient from inside the request; a second
+            pair of eyes asks why this binding exists with no stake in
+            the answer, which is precisely the question standing
+            privilege never survives.
+        - type: code
+          language: bash
+          code: |
+            # quarterly sweep: which SAs can touch ANY secret?
+            $ kubectl get rolebindings,clusterrolebindings -o json \
+                | jq -r '.items[] | select(.roleRef.name | test("secret|reader"))
+                        | "\(.kind)/\(.metadata.namespace // "-") \(.metadata.name)"'
+            RoleBinding/payments payments-api-reader
+            ClusterRoleBinding/- legacy-ci-secret-reader
+
+            finding: legacy-ci binding predates the CI migration ticket
+            (PLAT-229); owner contacted, removal scheduled Friday
+        - type: quiz
+          question_id: prs-review-artifact
+          question: 'What makes an identity review durable rather than theater?'
+          options:
+            - id: a
+              text: 'Screenshots of dashboard pages filed in chat.'
+            - id: b
+              text: 'Removal tickets with owners plus accepted risks carrying review dates.'
+            - id: c
+              text: 'Rewriting every role from scratch each quarter.'
+            - id: d
+              text: 'Requiring developers to memorize RBAC verbs.'
+          answer_ids: [b]
+          explanation: >
+            Reviews pay off through decisions recorded and executed.
+            Tickets with owners drive change; dated acceptances prevent
+            silent risk accumulation; everything else documents the past
+            without altering the future.
+  cheat_sheet: |
+    # Pod identity, RBAC, secrets quick reference
+
+    Identity chain:
+        SA -> projected token (/var/run/secrets/.../token) -> API verify
+        no API use? automountServiceAccountToken: false
+
+    RBAC reading order:
+        Role (verbs x resources, namespace) / ClusterRole (all)
+        Binding assigns subjects -> additive union = effective set
+        resourceNames: [one-secret] beats secrets: ["*"]
+
+    Audit commands:
+        kubectl auth can-i <verb> <res> --as=system:serviceaccount:<ns>:<sa>
+        kubectl auth can-i --list ...   full effective dump
+
+    Secrets truth:
+        base64 == encoding; decode needs read access only
+        etcd encryption + audit-on-read = operator choices, verify them
+        deliver via readOnly volume mounts, mode 0400, not env
+
+    Review cadence:
+        quarterly: SA list, effective perms, wildcard count,
+        all-secrets readers, stale bindings -> tickets w/ owners

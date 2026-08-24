@@ -1,0 +1,37 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: professional-security-engagement
+  title: 'Professional security engagement'
+  version: 0.1.0
+  difficulty: medium
+  points: 440
+  estimated_minutes: 190
+  tags:
+    - pentest
+    - scoping
+    - reporting
+    - risk
+    - methodology
+spec:
+  track: web-foundations
+  summary: >-
+    The professional track, where offensive skill finally meets the paper
+    that makes it legitimate. Scoping turns business questions into
+    boundaries precise enough to check a packet against, and rules of
+    engagement define techniques, stop conditions, and contacts before
+    anything fires. Operation evidence habits, contemporaneous logs,
+    hashed registers, out-of-scope discoveries routed through channels,
+    keep every claim checkable later. Risk rating teaches CVSS base
+    metrics applied consistently, then adjusts them with documented
+    context instead of dogma; remediation writing delivers fixes
+    engineers can ship without calling anyone. Reporting closes the loop
+    in two altitudes, executive summaries that ask for decisions and
+    technical entries a stranger can reproduce, before a full-spectrum
+    rehearsal block reuses rooms you have already solved as complete case
+    files. A dedicated capstone room for this path is still being built;
+    the readiness checklist here turns the wait into deliberate practice.
+  modules:
+    - slug: scoping-rules-of-engagement
+    - slug: risk-rating-remediation-writing
+    - slug: reporting-capstone-preparation

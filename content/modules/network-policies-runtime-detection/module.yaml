@@ -1,0 +1,416 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: network-policies-runtime-detection
+  title: 'Network policies and runtime detection concepts'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - kubernetes
+    - network-policy
+    - runtime-security
+    - detection-engineering
+spec:
+  track: defense-cloud
+  summary: >-
+    Cluster networks start flat, every pod able to reach every other pod,
+    and attackers treat that fact as free lateral movement. This module
+    teaches the two disciplines that close the gap. First, network
+    policy: how the default-allow model works, what selectors and
+    directionality actually mean, why empty rules deny everything, and
+    how to roll out fail-closed policies with a test matrix proving both
+    blocks and allowed flows. Second, runtime detection: recognizing
+    what abuse looks like from inside a container, then reading the
+    signals clusters emit, API audit events and syscall-level sensors,
+    to catch exec sessions, secret reads, and escape attempts while they
+    happen. The closing section assembles containment habits, isolation
+    before deletion, snapshots before kills, so your first response is
+    evidence-preserving rather than evidence-destroying.
+  objectives:
+    - Explain why default cluster networking invites lateral movement.
+    - Interpret NetworkPolicy selectors, directionality, and additive merging.
+    - Deploy fail-closed policies verified by explicit flow tests.
+    - Recognize runtime abuse patterns visible inside containers.
+    - Detect suspicious activity through audit logs and runtime sensors.
+    - Contain incidents while preserving forensic state.
+  sections:
+    - id: flat-by-default
+      title: 'Flat by default'
+      blocks:
+        - type: prose
+          markdown: |
+            Kubernetes ships with no network segmentation between pods.
+            Any pod holding an IP can open any port on any other pod in
+            any namespace, subject only to whatever runs outside the
+            cluster. The design choice makes sense for getting started,
+            service discovery just works, but it converts a single
+            compromised workload into a tenant of the entire internal
+            network. Databases assume callers are trustworthy because the
+            platform never said otherwise. An attacker who lands in a
+            marketing pod scans the payment namespace across cluster DNS
+            names without leaving the cluster's own address space.
+
+            The mental correction is treating east-west traffic, pod to
+            pod, with the same suspicion north-south traffic already gets.
+            Perimeter firewalls guard the edge; inside, the equivalent
+            control is NetworkPolicy. Before writing one, prove the
+            baseline to yourself: stand up two pods in different namespaces
+            and watch one reach the other with nothing configured. The
+            demonstration takes two minutes and motivates everything after
+            it.
+        - type: code
+          language: bash
+          code: |
+            $ kubectl run probe --rm -it --image=busybox -- wget -qO- \
+                --timeout=3 http://payments-api.payments.svc:8080/healthz
+            ok
+
+            reading: default-allow confirmed; a throwaway pod reached a
+            payments service cross-namespace on the first try
+        - type: quiz
+          question_id: nrd-default-allow-risk
+          question: 'Why does flat default networking raise incident impact specifically?'
+          options:
+            - id: a
+              text: 'It slows down legitimate services during attacks.'
+            - id: b
+              text: 'One compromised workload can reach workloads cluster-wide without obstacles.'
+            - id: c
+              text: 'It prevents NetworkPolicies from being applied later.'
+            - id: d
+              text: 'It exposes nodes directly to the internet.'
+          answer_ids: [b]
+          explanation: >
+            Lateral movement needs reachability plus trust assumptions;
+            defaults provide both. Policies do apply later just fine,
+            and node exposure is a separate concern, which leaves blast
+            radius as the honest cost of flat networking.
+    - id: policy-semantics
+      title: 'Policy semantics that surprise'
+      blocks:
+        - type: prose
+          markdown: |
+            NetworkPolicy logic follows three rules that generate most
+            confusion. First, selection is opt-in per direction: a pod
+            with no ingress policy selected accepts everything, and the
+            moment any policy selects it for ingress, it accepts only what
+            policies allow. Second, emptiness denies: an ingress block
+            with an empty from list means no inbound at all, which is how
+            default-deny gets written. Third, allowances merge additively
+            across all matching policies, so you cannot subtract another
+            team's broad rule, you must fix it where it lives.
+
+            Directionality doubles the surface: ingress and egress are
+            separate stanzas with independent selection, and DNS is egress
+            from the caller even when you think of it as name resolution.
+            Policy types matter too; a manifest declaring only ingress
+            leaves egress untouched. Reading someone else's policy starts
+            with asking which pods it selects, then which directions it
+            governs, then whether emptiness intends denial or accident.
+        - type: code
+          language: yaml
+          code: |
+            kind: NetworkPolicy
+            metadata: { name: default-deny-all, namespace: payments }
+            spec:
+              podSelector: {}            # every pod in this namespace
+              policyTypes: ["Ingress", "Egress"]
+              ingress: []                # empty == deny all inbound
+              egress: []                 # empty == deny all outbound
+        - type: code
+          language: text
+          code: |
+            $ kubectl apply -f default-deny.yaml && sleep 2
+            $ kubectl run probe --rm -it --image=busybox -- \
+                wget -qO- --timeout=3 http://payments-api.payments.svc:8080/healthz
+            wget: download timed out
+
+            reading: same probe, now silent; selection flipped the pod
+            from allow-anywhere to speak-only-when-listed
+        - type: quiz
+          question_id: nrd-empty-rule-meaning
+          question: 'A policy selects a pod for ingress and its ingress list is empty. Result?'
+          options:
+            - id: a
+              text: 'The pod accepts all inbound traffic as before.'
+            - id: b
+              text: 'The pod accepts no inbound traffic; empty equals deny.'
+            - id: c
+              text: 'The policy is invalid and rejected by the API server.'
+            - id: d
+              text: 'Only same-namespace pods may connect.'
+          answer_ids: [b]
+          explanation: >
+            Selection itself switches the pod into whitelist mode, and
+            empty lists whitelist nothing. Same-namespace generosity
+            would require an explicit podSelector matching the
+            namespace's labels.
+    - id: fail-closed-rollout
+      title: 'Rolling out fail-closed, with receipts'
+      blocks:
+        - type: prose
+          markdown: |
+            Sensible namespaces land on the same shape: default deny both
+            directions, then named allowances for real flows, database
+            access from the app tier, DNS egress everywhere, metrics
+            scrape paths from the monitoring stack. The rollout order
+            protects you from yourself: deploy default-deny during low
+            traffic, watch dashboards and error budgets, add allowances
+            until flows resume. Every allowance earns its place by being
+            tested, and every test produces a receipt, command, expected
+            result, observed result.
+
+            Two classics burn teams who skip receipts. Forgetting DNS
+            breaks everything at once, because names resolve through
+            egress UDP 53 to kube-dns, and apps fail in ways that look
+            like anything but policy. And health probes originate from
+            node-local sources whose traffic still counts as ingress,
+            so overly tight rules make Kubernetes kill healthy pods. The
+            test matrix catches both before production does.
+
+            CNI support is the quiet dependency underneath all of it:
+            NetworkPolicy objects exist in the API regardless, but a
+            cluster running a plugin without enforcement ignores them
+            silently, which is worse than having none. Verify once,
+            early, with a deny-everything probe, and record which plugin
+            and version produced your receipts. Policies on an enforcing
+            cluster and policies on a hopeful one look identical in
+            manifests.
+        - type: code
+          language: yaml
+          code: |
+            kind: NetworkPolicy
+            metadata: { name: api-allow-db-dns, namespace: payments }
+            spec:
+              podSelector: { matchLabels: { app: payments-api } }
+              policyTypes: ["Egress"]
+              egress:
+                - to: [{ podSelector: { matchLabels: { app: payments-db } } }]
+                  ports: [{ protocol: TCP, port: 5432 }]
+                - to: [{ namespaceSelector: { matchLabels:
+                      { kubernetes.io/metadata.name: kube-system } } }]
+                  ports: [{ protocol: UDP, port: 53 }]
+        - type: code
+          language: text
+          code: |
+            # flow matrix after rollout (receipt format)
+            api -> db:5432       expect OK     observed OK
+            api -> kube-dns:53   expect OK     observed OK
+            api -> internet:443  expect DENY   observed timeout
+            probe -> api:8080    expect DENY   observed timeout
+            node-probe -> api    expect OK     observed OK
+
+            reading: four denials and three allowances behave exactly as
+            designed; the matrix is the change record
+        - type: quiz
+          question_id: nrd-dns-gotcha
+          question: 'After applying strict default-deny egress, every app fails to resolve names. Why?'
+          options:
+            - id: a
+              text: 'NetworkPolicies disable CoreDNS permanently.'
+            - id: b
+              text: 'DNS queries are blocked egress; an allowance to kube-dns on UDP 53 is missing.'
+            - id: c
+              text: 'The CNI plugin requires a restart to enforce policy.'
+            - id: d
+              text: 'Pods cache negative results forever.'
+          answer_ids: [b]
+          explanation: >
+            Name resolution is outbound traffic like any other. The
+            standard fix pairs a namespace selector for kube-system with
+            UDP 53, and mature templates include it in every egress
+            policy from day one.
+    - id: runtime-abuse-patterns
+      title: 'What abuse looks like inside'
+      blocks:
+        - type: prose
+          markdown: |
+            Detection starts with knowing shapes. Interactive compromise
+            shows a shell or interpreter spawned by something that should
+            not parent shells: nginx launching bash reads differently than
+            a build pod doing so. Cryptominers announce themselves in CPU
+            graphs and process tables, binaries named after system tools
+            pinning cores. Discovery phases produce bursts of short-lived
+            commands, env dumps, file listings, API probes against
+            169.254.169.255 metadata ranges or the kubelet port. Persistence
+            attempts write to writable volumes, cron directories, or try
+            downloading payloads through whatever egress remains.
+
+            None of these patterns require exotic telemetry to notice;
+            they require looking at ordinary telemetry with intent. A
+            process tree listing per pod, sampled regularly, surfaces most
+            of them. The discipline from earlier modules transfers whole:
+            baseline what normal looks like for each workload class, then
+            read exceptions rather than volume.
+        - type: code
+          language: text
+          code: |
+            $ crictl ps && crictl exec 4f19e ps -eo pid,ppid,comm,args | head -6
+              PID  PPID COMM   ARGS
+             1024     7 nginx  nginx: worker process
+             1180  1024 bash   bash -c curl -s http://169.254.169.254/latest/meta-data
+             1204  1180 curl   curl -s http://169.254.169.254/latest/meta-data
+
+            reading: web worker parenting a shell parenting curl aimed at
+            cloud metadata; textbook instance-credential attempt
+        - type: callout
+          tone: warning
+          markdown: |
+            Metadata endpoints deserve special policy attention: blocking
+            pod access to the node link-local range costs nothing and
+            deletes an entire credential-theft category in one line.
+    - id: detection-signals
+      title: 'Audit logs and runtime sensors'
+      blocks:
+        - type: prose
+          markdown: |
+            Two signal families cover cluster compromise. The API server
+            audit log records every request with subject, verb, object,
+            and response code, which turns questions into grep: who listed
+            secrets today, who exec'd into production pods, which service
+            accounts created cluster role bindings. Sensor coverage comes
+            from enabling audit policy with sensible levels, metadata for
+            noise, requestObject for mutations, and shipping the stream
+            somewhere queryable. Runtime sensors sit lower, watching
+            syscalls and container events, and express detections as rules:
+            alert when a container spawns processes outside its expected
+            set, writes below /sys or /proc paths, or loads kernel modules.
+
+            Tuning follows the hunting module's grammar, hypothesis,
+            data source, observation, falsification. Rules fire on
+            deviation from declared baselines, and baselines live next to
+            manifests in review, so a new legitimate behavior updates both
+            the deployment and the expectation together instead of
+            training analysts to click through alerts.
+
+            Signal quality beats signal volume when staffing is real, so
+            route by consequence: privilege grants and exec sessions into
+            production pages a human, secret reads by unusual subjects
+            open tickets with a deadline, and everything else feeds
+            dashboards reviewed on cadence. Revisit routing quarterly,
+            because workloads change faster than alert rules and stale
+            paging rules are how on-call rotations learn to ignore their
+            own phones.
+        - type: code
+          language: bash
+          code: |
+            $ jq -r 'select(.verb=="create" and .objectRef.resource=="pods"
+                       and .objectRef.subresource=="exec")
+                     | [.auditID,.user.username,.objectRef.namespace] | @tsv' \
+                  kube-audit.jsonl | tail -3
+            a91f...  system:user:contractor-k   production
+            b77e...  system:serviceaccount:payments:payments-api  payments
+            c410...  system:user:m.okafor       production
+
+            $ falco-style rule (concept):
+              spawned_process and container and proc.name in (bash,nc,curl)
+                and not trusted_parent_set -> CRITICAL exec-in-container
+        - type: quiz
+          question_id: nrd-audit-event-priority
+          question: 'Which single audit event most deserves immediate paging?'
+          options:
+            - id: a
+              text: 'A developer viewing their own deployment status.'
+            - id: b
+              text: 'A non-platform identity creating a cluster-admin role binding.'
+            - id: c
+              text: 'A nightly job updating a configmap as scheduled.'
+            - id: d
+              text: 'A failed login from an intern mistyping twice.'
+          answer_ids: [b]
+          explanation: >
+            Privilege escalation grants rewrite the authorization plane
+            itself and historically precede worst outcomes. Read-only
+            views, scheduled mutations, and typos belong to dashboards
+            and ticket queues, not pages.
+    - id: containment-habits
+      title: 'Containment without destroying evidence'
+      blocks:
+        - type: prose
+          markdown: |
+            The first response reflexes decide what investigators get to
+            know later. Killing the pod erases memory, ephemeral storage,
+            and process state simultaneously, so containment orders
+            operations deliberately. Isolate first: apply a quarantine
+            NetworkPolicy dropping all traffic for the affected labels,
+            cutting attacker control while the filesystem stays frozen.
+            Capture second: snapshot the volume, export logs and the audit
+            window, preserve the image digest actually running. Only then
+            remove, revoke tokens the identity held, rotate exposed
+            secrets, delete the workload, cordon the node if kernel
+            compromise is suspected.
+
+            Write the sequence down before incidents force improvisation,
+            because calm sequencing survives adrenaline better than good
+            intentions. Post-incident, the policy work matters more than
+            the takedown: the escape path that succeeded becomes a new
+            default-deny rule, a dropped capability, a sensor rule, so
+            yesterday's intrusion funds tomorrow's friction.
+        - type: code
+          language: bash
+          code: |
+            # quarantine: deny all for labeled pods, keep forensics intact
+            $ kubectl label pod/payments-api-7d9f -n payments quarantined=true
+            $ kubectl apply -f - <<'EOF'
+            kind: NetworkPolicy
+            metadata: { name: quarantine, namespace: payments }
+            spec:
+              podSelector: { matchLabels: { quarantined: "true" } }
+              policyTypes: ["Ingress", "Egress"]
+              ingress: []
+              egress: []
+            EOF
+            networkpolicy.networkpolicy.../quarantine created
+        - type: callout
+          tone: tip
+          markdown: |
+            Rehearse this sequence in the container-window room: isolate,
+            inspect, capture, then act. Rooms forgive wrong orders;
+            production rarely does.
+        - type: quiz
+          question_id: nrd-containment-order
+          question: 'Compromised pod confirmed. Which ordering preserves both safety and evidence?'
+          options:
+            - id: a
+              text: 'Delete pod immediately, investigate from backups afterwards.'
+            - id: b
+              text: 'Quarantine via policy, capture state, revoke identity, then remove.'
+            - id: c
+              text: 'Reboot the node to clear malware, then look around.'
+            - id: d
+              text: 'Leave everything running until the weekly change window.'
+          answer_ids: [b]
+          explanation: >
+            Quarantining severs attacker control cheaply while keeping
+            memory and disk intact for capture. Immediate deletion and
+            reboots destroy exactly the state investigations need;
+            waiting hands the attacker time instead.
+  cheat_sheet: |
+    # Network policy and runtime detection quick reference
+
+    Baseline truth:
+        no policy selected = allow all (that direction)
+        any policy selecting pod -> whitelist mode
+        empty ingress/egress list = deny all
+        allowances merge additively; subtraction happens at source
+
+    Rollout shape:
+        default-deny both directions -> watch -> named allowances
+        always pair egress with DNS (kube-system UDP/TCP 53)
+        receipt matrix: flow, expect, observe
+
+    Abuse shapes:
+        web worker -> bash -> curl metadata 169.254.169.254
+        miner CPU pinning, discovery cmd bursts, writable-volume drops
+        block link-local + kubelet ports by policy
+
+    Signals:
+        audit log verbs to watch: exec, create rolebindings,
+        secrets list by odd subjects
+        runtime sensors: unexpected children, /sys writes, modules
+
+    Containment order:
+        quarantine policy -> capture (snapshot, logs, digest)
+        -> revoke identity/secrets -> remove -> postmortem policies

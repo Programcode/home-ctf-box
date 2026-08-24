@@ -1,0 +1,38 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: dfir-investigator
+  title: 'DFIR Investigator'
+  version: 0.1.0
+  difficulty: medium
+  points: 470
+  estimated_minutes: 220
+  tags:
+    - dfir
+    - forensics
+    - incident-response
+    - timelines
+    - reporting
+spec:
+  track: defense-cloud
+  summary: >-
+    The investigator's track, for learners who want cases to rest on
+    evidence that would survive an auditor or a courtroom. You start with
+    the handling discipline everything else depends on, collection order,
+    hashed acquisitions, custody ledgers written as you work, then move
+    into the two great evidence sources: filesystems, where metadata and
+    deleted files tell their stories to The Sleuth Kit, and memory,
+    where Volatility triage catches processes that hide from polite
+    listings. Timeline building turns scattered timestamps into one
+    defensible narrative, the malware-safe workflow keeps your curiosity
+    from detonating anything on production, and report writing packages
+    facts apart from interpretation so readers act on what you found.
+    The path closes in quiet-persistence, where four planted artifacts
+    wait for exactly these habits, from first acquisition note to final
+    timeline entry.
+  modules:
+    - slug: evidence-handling-chain-of-custody
+    - slug: filesystem-memory-forensics
+    - slug: timeline-malware-safety-reporting
+  capstones:
+    - quiet-persistence

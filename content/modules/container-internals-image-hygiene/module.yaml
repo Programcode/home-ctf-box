@@ -1,0 +1,400 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: container-internals-image-hygiene
+  title: 'Container internals and image hygiene'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - containers
+    - namespaces
+    - cgroups
+    - images
+spec:
+  track: defense-cloud
+  summary: >-
+    Containers feel like virtual machines until something goes wrong,
+    and then the difference matters enormously. This module opens the
+    hood. You learn that isolation is a set of kernel features, namespaces
+    providing separate views and cgroups rationing resources, not a
+    security boundary with hard walls, and you prove each mechanism to
+    yourself from a shell. The second half moves up the stack to images:
+    how layered builds record every instruction forever, what secrets
+    left in early layers cost, why minimal bases and pinned digests shrink
+    attack surface, how scanners report and how to read them honestly.
+    It closes on runtime posture, non-root users, read-only filesystems,
+    dropped capabilities, the settings that turn container escapes from
+    trivial to expensive, which is exactly the judgment the
+    container-window room will ask you to apply.
+  objectives:
+    - Explain how namespaces construct the isolation illusion.
+    - Describe how cgroups bound resource consumption per container.
+    - Inspect image layers for build history and embedded leftovers.
+    - Choose minimal base images and pin immutable digests for builds.
+    - Interpret scanner output by severity, exploitability, and fix state.
+    - Harden runtime posture using non-root, read-only, capability settings.
+  sections:
+    - id: namespaced-kernel-view
+      title: 'Namespaces are views, not walls'
+      blocks:
+        - type: prose
+          markdown: |
+            A container is a process whose view of the system has been
+            narrowed. Linux namespaces do the narrowing: the PID namespace
+            makes your process think it is alone in its numbering scheme,
+            the mount namespace gives it a private filesystem tree, network
+            namespaces hand it an interface set of its own, and user
+            namespaces map its internal root to an unprivileged host id.
+            Nothing is virtualized here; one kernel serves everyone. The
+            container believes it owns the machine because the kernel
+            filters what it can see, and every escape story ever told
+            starts from that fact.
+
+            You can watch the machinery without Docker at all. unshare
+            spawns processes inside fresh namespaces, and comparing
+            /proc/self/ns links before and after shows new identifiers
+            where views changed. This ground truth explains behaviors that
+            puzzle people later: two containers sharing a network namespace
+            see each other's ports, and a root process inside a user
+            namespace may still be uid nobody outside it.
+        - type: code
+          language: bash
+          code: |
+            $ readlink /proc/self/ns/pid /proc/self/ns/net
+            pid:[4026531836]
+            net:[4026531840]
+
+            $ unshare --pid --fork --mount-proc sh -c 'readlink /proc/self/ns/pid; ps'
+            pid:[4026532677]
+              PID TTY          TIME CMD
+                1 pts/0    00:00:00 sh
+
+            reading: new pid namespace, and inside it our shell renumbered
+            itself as PID 1; same kernel, different view
+        - type: quiz
+          question_id: cih-pid-namespace-meaning
+          question: 'A process sits in a fresh PID namespace and numbers itself 1. What does that actually isolate?'
+          options:
+            - id: a
+              text: 'It runs on a different kernel from other containers.'
+            - id: b
+              text: 'Only its view of process numbering; kernel services remain shared.'
+            - id: c
+              text: 'Its memory is hardware-separated like a VM guest.'
+            - id: d
+              text: 'It cannot observe or signal any process on the host under any circumstances.'
+          answer_ids: [b]
+          explanation: >
+            Namespaces filter visibility, they do not partition hardware
+            or replace the kernel. The numbering restarts, but the
+            kernel, its drivers, and its vulnerabilities remain shared
+            infrastructure, which is why kernel bugs dominate escape
+            history.
+    - id: cgroups-ration-resources
+      title: 'cgroups ration the machine'
+      blocks:
+        - type: prose
+          markdown: |
+            Where namespaces answer what can be seen, control groups answer
+            how much may be consumed. Every container lands in a cgroup
+            holding limits for memory, CPU bandwidth, I/O, and process
+            counts. The memory controller tracks pages charged to the
+            group and enforces its ceiling by reclaiming, then killing;
+            this is the machinery behind OOMKilled exit codes that confuse
+            people whose applications suddenly die under load. CPU limits
+            translate into scheduling quotas rather than dedicated cores,
+            so a throttled container shares time slices instead of owning
+            silicon.
+
+            Reading the live values demystifies runtime behavior. The
+            unified hierarchy under /sys/fs/cgroup exposes current usage,
+            ceilings, and event counters per group, and correlating those
+            counters with application symptoms converts mystery failures
+            into arithmetic. For defenders the same files are evidence:
+            resource exhaustion patterns distinguish cryptominers from
+            ordinary leaks quickly.
+        - type: code
+          language: bash
+          code: |
+            $ CG=/sys/fs/cgroup/system.slice/docker-9f14c2.scope
+            $ cat $CG/memory.max $CG/memory.current $CG/memory.events
+            536870912
+            512421888
+            oom_kill 3
+
+            $ cat $CG/cpu.max
+            200000 100000
+
+            reading: ceiling 512 MiB, sitting near it, three kills already;
+            cpu quota 2 cores worth of slices per period
+        - type: callout
+          tone: tip
+          markdown: |
+            When a pod restarts without a crash log, check the cgroup
+            events file before blaming the application. oom_kill counts
+            explain most unexplained restarts in minutes.
+    - id: layers-tell-stories
+      title: 'Layers tell stories'
+      blocks:
+        - type: prose
+          markdown: |
+            Images stack read-only layers, one per build instruction, and
+            the union presents them as one filesystem. Two consequences
+            matter for hygiene. First, history is permanent: deleting a
+            file in a later layer hides it but leaves the earlier layer
+            holding the bytes, so credentials copied in step three survive
+            their deletion in step seven. Anyone who pulls the image can
+            walk every layer. Second, layers carry provenance: the history
+            listing maps each layer to its Dockerfile instruction, making
+            images auditable artifacts rather than opaque blobs.
+
+            The inspection habit is cheap and revealing. History output
+            exposes COPY steps worth questioning, curl-and-run chains that
+            nobody remembers approving, and cache-busting tricks that hint
+            at hidden work. Real incidents have begun with someone asking
+            out loud why a base image contains a static binary for a
+            tool no manifest mentions.
+        - type: code
+          language: text
+          code: |
+            $ docker history payments-api:1.7 --no-trunc | head -6
+            IMAGE          CREATED      BY
+            a91f0c...      3 days ago   CMD ["./server"]
+            b77e2d...      3 days ago   COPY . /app
+            c4108a...      3 days ago   RUN chmod 600 /app/deploy.env
+            dd90b3...      3 days ago   COPY . /app
+            ee21f7...      5 days ago   FROM debian:11
+
+            reading: deploy.env gets permissions tightened but never
+            removed; both COPY layers persist, so the env file remains
+            pullable from layer dd90b3 regardless of later cleanup
+        - type: prose
+          markdown: |
+            Fixing that class of finding is structural, not cosmetic.
+            Secrets belong in build-time secret mounts or runtime
+            injection, never in COPY'd context. Multi-stage builds give
+            compile tooling one stage and ship only artifacts to the next,
+            so final layers hold neither compilers nor the material that
+            fed them. The audit question for every layer stays constant:
+            would I be comfortable showing this layer's bytes to a
+            customer?
+        - type: quiz
+          question_id: cih-deleted-layer-file
+          question: 'A Dockerfile copies credentials.json then deletes it two instructions later. What does the shipped image contain?'
+          options:
+            - id: a
+              text: 'Nothing; deletion removes the bytes from all layers.'
+            - id: b
+              text: 'The credentials, still recoverable from the earlier COPY layer.'
+            - id: c
+              text: 'The credentials encrypted by the overlay driver.'
+            - id: d
+              text: 'Only the deletion tombstone, contents unrecoverable.'
+          answer_ids: [b]
+          explanation: >
+            Layer deletion writes a whiteout marker in a new layer while
+            old layers stay byte-identical. Pulling and unpacking the
+            image exposes every historical layer, which is precisely why
+            secrets enter through mounts rather than build context.
+    - id: minimal-bases-pinned-digests
+      title: 'Minimal bases and pinned digests'
+      blocks:
+        - type: prose
+          markdown: |
+            Base choice sets the floor for everything above it. Full
+            distributions ship package managers, shells, and libraries
+            that inflate both CVE counts and the toolkit available to any
+            attacker who lands inside. Minimal bases such as alpine or
+            distroless strip most of that away; distroless runtimes often
+            contain nothing except the language runtime and your binary,
+            meaning no shell for an interactive intruder to enjoy. The
+            tradeoffs are real, debugging gets harder without a shell and
+            glibc compatibility sometimes argues for alternatives, but the
+            default direction is downward.
+
+            Tags lie casually: latest means whatever it meant when someone
+            pushed. Digests cannot lie, since a digest pins the exact
+            bytes, and FROM node@sha256:... turns builds into reproducible
+            events. Renovate-style automation watches for newer digests
+            and proposes updates deliberately, giving you immutability
+            plus freshness instead of either-or.
+
+            Budget the migration realistically, because minimal bases
+            break assumptions quietly. Static binaries linked against
+            glibc miss musl quirks; missing shells break debug exec
+            sessions and force ephemeral sidecar debugging patterns;
+            certificates and time zone data need explicit inclusion.
+            Teams that adopt one service at a time, verify it under load,
+            and write down every surprise build a house style that later
+            migrations inherit for free.
+        - type: code
+          language: dockerfile
+          code: |
+            # before: floats with whatever debian:11 meant today
+            FROM debian:11
+            RUN apt-get update && apt-get install -y python3 curl
+
+            # after: pinned digest, minimal runtime, no package manager
+            FROM python:3.12-slim@sha256:9c04e2b715a81e5f...
+            COPY --from=build /app/server /server
+            USER 10001:10001
+            ENTRYPOINT ["/server"]
+        - type: quiz
+          question_id: cih-digest-pinning-value
+          question: 'What does building FROM an image digest rather than a tag guarantee?'
+          options:
+            - id: a
+              text: 'The image contains no vulnerabilities.'
+            - id: b
+              text: 'Byte-identical base content across builds, independent of registry updates.'
+            - id: c
+              text: 'Faster downloads from regional mirrors.'
+            - id: d
+              text: 'Automatic updates whenever upstream publishes fixes.'
+          answer_ids: [b]
+          explanation: >
+            Digests hash content, so identical digests mean identical
+            bytes forever. Vulnerability absence, speed, and automatic
+            updating are all properties tags pretend to offer; digests
+            trade convenience for determinism and pair with deliberate
+            update automation.
+    - id: scanning-findings-honestly
+      title: 'Scanning, read honestly'
+      blocks:
+        - type: prose
+          markdown: |
+            Scanners match installed components against vulnerability feeds
+            and produce long reports, and teams drown when they treat every
+            line as equal debt. Reading findings honestly means filtering
+            on three axes. Reachability first: a vulnerable library absent
+            from any executed code path is a different animal than the
+            parsing library facing the internet. Fix availability second,
+            since items with published upgrades become tickets while
+            unpatched ones become mitigations and vendor pressure. Severity
+            third, and only third, because CVSS scores describe worst-case
+            assumptions rather than your workload.
+
+            The workflow worth building gates new images in CI against
+            thresholds, refuses critical-and-fixable entries, and produces
+            a diff against the previous scan so reviews discuss deltas
+            instead of rereading the whole backlog. Scanner disagreement
+            is normal; when two tools argue about one finding, the tiebreak
+            is reading the upstream advisory yourself, not averaging.
+        - type: code
+          language: text
+          code: |
+            $ trivy image --severity HIGH,CRITICAL payments-api:1.7 | tail -7
+            ┌──────────────────────┬───────────┬──────────┬────────┐
+            │ Library              │ Vuln      │ Severity │ Fixed  │
+            ├──────────────────────┼───────────┼──────────┼────────┤
+            │ libssl3 3.0.13-1     │ CVE-2026-3│ CRITICAL │ 3.0.15 │
+            │ zlib1g 1.3.dfsg-2    │ CVE-2026-7│ HIGH     │ 1.3.1  │
+            │ curl 8.7.1           │ CVE-2026-2│ HIGH     │ (none) │
+
+            triage: first two rows -> upgrade ticket this sprint;
+            unfixed curl finding -> document exposure (no remote fetch
+            paths in app), revisit weekly
+        - type: callout
+          tone: info
+          markdown: |
+            Publish the triage decision beside the pipeline result. An
+            accepted-risk note with owner and date converts scanner noise
+            into a managed register, and audits stop being archaeology.
+    - id: runtime-posture
+      title: 'Runtime posture: non-root, read-only, least capability'
+      blocks:
+        - type: prose
+          markdown: |
+            Build hygiene shrinks what arrives; runtime posture constrains
+            what it can do once compromised. Three settings carry most of
+            the weight. Running as a non-root user removes the assumption
+            every exploit chain begins privileged. A read-only root
+            filesystem, with writable volumes mounted only where the app
+            needs them, converts persistence attempts into failures, since
+            planting binaries or cron entries requires writing somewhere
+            permanent. Dropping capabilities and disabling privilege
+            escalation strips the remaining superpowers containers inherit
+            by default.
+
+            Kubernetes expresses all three in the securityContext block,
+            and Pod security standards now enforce sane defaults cluster
+            wide. The verification habit matters more than the YAML:
+            exec into the running container, confirm the uid, attempt a
+            write to a system path, expect refusal. Posture claims belong
+            to tests, not slide decks.
+
+            Expect the tradeoffs to surface immediately, because they are
+            the point. Read-only roots push applications toward explicit
+            writable volumes, which documents exactly where state lives;
+            dropped capabilities break tools that assumed silent powers,
+            revealing assumptions nobody wrote down; non-root uids force
+            file ownership decisions that default images had been hiding.
+            Every complaint during hardening names a real unknown, which
+            beats discovering those unknowns during an incident.
+        - type: code
+          language: yaml
+          code: |
+            spec:
+              containers:
+                - name: api
+                  securityContext:
+                    runAsNonRoot: true
+                    runAsUser: 10001
+                    readOnlyRootFilesystem: true
+                    allowPrivilegeEscalation: false
+                    capabilities: { drop: ["ALL"] }
+                  volumeMounts:
+                    - { name: tmp, mountPath: /tmp }
+        - type: code
+          language: text
+          code: |
+            $ kubectl exec deploy/payments-api -- id
+            uid=10001 gid=10001 groups=10001
+
+            $ kubectl exec deploy/payments-api -- touch /usr/bin/x
+            touch: cannot touch '/usr/bin/x': Read-only file system
+
+            reading: posture verified from inside; uid unmapped, writes to
+            system paths refused, persistence needs a mounted volume now
+        - type: quiz
+          question_id: cih-readonly-effect
+          question: 'Which runtime behavior does readOnlyRootFilesystem directly prevent?'
+          options:
+            - id: a
+              text: 'Network connections to unexpected destinations.'
+            - id: b
+              text: 'Planting binaries or cron files on the container root filesystem.'
+            - id: c
+              text: 'Reading secrets mounted from the API server.'
+            - id: d
+              text: 'Kernel module loading from the node.'
+          answer_ids: [b]
+          explanation: >
+            The setting mounts the root filesystem read-only, so
+            persistence-by-writing dies even under root. Network rules,
+            secret access, and kernel operations are governed by other
+            controls entirely, which is why defense in depth stacks
+            several settings instead of trusting one.
+  cheat_sheet: |
+    # Container internals and image hygiene quick reference
+
+    Kernel truth:
+        namespaces = filtered views (pid/mnt/net/user)
+        cgroups = quotas (memory.max, cpu.max, memory.events)
+        one shared kernel -> kernel bugs = escape stories
+
+    Image forensics:
+        docker history --no-trunc       instruction map
+        deleted-in-layer-N still lives in layer < N
+        multi-stage builds keep tooling out of ships
+
+    Hygiene defaults:
+        FROM distroless/slim @sha256:digest (pin bytes)
+        secrets via mounts, never COPY context
+        scan CI gate: severity + fixable + diff vs last
+
+    Runtime posture:
+        runAsNonRoot + readOnlyRootFilesystem + drop ALL caps
+        verify from inside: id; touch /usr/bin/x -> refuse
