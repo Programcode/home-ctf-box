@@ -168,6 +168,17 @@ async def test_default_port_is_5900(make_live_gateway: GatewayFactory) -> None:
     base, _ = await make_live_gateway()
     # Token allows 5900 only and nothing listens there: dial happens on the
     # default port and fails as upstream-unavailable, proving the default.
+    try:
+        probe_reader, probe_writer = await asyncio.wait_for(  # noqa: F841 - probe only
+            asyncio.open_connection("127.0.0.1", 5900), timeout=0.5
+        )
+    except OSError:
+        pass
+    else:
+        probe_writer.close()
+        with contextlib.suppress(Exception):
+            await probe_writer.wait_closed()
+        pytest.skip("host already has a listener on 5900; default-port dial is not observable")
     url = _desktop_url(base, _rfb_token(5900))
     async with ws_connect(url, open_timeout=5) as ws:
         await _expect_close(ws, 1011)
