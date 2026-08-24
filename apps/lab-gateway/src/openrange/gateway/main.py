@@ -12,6 +12,14 @@ import httpx
 import uvicorn
 from fastapi import APIRouter, FastAPI, Request
 from openrange.gateway.config import GatewaySettings, get_settings
+from openrange.gateway.desktop import (
+    DesktopRegistry,
+    HttpVpnHeartbeatClient,
+)
+from openrange.gateway.desktop import (
+    reap_loop as desktop_reap_loop,
+)
+from openrange.gateway.desktop import router as desktop_router
 from openrange.gateway.logging_setup import RequestContextMiddleware, configure_logging
 from openrange.gateway.models import HealthResponse
 from openrange.gateway.problems import register_error_handlers
@@ -45,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout=httpx.Timeout(connect=10.0, read=None, write=None, pool=10.0)
     )
     reaper = asyncio.create_task(reap_loop(app.state.sessions))
+    desktop_reaper = asyncio.create_task(desktop_reap_loop(app.state.desktops))
     logger.info(
         "gateway_started",
         extra={
@@ -58,7 +67,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         reaper.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await reaper
+        desktop_reaper.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await desktop_reaper
         await app.state.sessions.aclose_all()
+        await app.state.desktops.aclose_all()
         await app.state.http.aclose()
         logger.info("gateway_stopped")
 
@@ -83,10 +96,18 @@ def create_app(
         max_per_lab=resolved.max_sessions_per_lab,
         resume_ttl_seconds=resolved.resume_ttl_seconds,
     )
+    app.state.desktops = DesktopRegistry(
+        max_per_lab=resolved.max_sessions_per_lab,
+        resume_ttl_seconds=resolved.resume_ttl_seconds,
+    )
+    # Invoked by a later WireGuard peer watcher; wired now so deployment
+    # config (OPENRANGE_API_URL + gateway secret) is stable.
+    app.state.vpn_heartbeat = HttpVpnHeartbeatClient(secret=resolved.gateway_secret)
     register_error_handlers(app)
     app.add_middleware(RequestContextMiddleware)
     app.include_router(proxy_router)
     app.include_router(terminal_router)
+    app.include_router(desktop_router)
     app.include_router(router)
     return app
 

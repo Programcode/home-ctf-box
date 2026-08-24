@@ -24,6 +24,9 @@ from openrange.api.readiness import router as readiness_router
 from openrange.api.scoring.routes import router as scoring_router
 from openrange.api.setup.routes import router as setup_router
 from openrange.api.studio.routes import router as studio_router
+from openrange.api.vpn.routes import admin_router as vpn_admin_router
+from openrange.api.vpn.routes import internal_router as vpn_internal_router
+from openrange.api.vpn.routes import router as vpn_router
 
 
 @asynccontextmanager
@@ -59,6 +62,9 @@ def create_app() -> FastAPI:
     app.include_router(oidc_router)
     app.include_router(setup_router)
     app.include_router(studio_router)
+    app.include_router(vpn_router)
+    app.include_router(vpn_admin_router)
+    app.include_router(vpn_internal_router)
     app.include_router(metrics_router, prefix="/api")
     register_error_handlers(app)
     return app
