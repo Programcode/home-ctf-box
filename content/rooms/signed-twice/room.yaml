@@ -1,0 +1,92 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: signed-twice
+  title: 'Signed Twice'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 50
+  tags: [dsa, nonce-reuse, digital-signatures, key-recovery]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    LedgerLine's batch signer approves audit entries with DSA over small
+    documented fields, and today it signed two entries with the same
+    nonce k, which you can see because both signatures share an r value.
+    You will recover the nonce with plain modular arithmetic, derive the
+    svc-admin private key from it, sign your own admin token, and take
+    the flag.
+  objectives:
+    - 'Detect nonce reuse in DSA signatures from repeated r values.'
+    - 'Recover the reused nonce k and the private key x with modular arithmetic.'
+    - 'Forge a fresh valid signature over an attacker-chosen admin token.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Toy-field DSA (512-bit p, 160-bit q) implemented in stdlib Python inside the isolated room network; all attack math runs offline in the learner container.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: forge-admin-token
+      title: 'Recover the private key and mint an admin token'
+      prompt: >-
+        Pull the domain parameters and the two published signature records
+        from GET /api/audit, exploit the reused nonce to reconstruct the
+        svc-admin private key, then submit a valid signature over your own
+        token string to POST /admin/token and capture the FLAG value.
+      points: 275
+      hints:
+        - cost: 0
+          text: 'Both entries show the same r. Since r = (g^k mod p) mod q, identical r across two signatures is a public confession that the nonce k was reused.'
+        - cost: 10
+          text: 'Each signature satisfies s = k^-1 (z + x r) mod q. Subtract the two equations: s1 - s2 = k^-1 (z1 - z2), so k = (z1 - z2)(s1 - s2)^-1 mod q.'
+        - cost: 25
+          text: 'Then x = (s1 k - z1) r1^-1 mod q. Verify pow(g, x, p) == y, hash your token as int(sha256(token)) >> 96, pick any fresh nonce k2, compute r2 = pow(g,k2,p) % q and s2 = pow(k2,-1,q)*(z_t + x*r2) % q, and post token, r2, s2 as decimal strings.'
+      solution: |
+        1. GET http://target:8000/api/audit returns params p (512-bit),
+           q (160-bit), g, public y, plus two entries:
+           message_1="ledger-entry-0001:intake" with (r1,s1) and
+           message_2="ledger-entry-0002:release" with (r2,s2). Note
+           r1 == r2: same nonce.
+        2. Hash both messages exactly as the service documents:
+           z_i = int.from_bytes(sha256(m_i).digest(), "big") >> 96,
+           the leftmost 160 bits of SHA-256.
+        3. Recover the nonce. DSA signing computes
+           s_i = k^-1 (z_i + x r) mod q for both entries with the same k,
+           so subtracting gives s1 - s2 = k^-1 (z1 - z2) mod q. Solve:
+
+           k = (z1 - z2) * pow(s1 - s2, -1, q) % q
+
+           Confirm with r == pow(g, k, p) % q before going further.
+        4. Recover the private key from either equation by isolating x:
+           s1 k = z1 + x r1  =>
+
+           x = (s1 * k - z1) * pow(r1, -1, q) % q
+
+           Sanity check: pow(g, x, p) must equal the published y. You now
+           hold svc-admin's signing capability.
+        5. Sign anything. Pick a token string such as
+           "grant-ledgerline-admin" and a fresh nonce k2 (k+1 works):
+           z_t = int.from_bytes(sha256(token.encode()).digest(), "big") >> 96
+           r_new = pow(g, k2, p) % q
+           s_new = pow(k2, -1, q) * (z_t + x * r_new) % q
+        6. POST /admin/token with form fields token, r=str(r_new),
+           s=str(s_new). The verifier recomputes v = g^u1 y^u2 mod p mod q
+           and finds v == r_new, grants the session, and prints FLAG{...}.
+           Submit the flag. The whole attack is modular arithmetic on
+           integers you already have; no crypto library involved.
+      validator:
+        type: per_session_flag
