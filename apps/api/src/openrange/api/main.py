@@ -12,6 +12,7 @@ from openrange.api.auth.routes import router as auth_router
 from openrange.api.auth.webauthn_routes import router as webauthn_router
 from openrange.api.db import dispose_engine, init_engine
 from openrange.api.errors import register_error_handlers
+from openrange.api.events.routes import router as events_router
 from openrange.api.health import router as health_router
 from openrange.api.labs.routes import router as labs_router
 from openrange.api.learning.routes import router as learning_router
@@ -24,6 +25,7 @@ from openrange.api.readiness import router as readiness_router
 from openrange.api.scoring.routes import router as scoring_router
 from openrange.api.setup.routes import router as setup_router
 from openrange.api.studio.routes import router as studio_router
+from openrange.api.teams.routes import router as teams_router
 from openrange.api.vpn.routes import admin_router as vpn_admin_router
 from openrange.api.vpn.routes import internal_router as vpn_internal_router
 from openrange.api.vpn.routes import router as vpn_router
@@ -58,6 +60,8 @@ def create_app() -> FastAPI:
     app.include_router(notifications_router)
     app.include_router(orgs_router)
     app.include_router(scoring_router)
+    app.include_router(teams_router)
+    app.include_router(events_router)
     app.include_router(webauthn_router)
     app.include_router(oidc_router)
     app.include_router(setup_router)

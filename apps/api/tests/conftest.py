@@ -18,6 +18,13 @@ TEST_DB_URL = os.environ.get(
 _TEST_DB_DSN = TEST_DB_URL.replace("+asyncpg", "")
 
 TABLES = [
+    "event_registrations",
+    "event_solves",
+    "event_team_sessions",
+    "event_scoreboards",
+    "events",
+    "team_members",
+    "teams",
     "vpn_leases",
     "vpn_devices",
     "publish_events",

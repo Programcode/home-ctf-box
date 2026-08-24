@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from openrange.config import Settings
+from pydantic import Field
 
 
 class ApiSettings(Settings):
@@ -21,6 +22,7 @@ class ApiSettings(Settings):
     oidc_issuer: str = ""  # empty disables OIDC
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    team_max_size: int = Field(default=8, ge=2, le=64)
 
 
 @lru_cache
