@@ -7,7 +7,8 @@ SHELL := /bin/bash
 
 .PHONY: help bootstrap check lint typecheck test test-unit test-integration test-contract \
   test-content test-solvers test-e2e test-a11y test-security test-load \
-  test-compose-clean-install test-backup-restore up down reset-demo backup restore content-check
+  test-compose-clean-install test-backup-restore up down reset-demo backup restore content-check \
+  build-images push-images release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-28s\033[0m %s\n", $$1, $$2}'
@@ -78,3 +79,35 @@ backup: ## Dump Postgres + MinIO metadata into backups/
 
 restore: ## Restore the latest backup into the running stack
 	bash scripts/restore.sh
+
+IMAGE_REGISTRY ?= ghcr.io
+# ghcr.io requires lowercase repository paths; derive from origin when possible.
+IMAGE_OWNER ?= $(shell git config --get remote.origin.url | sed -E 's#.*[:/]([^/]+)/[^/]+(\.git)?$$#\1#' | tr '[:upper:]' '[:lower:]')
+IMAGE_TAG ?= dev
+
+build-images: ## Build the three production images locally (docker build)
+	docker build -f docker/Dockerfile.api -t $(IMAGE_REGISTRY)/$(IMAGE_OWNER)/openrange-api:$(IMAGE_TAG) .
+	docker build -f docker/Dockerfile.web -t $(IMAGE_REGISTRY)/$(IMAGE_OWNER)/openrange-web:$(IMAGE_TAG) .
+	docker build -f docker/Dockerfile.gateway -t $(IMAGE_REGISTRY)/$(IMAGE_OWNER)/openrange-gateway:$(IMAGE_TAG) .
+
+push-images: ## Push the three production images (requires IMAGE_TAG and GHCR auth)
+	test "$(IMAGE_TAG)" != dev || { echo "refusing to push :dev; set IMAGE_TAG=vX.Y.Z"; exit 1; }
+	for c in api web gateway; do \
+		docker push $(IMAGE_REGISTRY)/$(IMAGE_OWNER)/openrange-$$c:$(IMAGE_TAG); \
+	done
+
+release-check: ## Packaging gates: ruff, prettier, shell syntax, compose validation
+	uv run ruff check .
+	pnpm exec prettier --check .
+	@for f in scripts/*.sh scripts/operations/*.sh tests/install/*.sh; do \
+		bash -n "$$f" || exit 1; \
+	done
+	@if [ -f .env ]; then created=0; else \
+		printf 'POSTGRES_PASSWORD=release-check\nOPENRANGE_S3_ACCESS_KEY=release-check\nOPENRANGE_S3_SECRET_KEY=release-check\nOPENRANGE_MEILI_MASTER_KEY=release-check\n' > .env; \
+		created=1; \
+	fi; \
+	docker compose -f infra/compose/production.yml --env-file .env --profile ops config > /dev/null; \
+	rc=$$?; \
+	if [ "$$created" = "1" ]; then rm -f .env; fi; \
+	[ $$rc -eq 0 ] && echo "infra/compose/production.yml validates"; \
+	exit $$rc

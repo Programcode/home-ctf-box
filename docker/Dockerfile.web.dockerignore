@@ -1,0 +1,22 @@
+# Build context slimming for docker/Dockerfile.web (context = repo root).
+.git
+.github
+.devcontainer
+.hermes
+apps/api
+apps/lab-gateway
+apps/lab-runner
+backups
+content
+docs
+licenses
+platform
+rooms
+scripts
+security
+tests
+node_modules
+**/.next
+**/__pycache__
+**/*.pyc
+**/.venv

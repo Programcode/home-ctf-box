@@ -1,0 +1,58 @@
+# OpenRange web image (Next.js standalone output).
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.web -t openrange-web:dev .
+#
+# pnpm workspace install + `next build` in a builder stage; the runtime is
+# node:22-bookworm-slim with the traced standalone bundle only, running as
+# uid 10001. Requires output:'standalone' in apps/web/next.config.ts.
+
+FROM node:22-bookworm-slim AS builder
+
+RUN corepack enable
+
+WORKDIR /repo
+
+# Workspace manifests first for layer caching.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/tsconfig/package.json packages/tsconfig/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY apps/web/package.json apps/web/package.json
+
+RUN pnpm install --frozen-lockfile --filter web...
+
+# tsconfig ships JSON configs consumed by apps/web/tsconfig.json.
+COPY packages/tsconfig/ packages/tsconfig/
+COPY packages/contracts/ packages/contracts/
+COPY packages/ui/ packages/ui/
+COPY apps/web/ apps/web/
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm --filter web build
+
+FROM node:22-bookworm-slim AS runner
+
+RUN groupadd --gid 10001 --system nextjs \
+    && useradd --uid 10001 --gid 10001 --system --home-dir /nonexistent \
+       --shell /usr/sbin/nologin nextjs
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3100 \
+    HOSTNAME=0.0.0.0
+
+# Standalone server traces the workspace sources it needs; static assets
+# are served by the Next.js runtime from .next/static.
+COPY --from=builder /repo/apps/web/.next/standalone /app
+COPY --from=builder /repo/apps/web/.next/static /app/apps/web/.next/static
+
+USER 10001:10001
+EXPOSE 3100
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+CMD ["node", "apps/web/server.js"]
