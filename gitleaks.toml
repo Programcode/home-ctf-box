@@ -16,6 +16,9 @@ description = "Intentional challenge fixtures: room targets and manifests carry 
 paths = [
   '''^content/rooms/[^/]+/target/.*$''',
   '''^content/rooms/[^/]+/room\.yaml$''',
+  # Curriculum crypto lessons use obviously fake encoded strings as
+  # teaching examples; nothing real is ever stored here.
+  '''^content/modules/[^/]+/module\.yaml$''',
   '''^rooms/''',
   '''^platform/''',
 ]
