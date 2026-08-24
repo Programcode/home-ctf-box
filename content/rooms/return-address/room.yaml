@@ -1,0 +1,117 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: return-address
+  title: 'Return Address'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 55
+  tags: [reversing, pwn-basics, rop, ret2win, linux, ssh]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    A deliberately mitigation-free toy target lets you practice the full
+    return-oriented workflow end to end. ropebridge is statically linked,
+    stripped, compiled with no PIE and no stack protector, and it reads
+    past its 64-byte order buffer; NX stays on, so shellcode is out and a
+    return chain is the answer. The build captured symbols.txt and a
+    focused disassembly before stripping, so every address you need is on
+    the box. Derive the padding from the disclosed buffer depth, chain a
+    pop rdi gadget with the magic constant into win, and collect the flag.
+  objectives:
+    - 'Explain how each disabled mitigation widens what an overflow can reach.'
+    - 'Recover function addresses and gadgets from a symbol map and disassembly dump of a stripped binary.'
+    - 'Assemble a deterministic ret2win chain: padding, pop rdi gadget, argument constant, target function.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and the
+      learner shell; sessions run as unprivileged learner (uid 1000). The
+      ropebridge helper is purpose-built for this room and carries the
+      setuid bit only so the win path can read the root-owned flag file;
+      the overflow targets a toy process inside one disposable container
+      and touches nothing beyond it. No shellcode, no real-world exploit
+      code, and no external systems are involved. Disposable Debian
+      container on an internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: ret2win-chain
+      title: 'Chain your way into win(0xdeadbeef)'
+      prompt: >-
+        Log in as learner with password learner. Recon /opt/challenges:
+        the ropebridge binary is stripped, but symbols.txt and dump.asm
+        were captured before stripping. Confirm from the banner how deep
+        the order buffer is, find the addresses of win and of the
+        pop rdi; ret gadget, then craft a payload that overflows climb's
+        saved return address with a chain calling win(0xdeadbeef). Pipe
+        your payload into the binary over SSH and submit the FLAG it
+        prints at the summit.
+      points: 300
+      hints:
+        - cost: 0
+          text: >-
+            The banner discloses the buffer depth, and x86-64 keeps an
+            eight-byte saved frame pointer between any buffer's end and
+            the saved return address, so padding equals depth plus eight.
+            NX is still on here, which rules out shellcode but not chains.
+        - cost: 10
+          text: >-
+            /opt/challenges/symbols.txt lists the pre-strip addresses of
+            win, climb, main, and two named gadget functions;
+            /opt/challenges/dump.asm disassembles those functions. Read
+            the bytes rather than trusting names: both gadget functions
+            open with frame-setup instructions, so the usable gadgets are
+            the raw pop %rdi followed by ret inside one of them, plus a
+            standalone ret byte for stack alignment.
+        - cost: 25
+          text: >-
+            Payload = 72 filler bytes (64 buffer + 8 saved rbp), p64(pop
+            rdi; ret), p64(0x00000000deadbeef), p64(bare ret), p64(win),
+            little-endian, fed through base64 -d. The extra ret keeps the
+            stack 16-byte aligned on win's behalf so its printf cannot
+            fault on movaps.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Recon the artifacts: cat /opt/challenges/symbols.txt maps
+           names to fixed addresses (no PIE, so they never move).
+           Run /opt/challenges/ropebridge once with empty stdin to read
+           the banner: the order buffer is 64 bytes deep.
+        3. Find the real gadgets in less /opt/challenges/dump.asm. The
+           gadget_pop_rdi_ret function reads:
+           push rbp; mov rsp,rbp; pop rdi; ret
+           Entering it at its symbol address executes the prologue and
+           ruins the chain, so take the address of the pop instruction
+           itself, the one whose next byte is ret. Note one standalone
+           ret byte nearby too; you will need it for alignment.
+        4. Compute the layout. Padding = 64 buffer bytes + 8 saved rbp =
+           72 filler bytes before the saved return address slot. Build
+           the chain locally:
+           python3 -c "import struct,sys; sys.stdout.buffer.write(
+           b'A'*72 + struct.pack('<QQQQ', GADGET, 0xdeadbeef, RET,
+           WIN))" where GADGET, RET and WIN come from the artifacts,
+           then base64 it: ... | base64 > chain.b64
+        5. Deliver it over SSH:
+           printf '%s' '<paste base64>' | base64 -d | /opt/challenges/ropebridge
+           The read loop swallows every byte until EOF, then climb's ret
+           slides into the gadget: pop rdi loads 0xdeadbeef, the bare ret
+           keeps the stack aligned, and win's magic check passes.
+        6. The program prints === SUMMIT REACHED === and FLAG{...}.
+           Submit that value.
+      validator:
+        type: per_session_flag

@@ -1,0 +1,114 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: stack-snacks
+  title: 'Stack Snacks'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 45
+  tags: [reversing, pwn-basics, stack-canary, format-string, linux, ssh]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    Two purpose-built programs teach what modern mitigations do to the
+    classic stack overflow. The snack CLI reads far past its 64-byte
+    buffer but is compiled with canary, NX, and PIE, so a full exploit is
+    impossible by design; what you can do is measure exactly where the
+    guard sits by feeding patterns of increasing length. A companion
+    kiosk service leaks its own canary through an adjacent format-string
+    bug, and its quiz endpoint pays out when you demonstrate both skills:
+    the leaked canary value and the offset.
+  objectives:
+    - 'Explain what stack canaries, NX, and PIE each remove from classic overflow arithmetic.'
+    - 'Measure a canary offset empirically with pattern inputs of increasing length.'
+    - 'Leak a stack guard value with positional format-string verbs and reason about which candidate is the canary.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and the
+      learner shell; sessions run as unprivileged learner (uid 1000). Both
+      challenge binaries are plain executables without special bits; the
+      kiosk runs as root only long enough to pin a read descriptor on the
+      root-owned flag file and then drops to uid 1000, so the deliberate
+      format-string bug stays fully unprivileged. Full exploitation is
+      blocked by design; canary, NX, and PIE remain enabled throughout.
+      Disposable Debian container on an internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22, 9994]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: canary-quiz
+      title: 'Measure the guard, leak it, pass the quiz'
+      prompt: >-
+        Log in as learner with password learner. First demonstrate crash
+        control against /opt/challenges/snack: prove that a 56-byte
+        pattern passes cleanly while a 96-byte pattern trips the stack
+        smashing detector, and note why nothing beyond that boundary is
+        reachable. Then connect to the snack-vendor kiosk on port 9994,
+        use its order command as a format string to leak this process's
+        stack canary, identify the real canary among the values you see,
+        answer both quiz questions (canary value and byte offset), and
+        submit the FLAG the kiosk pays out.
+      points: 250
+      hints:
+        - cost: 0
+          text: >-
+            The snack binary is compiled with canary plus NX plus PIE on
+            purpose. Feed it head -c 56 /dev/zero | tr '\0' A and then 96
+            bytes; the flip from clean exit to smashing detector marks the
+            guard's position without any debugger at all.
+        - cost: 10
+          text: >-
+            The kiosk passes your order text straight to fprintf as a
+            format string. Verbs like %7$p read values out of the running
+            frame; walk several positions (%1$p through %24$p) and look
+            for the large number whose lowest byte is 00, because glibc
+            canaries always end in a zero byte.
+        - cost: 25
+          text: >-
+            Send order %1$p,%2$p,%3$p,%4$p,%5$p,%6$p,%7$p,%8$p in three
+            batches up to %24$p, collect candidates ending in 00, then
+            send quiz, answer question 1 with each hex candidate until one
+            is accepted, and answer question 2 with decimal 64.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Boundary proof on the CLI binary:
+           head -c 56 /dev/zero | tr '\0' A | /opt/challenges/snack
+           prints devoured 56 bytes and exits RC=0. Repeat with 96 bytes:
+           the run dies with *** stack smashing detected *** and a nonzero
+           status. Byte 65 lands inside the canary, and because the binary
+           also has NX and PIE there is no path from corruption to control;
+           that ceiling is the lesson.
+        3. Walk the kiosk frame. Connect to port 9994 (for example with
+           python3 socket one-liners over SSH) and send three orders:
+           order %1$p,%2$p,%3$p,%4$p,%5$p,%6$p,%7$p,%8$p
+           order %9$p,%10$p,%11$p,%12$p,%13$p,%14$p,%15$p,%16$p
+           order %17$p,%18$p,%19$p,%20$p,%21$p,%22$p,%23$p,%24$p
+           Each reply echoes formatted stack values back.
+        4. Pick the canary: among the echoed values, pointers and small
+           integers are noise; the genuine guard is a large random-looking
+           number whose lowest byte is 00 (glibc sets it so strings never
+           leak past it).
+        5. Answer the quiz. Send quiz, then your candidate as hex (0x...).
+           If it answers wrong canary, reconnect (the kiosk process keeps
+           the same canary) and try the next candidate. Once accepted,
+           question 2 asks for the offset; the order buffer is 64 bytes,
+           so answer 64.
+        6. Correct answers make the kiosk print prize: FLAG{...}. Submit
+           that value.
+      validator:
+        type: per_session_flag

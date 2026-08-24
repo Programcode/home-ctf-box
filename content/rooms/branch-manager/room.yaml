@@ -1,0 +1,104 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: branch-manager
+  title: 'Branch Manager'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 35
+  tags: [reversing, control-flow, objdump, linux, ssh]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    A license checker on this box greets you with a vendor bulletin that
+    advertises its own master key format, and the advertised key is a lie:
+    the constant it compares against was corrupted when the build was made,
+    so no typed key ever satisfies it. The real path into the granted branch
+    is guarded by three numeric checks whose immediate values appear only in
+    the disassembly. You will read /opt/challenges/notes.asm, separate the
+    dead comparison from the live one, craft a key from the live constants,
+    and take the branch that prints the flag.
+  objectives:
+    - 'Follow a program control flow at the assembly level and tell dead branches from live ones.'
+    - 'Read compiler-generated disassembly to extract comparison constants.'
+    - 'Craft input that satisfies checksum constraints derived from a disassembly dump.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      sshd needs setuid and DAC overrides for privilege separation and the
+      learner shell; sessions run as unprivileged learner (uid 1000). The
+      license-check helper is purpose-built for this room and carries the
+      setuid bit only so the granted path can read the root-owned flag file;
+      it prints text and changes nothing. No debugger tricks, no memory
+      corruption, and no real-world exploit code are involved. Disposable
+      Debian container on an internal lab network.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: craft-license
+      title: 'Craft a key the verifier actually accepts'
+      prompt: >-
+        Log in as learner with password learner. Run
+        /opt/challenges/license-check and try the master key format the
+        vendor bulletin advertises; notice it is rejected. Then read the
+        full disassembly captured at /opt/challenges/notes.asm, find the
+        verify_key function, and work out which constants guard the only
+        route into grant_license. Craft any key satisfying those checks,
+        feed it to the checker, and submit the FLAG value it prints.
+      points: 175
+      hints:
+        - cost: 0
+          text: >-
+            The banner quotes a bulletin. Type that advertised key in and
+            watch it fail, then ask yourself whether the string being
+            compared against really equals what the banner says. Strings
+            output shows two near-identical license constants.
+        - cost: 10
+          text: >-
+            /opt/challenges/notes.asm holds an objdump of the binary with
+            function names intact. Locate <verify_key>: and read every cmp
+            instruction in it; those immediate operands never appear in
+            strings output because they are numbers, not text.
+        - cost: 25
+          text: >-
+            verify_key demands length exactly 20, byte sum exactly 1909
+            (0x775), and first byte B (0x42). Any 20 bytes starting with B
+            that add up to 1909 pass: B followed by nineteen lowercase a
+            characters does it.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. Try the honest-looking path first:
+           echo 'BMGR-LIFETIME-2026' | /opt/challenges/license-check
+           prints "license denied". strings /opt/challenges/license-check
+           shows why the obvious constant cannot win: the embedded compare
+           string ends in an unprintable byte instead of the digit 6, so
+           strcmp against anything you type always fails. That branch is
+           dead weight.
+        3. Read the dump: less /opt/challenges/notes.asm. Inside
+           <corrupt_compare>: sits the mangled strcmp constant. Inside
+           <verify_key>: sit three comparisons with immediate values:
+           cmpq $0x14 (length 20), cmp $0x775 (byte sum 1909), and
+           cmp $0x42 (first byte B). Both branches converge on
+           <grant_license>, so satisfying verify_key reaches it.
+        4. Craft a key. Nineteen 'a' bytes add 1843, plus 'B' (66) gives
+           1909, and the total length is 20:
+           echo 'Baaaaaaaaaaaaaaaaaaa' | /opt/challenges/license-check
+        5. The checker prints === LICENSE GRANTED === followed by
+           FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag
