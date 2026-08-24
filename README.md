@@ -7,24 +7,26 @@ isolated per-user labs, a content SDK, and a growing curriculum of rooms,
 paths, and modules. Built for a Raspberry Pi 5 on your home LAN and
 developed on an x86 VPS; images are multi-arch.
 
-Status snapshot (2026-08-24): 50 lab-backed rooms across three tracks,
-12 learning paths, 36 modules, learning engine, scoring with leaderboards,
+Status snapshot (2026-08-24): 109 lab-backed room bundles across six
+tracks plus four external OSS wrappers, 18 learning paths, 54 modules,
+learning engine with streaks and i18n, jeopardy challenge board,
+teams and events with frozen scoreboards, scoring with leaderboards,
 orgs and cohorts, notifications, studio review workflow, observability
-stack, and CI security gates. Current phase status lives in
-`docs/roadmap/implementation-status.md`.
+stack, packaging and release pipeline, and CI security gates. Current
+phase status lives in `docs/roadmap/implementation-status.md`.
 
 ## What runs where
 
-| Piece             | Path                   | What it is                                                                   |
-| ----------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| Control plane API | `apps/api`             | Auth/RBAC/sessions/MFA, labs, learning, scoring, orgs, notifications, studio |
-| Learner web app   | `apps/web`             | Catalog, dashboard, labs, profile pages on Next.js                           |
-| Lab gateway       | `apps/lab-gateway`     | Authenticated HTTP proxy to lab targets plus browser SSH terminal            |
-| Lab runner        | `apps/lab-runner`      | Per-user container lifecycle with HMAC auth and reconcile loop               |
-| Content SDK       | `packages/content-sdk` | Room/path/module schema, linting, solver harness, `cyberrange` CLI           |
-| Design system     | `packages/ui`          | Shared tokens and React components                                           |
-| Content           | `content/`             | 50 room bundles, 12 paths, 36 modules                                        |
-| Compose stacks    | `infra/compose/`       | core, dev, runner, gateway, observability profiles                           |
+| Piece             | Path                   | What it is                                                                                                            |
+| ----------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Control plane API | `apps/api`             | Auth/RBAC/sessions/MFA, labs, learning, streaks, challenges, scoring, teams, events, orgs, notifications, studio, vpn |
+| Learner web app   | `apps/web`             | Catalog, dashboard, labs, learn, challenges, terminal, notifications, profile pages on Next.js                        |
+| Lab gateway       | `apps/lab-gateway`     | Authenticated HTTP proxy to lab targets plus browser SSH terminal and VNC desktop bridge                              |
+| Lab runner        | `apps/lab-runner`      | Per-user container lifecycle with HMAC auth and reconcile loop                                                        |
+| Content SDK       | `packages/content-sdk` | Room/path/module schema, linting, solver harness, i18n validation, `cyberrange` CLI                                   |
+| Design system     | `packages/ui`          | Shared tokens and React components                                                                                    |
+| Content           | `content/`             | 109 room bundles, 18 paths, 54 modules                                                                                |
+| Compose stacks    | `infra/compose/`       | core, dev, runner, gateway, observability, production profiles                                                        |
 
 ## Feature list
 
@@ -36,14 +38,39 @@ What actually works today, each verifiable in the linked code:
   cross-tenant isolation at the API layer (`apps/api/src/openrange/api/labs/`).
 - Learning engine: enrollment, section progress, catalog queries backing
   the web catalog (`apps/api/src/openrange/api/learning/`).
+- Streaks: timezone-safe daily streaks with freeze days and healthy
+  milestone thresholds (`apps/api/src/openrange/api/streaks/`).
+- Localization: bundle-level i18n framework with protected spans and a
+  shipped Hungarian sample (`packages/content-sdk/src/openrange/content/i18n.py`,
+  `docs/i18n.md`).
+- Jeopardy board: containerless CTF challenges with attachments, a file
+  download portal, dynamic score decay, and submissions audit
+  (`apps/api/src/openrange/api/challenges/`).
 - Scoring: flag submission with first-blood handling, projections, scoped
   leaderboards including monthly periods (`apps/api/src/openrange/api/scoring/`).
+- Teams and events: team rosters with invites, an event builder with
+  registrations, and frozen event scoreboards
+  (`apps/api/src/openrange/api/teams/`, `apps/api/src/openrange/api/events/`).
+- External OSS lab integrations: OWASP Juice Shop, DVWA, WebGoat, and
+  WrongSecrets run from upstream official images pinned by digest inside
+  normal lab lifecycle rooms (`content/rooms/juice-shop-tour/`,
+  `docs/labs-external.md`).
+- Remote access: WireGuard device lifecycle API with per-device config QRs
+  (`apps/api/src/openrange/api/vpn/routes.py`) and a browser VNC desktop
+  bridge in the gateway (`apps/lab-gateway/src/openrange/gateway/desktop.py`).
+- Web app surfaces: learning view with path progress, embedded browser
+  terminal, jeopardy challenge board, and a notifications inbox
+  (`apps/web/app/learn`, `terminal`, `challenges`, `notifications`).
 - Organizations: orgs, cohorts, invites, instructor endpoints
   (`apps/api/src/openrange/api/orgs/`).
 - Notifications: announcements, preferences, feed, email outbox worker
   (`apps/api/src/openrange/api/notifications/`).
 - Studio: drafts, review workflow, atomic publish
   (`apps/api/src/openrange/api/studio/`).
+- Packaging: production images for api/web/gateway, production compose
+  stack, tag-triggered GHCR release pipeline (`docker/`,
+  `infra/compose/production.yml`, `.github/workflows/release.yml`,
+  `docs/deployment.md`).
 - Observability: Prometheus, Grafana, Loki stack with readiness probes and
   backup/restore tooling (`infra/compose/observability.yml`, `docs/operations.md`).
 - Security gates in CI: bandit, pip-audit, pnpm audit, gitleaks
