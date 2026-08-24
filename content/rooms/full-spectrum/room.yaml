@@ -1,0 +1,164 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: full-spectrum
+  title: 'Full Spectrum'
+  version: 1.0.0
+  difficulty: insane
+  points: 600
+  estimated_minutes: 150
+  tags: [capstone, red-team, blue-team, incident-report, kill-chain]
+spec:
+  track: defense-cloud
+  type: range
+  summary: >-
+    The grand capstone of the finale track, one locked container playing
+    five hosts behind a Host-header controller. The red chain runs initial
+    access through reused partner credentials on portal.spectrum.io, a
+    single sign-on pivot into git.internal.spectrum.io where CI config
+    leaks a console key, privilege escalation by impersonating an active
+    admin session on core-db.spectrum.internal, and exfil staging at
+    archive.spectrum.internal that pays the first flag. The blue
+    deliverable then grades a professional incident report at
+    ir.spectrum.io against a /review rubric covering scope in attack
+    order, four findings with severity mappings, and ordered remediation
+    priorities; only full red plus blue completion yields the second flag.
+  objectives:
+    - 'Execute a complete kill chain across four simulated estate hosts without breaking state between stages.'
+    - 'Write the defensive counterpart: scope the incident precisely, map severities defensibly, and order remediation by risk.'
+    - 'Understand why professional reporting is graded as rigorously as exploitation, and what makes each rubric line fail or pass.'
+  prerequisites: [minimcorp-breach, minimcorp-defense, purple-replay, cloud-company]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: five Flask apps bind to separate loopback
+      ports inside one locked container and a front controller routes by
+      Host header like edge plus internal load balancers. There is no
+      corporate network, no real credentials (the breach corpus is
+      synthetic), no real database, and no real data egress; flags are
+      delivered as environment variables per task, tokens derive from
+      this session's flags, and all state resets on restart. Unprivileged
+      app user, capabilities dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: red-chain
+      title: 'Run the kill chain from initial access to exfiltration'
+      prompt: >-
+        Address the simulated hosts through http://target:8000 using Host
+        headers. Start at portal.spectrum.io: read the security notice,
+        pull the defanged partner-breach corpus from
+        /static/partner-breach.txt, and find the one pair that also works
+        on POST /login to obtain a session token. Pivot with it: call
+        GET /api/jump/git with header X-Spectrum-Session, then read
+        GET /projects/edge-api/blob/CI.yml on
+        git.internal.spectrum.io using the same session header to recover
+        the console key. Escalate on core-db.spectrum.internal:
+        POST /console/login with the key, GET /console/sessions, then
+        POST /console/impersonate on the privileged sid to learn the
+        staging dataset. Exfiltrate at archive.spectrum.internal:
+        POST /archive/stage {"dataset": "<staging dataset>",
+        "destination": "mirror-b"} with header X-Spectrum-Admin set to
+        the admin sid; the response carries the FLAG value for this task.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'The portal page itself tells you where its exposure check corpus lives. Every line is a candidate credential; only accounts on this estate can log in, so test pairs rather than assuming.'
+        - cost: 10
+          text: 'The jump service and the git service honor the same X-Spectrum-Session header, single sign-on is the pivot. The pipeline yaml prints its console key because vault integration keeps slipping.'
+        - cost: 25
+          text: 'core-db sessions list includes one privileged sid; impersonate it to receive both an X-Spectrum-Admin value and the dataset name ds-q3-ledgers, then POST /archive/stage with destination mirror-b. Success returns bundle id plus FLAG{...}.'
+      solution: |
+        The graded deliverable is the flag returned by step 8.
+        1. GET http://target:8000/ and read the disclosure: one container
+           plays five hosts addressed by Host header.
+        2. With Host portal.spectrum.io GET /static/partner-breach.txt.
+           Six user:password lines come back.
+        3. POST /login with each pair until one authenticates:
+           e.reyes@spectrum.io : Tundra!Fall42 returns authenticated true
+           with session token sess-... (stage initial-access).
+        4. Pivot: GET /api/jump/git with header X-Spectrum-Session set to
+           the token. The reply names git.internal.spectrum.io and
+           confirms the same header works there (stage pivot).
+        5. With Host git.internal.spectrum.io and the session header GET
+           /projects/edge-api/blob/CI.yml. The yaml embeds console_key
+           DBK-... (shared because vault integration slipped again).
+        6. Privilege: POST /console/login {"key": "DBK-..."} with Host
+           core-db.spectrum.internal to get a console token. GET
+           /console/sessions with header X-Console-Token lists two
+           sessions; sid adm-... belongs to svc_orchestrator with
+           privileged true.
+        7. POST /console/impersonate {"sid": "adm-..."} with the console
+           token. The reply grants impersonation, names staging dataset
+           ds-q3-ledgers, and instructs presenting X-Spectrum-Admin with
+           the sid at archive.spectrum.internal (stage privilege).
+        8. Exfil: POST /archive/stage {"dataset": "ds-q3-ledgers",
+           "destination": "mirror-b"} with Host
+           archive.spectrum.internal and header X-Spectrum-Admin adm-...
+           The response reports staged true, issues a bundle id, and
+           carries the FLAG{...} for this task. Submit that value.
+      validator:
+        type: per_session_flag
+    - id: blue-report
+      title: 'File the incident report the review desk will accept'
+      prompt: >-
+        Complete the red chain first: ir.spectrum.io refuses reports until
+        the technical annex exists. Then read GET /rubric with Host
+        ir.spectrum.io and file POST /review with three fields: "scope",
+        the list of estate hosts the intrusion touched in attack order;
+        "findings", objects pairing each rubric slug with your severity
+        choice among low, medium, high, critical; and "remediation", the
+        four control slugs ordered by priority. A fully correct report
+        returns graded true and the FLAG value for this task. The desk
+        names every failed rubric line, so revise and resubmit.
+      points: 300
+      hints:
+        - cost: 0
+          text: 'Scope is the walk you just took, host by host in attack order, internal names included. Findings slugs are fixed by the rubric; only severity is yours to argue.'
+        - cost: 10
+          text: 'Severity logic: the way in was credential reuse, serious but common (high); exposed deploy keys and admin session takeover both grant direct control (critical); staging volume leaving unmonitored is a detection gap (medium). Remediation leads with killing active access, then removing the secret, then binding sessions, then alerting.'
+        - cost: 25
+          text: 'Passing payload: scope [portal.spectrum.io, git.internal.spectrum.io, core-db.spectrum.internal, archive.spectrum.internal]; findings F1-F4 slugs with severities high, critical, critical, medium; remediation [rotate-and-vault-deploy-keys, scrub-ci-secrets-and-history, bind-admin-sessions, alert-on-staging-volume]. POST /review returns FLAG{...}.'
+      solution: |
+        The graded deliverable is the flag returned by step 5. Steps 1
+        through 8 of the red-chain task must be completed first.
+        1. With Host ir.spectrum.io GET /rubric. It fixes the finding
+           slugs (reused-partner-credentials,
+           ci-config-exposes-deploy-key, admin-session-impersonation,
+           unmonitored-archive-staging), offers severity options, and
+           names the four remediation control slugs to be ordered.
+        2. Derive scope from the chain in attack order:
+           portal.spectrum.io, git.internal.spectrum.io,
+           core-db.spectrum.internal, archive.spectrum.internal.
+        3. Map severities defensibly: credential reuse that worked is
+           high; a repo-readable console key and admin session takeover
+           are both critical; staging egress without monitoring is
+           medium.
+        4. Order remediation by risk: rotate-and-vault-deploy-keys first
+           because it kills live attacker access, then
+           scrub-ci-secrets-and-history, then bind-admin-sessions, then
+           alert-on-staging-volume.
+        5. POST /review with {"scope": [...], "findings": [{"id":
+           "F1", "slug": "reused-partner-credentials", "severity":
+           "high"}, {"id": "F2", "slug":
+           "ci-config-exposes-deploy-key", "severity": "critical"},
+           {"id": "F3", "slug": "admin-session-impersonation",
+           "severity": "critical"}, {"id": "F4", "slug":
+           "unmonitored-archive-staging", "severity": "medium"}],
+           "remediation": [...]}. graded true comes back with the
+           FLAG{...} for this task. Submit that value.
+      validator:
+        type: per_session_flag

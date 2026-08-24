@@ -1,0 +1,119 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: purple-replay
+  title: 'Purple Replay'
+  version: 1.0.0
+  difficulty: hard
+  points: 350
+  estimated_minutes: 60
+  tags: [purple-team, detection-engineering, replay, stage-gates, simulation]
+spec:
+  track: defense-cloud
+  type: range
+  summary: >-
+    One locked container plays both sides of a detection engineering
+    engagement: a victim web app under /victim/ and the purple lab
+    control plane under /lab/. You receive a scripted four-stage attack,
+    recon, brute force, traversal exploit, and bulk exfil, and you
+    replay it step by step exactly as written, stamping the attacker
+    source address the way the border router would. After each stage
+    you write a detection rule and submit it to the stage gate, which
+    validates that the rule fires on the attack events you just created
+    while staying silent on the deterministic benign traffic pool.
+    Completing all four stage gates and re-validating every tuned rule
+    together at finalize returns the flag.
+  objectives:
+    - 'Replay a provided attack script faithfully and attribute each request with its true source address.'
+    - 'Author detection rules that separate attack signal from benign noise using thresholds, field matches, and content patterns.'
+    - 'Experience stage-gated validation where a noisy rule fails immediately instead of after deployment.'
+  prerequisites: [knock-knock, busted-login]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: one locked Flask app is simultaneously the
+      victim web application and the purple lab control plane. The attack
+      script replays are ordinary HTTP requests against the same process;
+      events accumulate in one in-memory list alongside a fixed benign
+      pool loaded at boot, and everything resets on restart. Detection
+      rules are evaluated by a small documented matcher, no real exploit
+      code or malware exists anywhere. Unprivileged app user, capabilities
+      dropped, no outbound access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: purple-loop
+      title: 'Replay all four stages with detections passing every gate'
+      prompt: >-
+        Work the purple lab at http://target:8000. Read /lab/stages and
+        /attack-script, then for each stage in order (recon, brute-force,
+        exploit, exfil) replay every scripted step against /victim/... with
+        header X-Src-Ip set to the attacker address from the stages
+        document. After finishing a stage's steps, POST /lab/detect with
+        {"stage": "<name>", "rule": {"match": [{"field": ..., "op":
+        "equals|contains|startswith|>=", "value": ...}], "at_least": N}}
+        such that the rule matches at least N of that stage's attacker
+        events and zero benign events; the gate tells you match counts.
+        When all four gates are cleared, POST /lab/finalize re-validates
+        every stored rule against full traffic and returns the FLAG value
+        to submit.
+      points: 350
+      hints:
+        - cost: 0
+          text: "The gates grade precision, not cleverness: read each stage's objective and signal text in /lab/stages first. Every attacker event carries X-Src-Ip 203.0.113.66, so rules must key on request attributes, not addresses."
+        - cost: 10
+          text: 'recon fires on targets containing .git; brute-force needs two conditions ANDed, target equals /victim/login plus status equals 401, with at_least 5 because benign users produce two lone 401s; exploit fires on targets containing ../'
+        - cost: 25
+          text: 'exfil keys on bytes_in greater than or equal to 500000 since benign uploads stay under six kilobytes. Full passing rules: recon [{target contains .git}] x1; brute-force [{target equals /victim/login},{status equals 401}] x5; exploit [{target contains ../}] x1; exfil [{bytes_in >= 500000}] x1. Then POST /lab/finalize for the FLAG{...}.'
+      solution: |
+        The graded deliverable is the flag returned by step 11.
+        1. GET http://target:8000/ and read the disclosure: one container
+           plays victim and lab, state resets on restart.
+        2. GET /lab/stages and note attacker_src 203.0.113.66, the four
+           stage names, their objectives, signals, and structured steps.
+        3. Replay stage recon exactly: GET /victim/.git/config and GET
+           /victim/server-status, each with header X-Src-Ip:
+           203.0.113.66.
+        4. Clear the first gate: POST /lab/detect {"stage": "recon",
+           "rule": {"match": [{"field": "target", "op": "contains",
+           "value": ".git"}], "at_least": 1}}. Accepted with one attack
+           event matched and zero benign.
+        5. Replay stage brute-force: POST /victim/login seven times with
+           body {"user":"a.adams","password":"guess1"} through guess7 and
+           the attacker header. Each returns 401.
+        6. Clear the second gate: POST /lab/detect {"stage":
+           "brute-force", "rule": {"match": [{"field": "target", "op":
+           "equals", "value": "/victim/login"}, {"field": "status",
+           "op": "equals", "value": 401}], "at_least": 5}}. Seven
+           attack hits, zero benign, because the benign pool holds only
+           two failed logins.
+        7. Replay stage exploit: GET /victim/download?file=../../etc/
+           passwd with the attacker header.
+        8. Clear the third gate: POST /lab/detect {"stage": "exploit",
+           "rule": {"match": [{"field": "target", "op": "contains",
+           "value": "../"}], "at_least": 1}}. Accepted.
+        9. Replay stage exfil: POST /victim/upload with body
+           {"bundle":"q3-ledger-archive","bytes_in":850000} and the
+           attacker header.
+        10. Clear the fourth gate: POST /lab/detect {"stage": "exfil",
+            "rule": {"match": [{"field": "bytes_in", "op": ">=",
+            "value": 500000}], "at_least": 1}}. Benign uploads peak at
+            5100 bytes, so nothing benign matches.
+        11. POST /lab/finalize. All four stored rules re-validate
+            against full traffic and the response returns finalized=true
+            with the FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

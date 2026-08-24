@@ -1,0 +1,136 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: cloud-company
+  title: 'Cloud Company'
+  version: 1.0.0
+  difficulty: insane
+  points: 500
+  estimated_minutes: 120
+  tags: [cloud-security, iam-privesc, bucket-exposure, serverless, audit-forensics]
+spec:
+  track: defense-cloud
+  type: range
+  summary: >-
+    A local-cloud estate collapsed onto one locked box: iam,
+    s3, functions, and audit services run as four simulated APIs behind a
+    Host-header front controller. Starting from a developer onboarding key,
+    walk the IAM assume-role graph through two unreviewed edges to ops-admin,
+    ride the anonymous-read bucket into the confidential finance archive,
+    identify the serverless backdoor planted by an unsupervised automation
+    identity, then recompute the audit hash chain to expose deleted records
+    and answer both cover-track questions. Five stages yield five fragments;
+    the /board endpoint verifies them all and returns the master flag.
+  objectives:
+    - 'Escalate privilege along an assume-role graph by reading policy documents instead of guessing credentials.'
+    - 'Chain an anonymous bucket listing into authenticated archive access and recognize why public reads rarely stop at public data.'
+    - 'Verify a hash-chained audit log, quantify what was deleted, and name the exfiltration path from surviving quarantine records.'
+  prerequisites: [graph-maze, service-accounted]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: four Flask apps bind to separate loopback
+      ports inside one locked container and a front controller routes by
+      Host header like an internal service mesh. There is no cloud
+      provider account, no real bucket, and no real serverless runtime;
+      tokens are strings derived from this session's flag, the hash chain
+      is sha256 over plain strings, and fragments are slices of the same
+      flag. Nothing executes beyond the process and state resets on
+      restart. Unprivileged app user, capabilities dropped, no outbound
+      access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: cloud-board-master
+      title: 'Take all five stages and assemble the master flag'
+      prompt: >-
+        Address the four simulated services through http://target:8000 using
+        Host headers: iam.cloudcompany.internal, s3.cloudcompany.internal,
+        functions.cloudcompany.internal, audit.cloudcompany.internal.
+        Bootstrap with header X-CC-Key: AKICC-DEVONBOARD-7Q2F on the iam
+        service, assume-role up to ops-admin, then use header X-CC-Token
+        with the issued token for privileged reads everywhere. Collect one
+        fragment per stage: iam console summary, confidential ledger object,
+        confirmed backdoor revision verdict, audit deletion verdict (actor
+        plus deleted count), and audit exfil verdict (destination). Submit
+        all five to http://target:8000/board as JSON {"fragments": {"iam":
+        "...", "bucket": "...", "functions": "...", "audit": "...",
+        "verdict": "..."}}; all five accepted unlock the master flag, which
+        is the value to submit.
+      points: 500
+      hints:
+        - cost: 0
+          text: "Read /iam/users and /iam/policies before assuming anything: the graph is dev-onboard to ci-runner to deploy-bot to ops-admin, and each hop needs the previous hop's token in X-CC-Token or your starting key in X-CC-Key."
+        - cost: 10
+          text: 'The ops-admin console hands you the iam fragment and flags both leads. Anonymous listing of cc-public-assets names a manifest whose text names the confidential object; fetching it requires the ops-admin token. The rev 7 deploy note and code view give you the backdoor revision and its callback destination.'
+        - cost: 25
+          text: 'Audit: recompute sha256(prev_hash|actor|action) down the entries; the first survivor whose stored prev_hash does not match your recomputation marks the deletion point, and /audit/quarantine counts three maint-bot deletions including one copy naming https://hooks.example-callbacks.invalid/ingest as destination. POST deletion-verdict {actor: maint-bot, deleted: 3} and exfil-verdict {destination: that url} for the last two fragments, then POST all five to /board for the FLAG{...}.'
+      solution: |
+        Sub-flag intermediates are marked [stage N]; the graded deliverable
+        is only the master flag from step 12.
+        1. GET http://target:8000/ and read the disclosure: one container
+           plays four services addressed by Host header, bootstrap key
+           included in the page text.
+        2. With Host iam.cloudcompany.internal GET /iam/users and
+           /iam/policies. Policies show dev-onboard may assume ci-runner,
+           ci-runner may assume deploy-bot, and deploy-bot holds an
+           unreviewed break-glass assume on ops-admin.
+        3. Assume ci-runner: POST /iam/sts/assume {"role": "ci-runner"}
+           with header X-CC-Key: AKICC-DEVONBOARD-7Q2F. Keep the returned
+           token.
+        4. Assume deploy-bot: POST /iam/sts/assume {"role":
+           "deploy-bot"} with header X-CC-Token set to the ci-runner
+           token. Then assume ops-admin the same way using the deploy-bot
+           token. All later calls use the ops-admin token in X-CC-Token.
+        5. Stage iam: GET /iam/console with the ops-admin token. The
+           summary contains fragment[iam] [stage 1 of 5].
+        6. Stage bucket: with Host s3.cloudcompany.internal GET
+           /s3/cc-public-assets anonymously; it lists
+           vendor/inventory-manifest.txt. Fetch that object without any
+           credential: its text names
+           s3://cc-finance-archive/q1/q1-ledger-extract.txt.
+        7. GET /s3/cc-finance-archive/q1/q1-ledger-extract.txt with the
+           ops-admin token. The ledger contains fragment[bucket]
+           [stage 2 of 5] and repeats the maintenance-ci lead.
+        8. Stage functions: with Host functions.cloudcompany.internal GET
+           /functions, then /functions/image-resizer/revisions. Revision 7
+           by maintenance-ci stands out. GET
+           /functions/image-resizer/revision/7/code: the handler posts to
+           an external callback on every invocation and carries a daily
+           trigger.
+        9. POST /functions/image-resizer/backdoor-verdict {"revision":
+           7}. Confirmed response carries fragment[functions]
+           [stage 3 of 5].
+        10. Stage audit part one: with Host audit.cloudcompany.internal
+            GET /audit/entries and recompute the chain from genesis:
+            hash = sha256(prev_hash|actor|action). Entry 42 is the first
+            whose stored prev_hash does not equal the recomputed hash of
+            its predecessor, proving records between were deleted.
+        11. GET /audit/quarantine: three soft-deleted records, all by
+            actor maint-bot, one copying the q1 ledger to
+            https://hooks.example-callbacks.invalid/ingest. POST
+            /audit/deletion-verdict {"actor": "maint-bot", "deleted": 3}
+            for fragment[audit] [stage 4 of 5], then POST
+            /audit/exfil-verdict {"destination":
+            "https://hooks.example-callbacks.invalid/ingest"} for
+            fragment[verdict] [stage 5 of 5].
+        12. Assemble: POST /board with {"fragments": {"iam": "...",
+            "bucket": "...", "functions": "...", "audit": "...",
+            "verdict": "..."}} filling each from steps 5, 7, 9, 11. The
+            reply reports unlocked and returns the assembled master
+            FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

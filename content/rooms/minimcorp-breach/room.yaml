@@ -1,0 +1,121 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: minimcorp-breach
+  title: 'MinimCorp Breach'
+  version: 1.0.0
+  difficulty: hard
+  points: 400
+  estimated_minutes: 75
+  tags: [red-team, kill-chain, idor, token-forgery, simulation]
+spec:
+  track: windows-ad
+  type: range
+  summary: >-
+    The MinimCorp enterprise estate, honestly collapsed onto one box:
+    vpn-edge.minimcorp.net, wiki.corp.minimcorp.net, and
+    finance.minimcorp.net run as three simulated host APIs on distinct
+    loopback ports behind one front controller you address by Host
+    header. Walk the red-team chain in order: pull a stale rollback
+    config off the VPN edge, use the leaked service credentials on the
+    internal wiki, exploit an IDOR in the finance API to read an
+    executive ledger extract, then forge a directory-sim admin token
+    with the legacy signing secret the runbook never rotated. Each host
+    guards a four-character flag fragment; the scoreboard wants all
+    three plus the forged token and hands back the assembled master
+    flag.
+  objectives:
+    - 'Chain findings across three simulated hosts, treating each hop as recon for the next.'
+    - 'Exploit broken object-level authorization against sequential employee identifiers and read what the API layer never re-checked.'
+    - 'Forge a delegated sign-in token from a documented but unrotated signing scheme and understand why static secrets fail.'
+  prerequisites: [shared-secrets, idor-invoices, token-forger]
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Single-container reality disclosed prominently on the landing page,
+      in the README, and here: the three-host enterprise estate is three
+      small Flask apps bound to separate loopback ports inside one locked
+      container, fronted by a controller that routes by Host header like
+      an edge proxy. Fragments are slices of this session's flag, the
+      token forge is an md5 over documented fields with a secret the room
+      itself hands you, and no real exploit code or malware exists
+      anywhere. Unprivileged app user, capabilities dropped, no outbound
+      access.
+  target:
+    privilege_profile: locked
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: estate-breach
+      title: 'Walk the chain and assemble the master flag'
+      prompt: >-
+        Address the three simulated hosts through http://target:8000 using
+        Host headers: vpn-edge.minimcorp.net, wiki.corp.minimcorp.net, and
+        finance.minimcorp.net. Recover one four-character fragment from
+        each host, forge a directory-sim admin token on the finance host,
+        then submit everything to http://target:8000/scoreboard as JSON
+        {"fragments": {"vpn-edge.minimcorp.net": "...",
+        "wiki.corp.minimcorp.net": "...", "finance.minimcorp.net":
+        "..."}, "token": "..."}. All three fragments plus a valid admin
+        token unlock the master flag, which is the value to submit. The
+        per-host fragments are intermediate state only and score nothing
+        on their own.
+      points: 400
+      hints:
+        - cost: 0
+          text: "Start at vpn-edge and read its homepage HTML source: an ops comment admits the old gateway config still sits at /static/vpn.conf.bak, base64 encoded. Decoding it yields this host's fragment plus basic-auth credentials for the wiki."
+        - cost: 10
+          text: 'On the wiki, read the finance-runbook page and its revision history; the sync bot stamped the wiki fragment into revision metadata. The runbook also gives the finance integration key, the invoice endpoint shape, and the exact directory-sim signature formula.'
+        - cost: 25
+          text: 'Finance invoices are keyed by sequential numeric employee ids starting at 1001 and the key is never re-checked per record, so enumerate upward until the executive record at 1013 returns the finance fragment and names principal a.adams with role estate-admin. Compute sig = md5hex("a.adams|estate-admin|minimcorp-sso-2026"), POST it to /sso/verify, then POST all three fragments plus the returned token to /scoreboard for the master FLAG{...}.'
+      solution: |
+        Sub-flag intermediates are marked [fragment N of 3]; the graded
+        deliverable is only the master flag from step 9.
+        1. GET http://target:8000/ and read the disclosure: one container
+           plays three hosts, addressed by Host header.
+        2. GET http://target:8000/ with Host vpn-edge.minimcorp.net and
+           view the page source. An ops comment points at
+           /static/vpn.conf.bak and says it is base64.
+        3. Download /static/vpn.conf.bak and base64-decode it. The
+           plaintext holds fragment[vpn-edge.minimcorp.net]
+           [fragment 1 of 3], wiki credentials svc_wiki /
+           W1kiSync#2026, and a note that the directory-sim signing
+           secret lives in the wiki finance runbook.
+        4. GET the wiki home with basic auth svc_wiki : W1kiSync#2026.
+           Three pages are listed; open /pages/finance-runbook. The body
+           documents the finance API key fin-api-key-7788, the endpoint
+           GET /api/invoices/<id> keyed by numeric employee ids, and the
+           signature scheme sig = md5hex(user|role|secret) with legacy
+           secret minimcorp-sso-2026.
+        5. GET /pages/finance-runbook/revisions. Revision 3 carries the
+           sync-bot stamp fragment[wiki.corp.minimcorp.net]
+           [fragment 2 of 3] in its comment field.
+        6. On finance.minimcorp.net send header X-API-Key:
+           fin-api-key-7788 and enumerate GET /api/invoices/1001
+           upward. Access control is applied only at the gateway, so any
+           valid key reads any record. Ids 1010 to 1012 return not
+           found; 1013 is the executive ledger extract containing
+           fragment[finance.minimcorp.net] [fragment 3 of 3] and naming
+           principal a.adams with role estate-admin.
+        7. Forge the admin token: compute md5 of the string
+           "a.adams|estate-admin|minimcorp-sso-2026" and POST
+           {"user":"a.adams","role":"estate-admin","sig":"<md5hex>"}
+           to /sso/verify. The reply grants a directory-sim admin token.
+        8. Assemble and submit: POST /scoreboard with {"fragments":
+           {"vpn-edge.minimcorp.net":"...","wiki.corp.minimcorp.net":
+           "...","finance.minimcorp.net":"..."},"token":"<admin
+           token>"}, filling each fragment from steps 3, 5, and 6.
+        9. The reply reports unlocked and returns the assembled master
+           FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag
