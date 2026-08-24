@@ -1,0 +1,75 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: reused-horizon
+  title: 'Reused Horizon'
+  version: 1.0.0
+  difficulty: easy
+  points: 150
+  estimated_minutes: 25
+  tags: [xor, keystream-reuse, known-plaintext]
+spec:
+  track: crypto-binary
+  type: challenge
+  summary: >-
+    Horizon Sync's telemetry gateway scrambles every frame with the same
+    repeating XOR key, including one frame whose plaintext header the
+    protocol fixes for everyone. You will XOR the known header against
+    its ciphertext to expose the keystream, slide that recovered key
+    across the secret frame, and read the flag in clear.
+  objectives:
+    - 'Recover a repeating XOR keystream from a known plaintext and its ciphertext.'
+    - 'Apply the recovered keystream to decrypt the secret frame.'
+    - 'Explain why no keystream byte may ever protect two different messages.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: 'Single Flask service on the isolated room network; the XOR math is done offline by the learner.'
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: recover-frame-flag
+      title: 'Decrypt the secret frame with the leaked keystream'
+      prompt: >-
+        Pull both ciphertext frames from GET /api/frame, use the fixed
+        protocol header as a crib to recover the repeating XOR keystream,
+        then decrypt the secret frame and submit the FLAG value it
+        contains.
+      points: 150
+      hints:
+        - cost: 0
+          text: 'XOR is its own inverse: keystream[i] = header_ct[i] ^ header[i] for every byte position the known frame covers.'
+        - cost: 10
+          text: 'The key is 32 bytes and repeats. Recover at least as many bytes as the secret frame is long, or let the repeat cycle handle the tail positions.'
+        - cost: 25
+          text: 'In Python: ks = bytes(a ^ b for a, b in zip(c2, HEADER)); plain = bytes(a ^ ks[i % len(ks)] for i, a in enumerate(c1)). FLAG{...} falls out.'
+      solution: |
+        1. GET http://target:8000/api/frame returns JSON with
+           "secret_hex" (the encrypted flag frame), "header_hex" (the
+           encrypted fixed header), "known_header" (the exact header
+           bytes as ASCII), and the note that the gateway reuses one
+           32-byte key across frames.
+        2. Convert both hex strings to bytes. Encryption is
+           C = P xor K (K repeating), so for the header frame
+           K[i] = header_ct[i] xor known_header[i]. This is crib
+           dragging with the crib handed to you by the protocol spec.
+        3. Decrypt the secret frame byte by byte with the recovered
+           keystream, wrapping around modulo 32 when past the first key
+           length:
+           plain[i] = secret_ct[i] xor K[i mod 32].
+        4. The plaintext is ASCII containing FLAG{...}. Submit the flag.
+           The same math runs identically after a container restart
+           because both frames derive from this session's key material.
+      validator:
+        type: per_session_flag
