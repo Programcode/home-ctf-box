@@ -1,0 +1,97 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: windows-welcome
+  title: 'Windows Welcome'
+  version: 1.0.0
+  difficulty: beginner
+  points: 100
+  estimated_minutes: 25
+  tags: [powershell, pwsh, windows-concepts, simulation]
+spec:
+  track: windows-ad
+  type: guided
+  summary: >-
+    First room on the Windows track, hosted honestly on Linux. You SSH
+    into a Debian container whose login shell is genuine PowerShell 7
+    with a simulated Windows identity (WIN-SIM01) and a ~/winfs tree
+    standing in for the C: drive. No Windows kernel, registry, or
+    Active Directory exists here and the lesson says plainly which
+    parts are real. You will learn Get-Command, Get-Help,
+    Get-ChildItem, and Select-String by using them to hunt a flag
+    through a simulated Users directory.
+  objectives:
+    - 'Run real PowerShell on Linux and identify exactly which environment parts are simulated.'
+    - 'Discover commands and built-in help with Get-Command and Get-Help.'
+    - 'Enumerate the filesystem with Get-ChildItem and pinpoint content with Select-String.'
+    - 'Capture the flag from the simulated user-profile tree.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Linux-hosted Windows-concepts simulation. The container is Debian;
+      only PowerShell itself is the real Windows-world artifact. sshd
+      requires setuid and DAC overrides for privilege separation and to
+      hand the learner a working shell; capabilities are bounded to the
+      ssh server profile and sessions run as unprivileged learner
+      (uid 1000). The flag hunt is read-only text search inside the
+      learner-owned ~/winfs tree; nothing escalates.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: pwsh-hunt
+      title: 'Find the flag with core PowerShell cmdlets'
+      prompt: >-
+        SSH in as learner with password learner; your login shell is
+        PowerShell. Use Get-Command to confirm the cmdlets you need
+        exist, use Get-Help when syntax slips, then walk the simulated
+        C: drive under ~/winfs with Get-ChildItem and narrow to the
+        flag with Select-String. One file in the simulated Users tree
+        holds it. Submit the FLAG value.
+      points: 100
+      hints:
+        - cost: 0
+          text: >-
+            Get-Command answers "does this exist": try Get-Command
+            *-ChildItem or Get-Command Select-*. Get-Help
+            Select-String -Examples shows usage without leaving the box.
+        - cost: 10
+          text: >-
+            Your simulated drive lives at $HOME/winfs with a Users
+            folder inside. Get-ChildItem -File -Recurse $HOME/winfs
+            lists every file in the simulated profiles at once.
+        - cost: 25
+          text: >-
+            Pipe the recursive listing into a case-sensitive search:
+            Get-ChildItem -File -Recurse $HOME/winfs | Select-String
+            -CaseSensitive -Pattern 'FLAG\{' . The matching Line value
+            prints FLAG{...}.
+      solution: |
+        1. SSH in as learner (password learner). The banner shell is
+           real PowerShell 7 running on Debian; $env:COMPUTERNAME reads
+           WIN-SIM01 because the all-users profile sets it.
+        2. Confirm tooling exists: `Get-Command Get-ChildItem,
+           Select-String`. Skim help if needed: `Get-Help Select-String
+           -Examples`.
+        3. List the simulated C: tree: `Get-ChildItem -Directory
+           $HOME/winfs` shows ProgramData, Users, Windows stand-ins.
+        4. Search every profile file at once:
+           `Get-ChildItem -File -Recurse $HOME/winfs | Select-String
+           -CaseSensitive -Pattern 'FLAG\{'`.
+        5. Exactly one line matches, inside the tsvc account's
+           Documents folder. Its Line property contains FLAG{...}.
+           Submit the value.
+      validator:
+        type: per_session_flag

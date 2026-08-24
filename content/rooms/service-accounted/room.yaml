@@ -1,0 +1,104 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: service-accounted
+  title: 'Service Accounted'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 30
+  tags: [windows-concepts, services, writable-path, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Windows services run their binaries from paths recorded in the
+    service database, and whatever those paths point at executes with
+    the service account's power. This room simulates that mechanic on
+    Linux, plainly labeled as such: a root-owned services database in
+    JSON stands in for the Service Control Manager's registry data,
+    and a root loop re-runs every recorded payload every 30 seconds
+    where a real SCM would start binaries. One service points under a
+    directory your account can write. Audit the database, spot the
+    misconfiguration, and turn it into a read of the root flag.
+  objectives:
+    - 'Read the simulated service database and relate binPath entries to executable locations.'
+    - 'Compare each binary directory against directory permissions to find the writable one.'
+    - 'Modify the affected service payload and let the privileged runner deliver the root flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Linux-hosted simulation of Windows service-path abuse; no real
+      SCM or Windows code exists here. sshd requires setuid and DAC
+      overrides for privilege separation and the learner shell;
+      capabilities are bounded to the ssh server profile and sessions
+      drop to unprivileged learner (uid 1000). The root side is a shell
+      loop that executes short local heartbeat scripts every 30 seconds
+      inside this container only; the intended abuse is one appended cp
+      of this box's own flag file.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: hijack-updater
+      title: 'Aim the updater service somewhere useful'
+      prompt: >-
+        Log in as learner with password learner and study the simulated
+        service database at /opt/services/services.json, which records
+        binPath and the payload each entry runs here. Exactly one
+        service executes from a directory your group can write. Make
+        that service's payload copy /root/flag.txt to a file you can
+        read, wait for the next 30-second pass of the privileged
+        runner, and submit the FLAG value you collect.
+      points: 200
+      hints:
+        - cost: 0
+          text: >-
+            The database is world-readable: cat /opt/services/
+            services.json lists every service with its binPath and the
+            linux_sim_path actually executed by this simulation. Compare
+            each parent directory with ls -ld.
+        - cost: 10
+          text: >-
+            /opt/services/updater/bin is owned root:learners and
+            group-writable, and your account sits in the learners
+            group. The UpdateHelperSvc entry runs uhelper.sh from that
+            exact directory as root every pass.
+        - cost: 25
+          text: >-
+            Append your instruction to the payload: echo 'cp
+            /root/flag.txt /tmp/flag.out && chmod 644 /tmp/flag.out'
+            >> /opt/services/updater/bin/uhelper.sh then wait up to
+            half a minute and read /tmp/flag.out for FLAG{...}.
+      solution: |
+        1. SSH in as learner (password learner).
+        2. `cat /opt/services/services.json`. Three services are
+           recorded with Windows-style binPath values plus the
+           linux_sim_path this simulation actually runs.
+        3. Check permissions: `ls -ld /opt/services/bin
+           /opt/services/updater/bin`. The first is root-only; the
+           second is root:learners 775 and `id` shows you are in
+           learners.
+        4. The UpdateHelperSvc payload therefore runs from ground you
+           control while executing as root, mirroring the classic
+           writable-service-directory mistake.
+        5. Append the copy step:
+           `echo 'cp /root/flag.txt /tmp/flag.out && chmod 644
+           /tmp/flag.out' >> /opt/services/updater/bin/uhelper.sh`.
+        6. The root loop fires every 30 seconds. Poll
+           `cat /tmp/flag.out` until it prints FLAG{...} and submit
+           the value.
+      validator:
+        type: per_session_flag

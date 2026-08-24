@@ -1,0 +1,3 @@
+[HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run]
+SimCloudSync="C:\Program Files\SimCloud\sync.exe" /background
+SimTray="C:\Program Files\SimTray\tray.exe"
