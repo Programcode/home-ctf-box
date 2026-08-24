@@ -1,0 +1,111 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: certificate-misprint
+  title: 'Certificate Misprint'
+  version: 1.0.0
+  difficulty: hard
+  points: 275
+  estimated_minutes: 55
+  tags: [windows-ad, adcs, esc1, san, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    AD CS template misconfigurations let an ordinary enrollee request a
+    certificate naming someone else in the SAN, and any authenticator
+    built from that cert then belongs to the impersonated principal.
+    This room simulates the arc honestly with toy RSA: the /ca endpoint
+    checks templates before issuing, one deliberately broken template
+    accepts a requester-supplied SAN, the resulting cert-token is
+    verified server-side by signature over its embedded fields, and
+    presenting a token whose SAN reads administrator opens /admin and
+    your flag.
+  objectives:
+    - 'Explain how ESC1 turns requester-supplied SANs into identity forgery.'
+    - 'Enroll against the vulnerable template as a low-privilege user.'
+    - 'Verify the issued cert-token structure and signature chain.'
+    - 'Present an administrator-SAN token to /admin and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted AD CS SIMULATION. Certificate signing is
+      deliberately toy RSA with documented 512-bit keys hardcoded in
+      app.py (textbook RSA over SHA-256, no real X.509, no padding
+      scheme), chosen for determinism and legality; nothing speaks
+      real PKI protocol and all principals are fictional training
+      labels. Plain Flask app on a disposable python:3.12-alpine
+      container under the locked privilege profile (cap_drop ALL,
+      no-new-privileges), running as uid 10001.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: enroll-and-impersonate
+      title: 'Enroll with an administrator SAN and open the admin page'
+      prompt: >-
+        Open http://target:8000 and read /ca/docs first: the toy RSA
+        scheme, key sizes, canonical signing string, and disclosure are
+        written there. Review the templates at /ca/templates and spot
+        the one that lets the enrollee supply the SAN. Enroll as the
+        low-privilege lab user via POST /ca/enroll requesting
+        SAN=administrator, then present the returned cert-token to GET
+        /admin in the X-Client-Cert-SIM header. Submit the FLAG value
+        shown on that page.
+      points: 275
+      hints:
+        - cost: 0
+          text: >-
+            /ca/templates shows each template's san_from_request flag.
+            UserAuth-Signing refuses caller-supplied SANs;
+            WebEnroll-2023 accepts them from any authenticated
+            enrollee. That contrast is the whole misconfiguration.
+        - cost: 10
+          text: >-
+            POST /ca/enroll with JSON {"template":"WebEnroll-2023",
+            "san":"administrator"} and HTTP Basic auth labuser /
+            LabEnroll2026!. The response carries serial, subject, san,
+            template, and a hex sig plus a ready-made cert_token.
+        - cost: 25
+          text: >-
+            GET /admin with header X-Client-Cert-SIM: <cert_token>.
+            The CA-SIM verifies pow(sig,e,n) equals the SHA-256 of
+            "serial|subject|san|template" using the published public
+            key, then requires san == administrator before printing
+            the flag.
+      solution: |
+        1. GET http://target:8000/ca/docs. Note the disclosure: certs
+           are signed with textbook toy RSA, 512-bit keys hardcoded in
+           the room, signature = SHA-256 digest of
+           "<serial>|<subject>|<san>|<template>" raised to d mod n,
+           verification uses the published (n, e). No X.509, no
+           Kerberos, no real PKI anywhere.
+        2. GET /ca/templates. Two templates exist: UserAuth-Signing
+           with san_from_request false and enrollment open to domain
+           users, and WebEnroll-2023 with san_from_request true,
+           the ESC1-shaped mistake.
+        3. POST http://target:8000/ca/enroll with JSON body
+           {"template": "WebEnroll-2023", "san": "administrator"} and
+           Basic auth labuser:LabEnroll2026!. The CA records subject
+           CN=labuser but honors the requested SAN because the
+           template allows it.
+        4. Confirm what you received: decode the cert-token payload
+           and check san=administrator while subject stays CN=labuser.
+           Optionally verify the signature yourself with /ca/pubkey.
+        5. GET http://target:8000/admin with header X-Client-Cert-SIM
+           set to the cert_token string. The server re-verifies the
+           signature, sees SAN administrator, and prints FLAG{...}.
+           Submit that value.
+      validator:
+        type: per_session_flag

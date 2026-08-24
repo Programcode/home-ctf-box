@@ -1,0 +1,117 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: delegated-trust
+  title: 'Delegated Trust'
+  version: 1.0.0
+  difficulty: medium
+  points: 250
+  estimated_minutes: 45
+  tags: [windows-ad, delegation, s4u, constrained-delegation, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Constrained delegation lets a service obtain tickets on behalf of
+    other users, which is powerful when configured narrowly and
+    dangerous when the service itself is compromised. This room
+    simulates the arc honestly: a Flask domain-controller API publishes
+    its delegation configuration showing that svc_web may impersonate
+    administrator, leaked recon material yields svc_web credentials,
+    the documented /tgs?impersonate=admin flow mints a simulated S4U
+    token, and the admin-only endpoint honors it for your flag.
+  objectives:
+    - 'Explain what S4U2Self and S4U2Proxy allow a service to do.'
+    - 'Recover svc_web credentials from the published recon artifact.'
+    - 'Mint an impersonation token for administrator through /tgs.'
+    - 'Call /dc/admin-only with the delegated token and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted S4U delegation SIMULATION. No Kerberos bytes
+      are spoken anywhere: the impersonation token is a signed JSON
+      blob using HMAC-SHA256 over a fixed disclosed room secret, a
+      stand-in for real PAC-bearing service tickets chosen for
+      determinism and legality; all accounts are fictional training
+      labels. Plain Flask app on a disposable python:3.12-alpine
+      container under the locked privilege profile (cap_drop ALL,
+      no-new-privileges), running as uid 10001. The recon leak is
+      staged content inside this container only.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: delegate-like-a-dc
+      title: 'Turn svc_web into administrator through simulated S4U'
+      prompt: >-
+        Open http://target:8000 and read /dc/docs first: the token
+        format, signing scheme, and disclosure are all written there.
+        Browse /recon/index for artifacts left by an earlier
+        engagement phase and recover the svc_web credential from the
+        web server config backup. Check /delegation/config to see who
+        svc_web may impersonate, request an impersonation token from
+        /tgs?impersonate=<user> using HTTP Basic auth as svc_web, then
+        present it as a Bearer token to /dc/admin-only. Submit the
+        FLAG value shown on that page.
+      points: 250
+      hints:
+        - cost: 0
+          text: >-
+            /recon/files/web-config.bak is the artifact you want; it
+            contains a connection string of the form
+            uid=svc_web;pwd=<password>. Credentials in recon files are
+            the classic starting point once delegation rights are
+            known.
+        - cost: 10
+          text: >-
+            GET /delegation/config shows svc_web's
+            allowed_to_impersonate list. Request
+            /tgs?impersonate=<allowed-user> with Basic auth
+            svc_web:<password>; the response JSON carries a token of
+            the form S4USIM.v1.<payload>.<hmac>.
+        - cost: 25
+          text: >-
+            Call /dc/admin-only with header Authorization: Bearer
+            <token>. The DC-SIM verifies the HMAC against its own copy
+            of the disclosed room secret and requires
+            impersonate=administrator inside the payload before
+            printing the flag.
+      solution: |
+        1. GET http://target:8000/dc/docs. Note the disclosure: the
+           impersonation token is S4USIM.v1.<base64url payload>.<hex
+           HMAC-SHA256>, signed with a fixed room secret printed on
+           that page, standing in for a real ticket with a PAC. Real
+           constrained delegation would use S4U2Self to get a ticket
+           to the service as another principal and S4U2Proxy to spend
+           it onward; both steps are collapsed into one documented
+           endpoint here.
+        2. GET /recon/index. One entry references
+           /recon/files/web-config.bak, a simulated leftover from an
+           earlier phase.
+        3. GET /recon/files/web-config.bak. The connection string
+           contains uid=svc_web;pwd=WebDeleg@te26.
+        4. GET /delegation/config. It declares svc_web with SPN
+           HTTP/dc01.lab.local and allowed_to_impersonate:
+           [administrator]. Any other target answers
+           DELEGATION_NOT_PERMITTED, mirroring how a real KDC enforces
+           the msDS-AllowedToDelegateTo list.
+        5. GET /tgs?impersonate=administrator with HTTP Basic auth
+           username svc_web and password WebDeleg@te26. The response
+           carries the S4USIM token.
+        6. GET http://target:8000/dc/admin-only with header
+           Authorization: Bearer <token>. The page verifies the
+           signature, reads impersonate=administrator from the
+           payload, and prints FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

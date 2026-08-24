@@ -1,0 +1,121 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: as-rep-arcade
+  title: 'AS-REP Arcade'
+  version: 1.0.0
+  difficulty: medium
+  points: 225
+  estimated_minutes: 45
+  tags: [windows-ad, asrep-roasting, no-preauth, known-plaintext, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Accounts with Kerberos pre-authentication disabled hand out
+    encrypted material that anyone can request and crack offline,
+    because the encrypted part is keyed by the account's own password.
+    This room simulates the arc with a disclosed toy cipher: a Flask
+    KDC issues AS-REP enc-parts computed as plaintext XORed against a
+    repeating sha256(password) keystream over a documented 16-byte
+    preamble. The /users?no-preauth=1 view lists vulnerable accounts,
+    the provided stdlib client pulls their enc-parts, a wordlist crack
+    recovers one password, and /redeem trades it for your flag.
+  objectives:
+    - 'Explain why pre-authentication exists and what its absence exposes.'
+    - 'Enumerate accounts with pre-auth disabled through /users?no-preauth=1.'
+    - 'Crack the XOR-SIM enc-part of one account with the published wordlist.'
+    - 'Redeem the recovered credential for the room flag at /redeem.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted AS-REP roasting SIMULATION. The encrypted
+      pre-auth part is deliberately toy crypto: repeating keystream of
+      sha256(password) over a fixed documented preamble, NOT RC4-HMAC
+      or AES-Kerberos, chosen for determinism and legality. Nothing
+      speaks the Kerberos protocol and no real credentials exist.
+      Plain Flask app on a disposable python:3.12-alpine container
+      under the locked privilege profile (cap_drop ALL,
+      no-new-privileges), running as uid 10001. Cracking runs only
+      against this room's own published wordlist.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: crack-the-no-preauth
+      title: 'List no-preauth accounts, crack one, redeem it'
+      prompt: >-
+        Open http://target:8000 and read /kdc/docs first: the toy
+        cipher, its exact 16-byte preamble, and the crack recipe are
+        disclosed there. Pull the list of accounts with pre-auth
+        disabled from /users?no-preauth=1, request each account's
+        simulated AS-REP with the provided /tools/getasreproast.py
+        client, and run the wordlist from /tools/wordlist.txt against
+        the enc-parts offline. Exactly one password falls. Submit it
+        with its username to POST /redeem and read the FLAG value on
+        the confirmation page.
+      points: 225
+      hints:
+        - cost: 0
+          text: >-
+            Start at /kdc/docs. Every enc-part decrypts to a blob
+            beginning with the same 16-byte preamble, so a candidate
+            wordlist entry is verified by deriving sha256(word) as the
+            keystream and testing whether the first bytes turn into
+            the magic prefix b"ASREPSIM-V1\x00".
+        - cost: 10
+          text: >-
+            Run `python3 getasreproast.py --kdc http://target:8000`
+            after saving it from /tools/. It lists every account with
+            no-preauth set and prints each base64 enc_part. The
+            plaintext is preamble + "user=<username>", keystream is
+            the 32-byte sha256(password) repeated.
+        - cost: 25
+          text: >-
+            svc_archive is the weak one: ArchiveIt92 reproduces its
+            full preamble when used as the keystream seed; svc_audit's
+            long random password is absent from the list on purpose.
+            Redeem with POST /redeem JSON body
+            {"username":"svc_archive","password":"ArchiveIt92"}.
+      solution: |
+        1. GET http://target:8000/kdc/docs. Note the disclosure: the
+           AS-REP enc-part is XOR-SIM-v1, deliberately not RC4-HMAC or
+           AES, with plaintext = 16-byte constant preamble followed by
+           "user=<username>", and keystream = sha256(account password)
+           repeated to length.
+        2. Download tooling: save /tools/getasreproast.py and
+           /tools/wordlist.txt locally.
+        3. Run `python3 getasreproast.py --kdc http://target:8000`. It
+           reads /users?no-preauth=1, which lists svc_archive and
+           svc_audit, then prints each account's base64 enc_part from
+           /kdc/as?user=<account>. Normal accounts such as
+           amelia.reyes refuse the request with PREAUTH_REQUIRED,
+           which is exactly the protection whose absence this room
+           demonstrates.
+        4. Decode each enc_part. For every wordlist candidate compute
+           ks = sha256(candidate).digest() and check whether
+           bytes(ct[i] ^ ks[i % 32] for i in range(11)) equals
+           b"ASREPSIM-V1". The correct candidate decrypts the whole
+           blob, tail included, into readable user text.
+        5. svc_audit matches nothing: its password is long, random and
+           absent from the wordlist by design, showing why strong
+           service passwords starve offline attacks even when
+           misconfiguration leaks their material.
+        6. svc_archive yields ArchiveIt92. Confirm by decrypting the
+           full blob: the trailing bytes spell user=svc_archive.
+        7. POST http://target:8000/redeem with JSON
+           {"username": "svc_archive", "password": "ArchiveIt92"}.
+           The confirmation page prints FLAG{...}. Submit that value.
+      validator:
+        type: per_session_flag

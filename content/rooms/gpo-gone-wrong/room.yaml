@@ -1,0 +1,120 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: gpo-gone-wrong
+  title: 'GPO Gone Wrong'
+  version: 1.0.0
+  difficulty: hard
+  points: 300
+  estimated_minutes: 55
+  tags: [windows-ad, gpo, sysvol, scheduled-task, privesc, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Group Policy lives on SYSVOL, and whatever a GPO tells machines to
+    run gets read straight from those world-readable shares. When a
+    GPO-defined scheduled task executes a script that sits somewhere
+    the wrong people can write, policy execution becomes an attacker's
+    scheduler. This Linux-simulated SYSVOL hosts GPO task definitions;
+    one runs as SYSTEM-equivalent every 30 seconds and points at a
+    script inside a group-writable folder your lab account belongs to.
+    Edit the script, wait out the policy loop, and read the copied
+    root flag.
+  objectives:
+    - 'Locate GPO task definitions under the simulated SYSVOL tree.'
+    - 'Identify which scheduled task executes from a group-writable path.'
+    - 'Modify the script so its SYSTEM-level run copies the root flag.'
+    - 'Wait out the 30-second policy loop and capture the flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      SIMULATION disclosure: this is a Debian box modeling AD CS-era
+      GPO abuse concepts, not a Windows host; no real Active
+      Directory, Kerberos, or SYSVOL protocol exists here. The GPO XML
+      is inert training data parsed by a stdlib Python runner.
+      sshd must run as root inside the disposable container because
+      binding port 22 and privilege separation require it; login
+      sessions drop to unprivileged learner (uid 1000). Escalation is
+      confined to the container filesystem: the hijacked policy task
+      only ever copies /root/flag.txt to /tmp inside the same
+      disposable image. Elevated privilege profile grants the bounded
+      capability set required by sshd privsep; no-new-privileges stays
+      off or the whole SSH room pattern is impossible by design.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [22]
+    healthcheck:
+      tcp_port: 22
+      timeout_seconds: 60
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: hijack-the-policy-task
+      title: 'Rewrite the script the SYSTEM scheduled task executes'
+      prompt: >-
+        Log in as learner with password learner and explore the
+        simulated SYSVOL share under /srv/sysvol-sim. Read the GPO
+        task definitions and find which one runs with SYSTEM-level
+        rights on a repeating interval, then check where its Command
+        actually lives on disk. One script sits in a folder your
+        gpo-editors group can write to. Change what that script does
+        so its next run copies /root/flag.txt to /tmp/flag and makes
+        the copy readable, wait up to about half a minute for the
+        policy loop, and submit the FLAG value you find.
+      points: 300
+      hints:
+        - cost: 0
+          text: >-
+            List /srv/sysvol-sim/Policies recursively and grep the
+            Tasks XML for <Command> entries and runAs attributes. The
+            audit task runs from a locked-down path; the cache task is
+            the interesting one.
+        - cost: 10
+          text: >-
+            ls -ld /srv/gpo-scripts shows the directory is owned by
+            root:gpo-editors with mode 775, and id shows you are in
+            gpo-editors. The script itself is 775 for that group, so
+            you can rewrite its contents directly.
+        - cost: 25
+          text: >-
+            Replace the contents of
+            /srv/gpo-scripts/cache-refresh.sh with: cp /root/flag.txt
+            /tmp/flag then chmod 644 /tmp/flag. Keep it executable.
+            The policy loop fires every 30 seconds, so poll
+            /tmp/flag for up to about 70 seconds.
+      solution: |
+        1. SSH in as learner (password learner). `id` shows membership
+           in gpo-editors.
+        2. Explore the policy store:
+           `find /srv/sysvol-sim -name "*.xml"`. Two GUID folders hold
+           GPO content; the workstation-hardening policy holds no
+           tasks, the deployment policy defines scheduled tasks under
+           Machine/Preferences/Tasks/tasks.xml.
+        3. Read tasks.xml. One task runs
+           /usr/local/sbin/audit-stamp.sh as SYSTEM from a
+           non-writable path; the Cache Refresh task runs
+           /srv/gpo-scripts/cache-refresh.sh as SYSTEM every 30
+           seconds.
+        4. Check permissions:
+           `ls -ld /srv/gpo-scripts` shows drwxrwxr-x root:gpo-editors
+           and `ls -l /srv/gpo-scripts` shows the script is 664
+           root:gpo-editors. Your group can edit it either way.
+        5. Rewrite the script:
+           `printf '%s\\n' '#!/bin/sh' 'cp /root/flag.txt /tmp/flag'
+           'chmod 644 /tmp/flag' > /srv/gpo-scripts/cache-refresh.sh`
+           The file is 775 root:gpo-editors, so the redirect keeps your
+           write access and the executable bit stays in place.
+        6. Wait up to ~70 seconds for the next 30-second policy tick,
+           then `cat /tmp/flag`. It contains FLAG{...}. Submit the
+           value.
+      validator:
+        type: per_session_flag
