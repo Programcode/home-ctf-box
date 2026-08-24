@@ -104,6 +104,178 @@ export interface LoginInput {
   readonly password: string;
 }
 
+// --- Learning -------------------------------------------------------------
+
+export type EnrollmentState = 'active' | 'paused' | 'completed';
+
+export interface LearningPath {
+  readonly slug: string;
+  readonly title: string;
+  readonly version: string;
+  readonly difficulty: string;
+  readonly estimated_minutes: number;
+  readonly summary: string;
+  readonly capstones: readonly string[];
+  readonly certificate: boolean;
+  readonly enrollment_state?: EnrollmentState | null;
+}
+
+export interface PathSectionRef {
+  readonly id: string;
+  readonly title: string;
+  readonly order_index: number;
+  readonly optional_branch: boolean;
+  readonly prerequisites: readonly { readonly module: string; readonly section: string }[];
+  readonly completed: boolean;
+}
+
+export interface PathModuleRef {
+  readonly slug: string;
+  readonly title: string;
+  readonly optional_branch: boolean;
+  readonly sections: readonly PathSectionRef[];
+}
+
+export interface LearningPathDetail extends LearningPath {
+  readonly modules: readonly PathModuleRef[];
+}
+
+export interface EnrollmentMutationResult {
+  readonly path_slug: string;
+  readonly state: EnrollmentState;
+  readonly enrollment_id?: string;
+}
+
+export type CalloutTone = 'info' | 'warning' | 'danger' | 'tip';
+
+export interface ProseBlockView {
+  readonly type: 'prose';
+  readonly markdown: string;
+}
+
+export interface CalloutBlockView {
+  readonly type: 'callout';
+  readonly tone: CalloutTone;
+  readonly markdown: string;
+}
+
+export interface CodeBlockView {
+  readonly type: 'code';
+  readonly language: string;
+  readonly code: string;
+}
+
+export interface QuizOptionView {
+  readonly id: string;
+  readonly text: string;
+}
+
+/** Client-safe quiz block: the answer key never leaves the server. */
+export interface QuizBlockView {
+  readonly type: 'quiz';
+  readonly question_id: string;
+  readonly question: string;
+  readonly options: readonly QuizOptionView[];
+}
+
+export type SectionBlockView = ProseBlockView | CalloutBlockView | CodeBlockView | QuizBlockView;
+
+export interface ModuleSectionView {
+  readonly id: string;
+  readonly title: string;
+  readonly blocks: readonly SectionBlockView[];
+}
+
+export interface LearningModule {
+  readonly slug: string;
+  readonly title: string;
+  readonly version: string;
+  readonly summary: string;
+  readonly objectives: readonly string[];
+  readonly labs: readonly string[];
+  readonly cheat_sheet: string | null;
+  readonly sections: readonly ModuleSectionView[];
+}
+
+export interface QuizAttemptInput {
+  /** question_id -> selected option ids */
+  readonly answers: Readonly<Record<string, readonly string[]>>;
+  readonly module?: string;
+}
+
+export interface QuizAttemptResult {
+  readonly attempt_id: string;
+  readonly section_id: string;
+  readonly passed: boolean;
+  readonly results: readonly { readonly question_id: string; readonly correct: boolean }[];
+}
+
+export interface SectionCompleteResult {
+  readonly enrollment_id: string;
+  readonly module_slug: string;
+  readonly section_id: string;
+  readonly already_completed: boolean;
+  readonly path_completed: boolean;
+}
+
+// --- Challenges -----------------------------------------------------------
+
+export type ChallengeCategory = 'web' | 'crypto' | 'pwn' | 'rev' | 'forensics' | 'misc' | 'osint';
+
+export interface ChallengeSummary {
+  readonly slug: string;
+  readonly name: string;
+  readonly category: ChallengeCategory;
+  readonly difficulty: number;
+  readonly scoring: 'static' | 'dynamic';
+  readonly points: number;
+  readonly solve_count: number;
+  readonly state?: 'hidden' | 'visible';
+}
+
+export interface ChallengeFile {
+  readonly id: string;
+  readonly filename: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
+export interface ChallengeDetail extends ChallengeSummary {
+  readonly description: string;
+  readonly files: readonly ChallengeFile[];
+  readonly solved_by_me: boolean;
+}
+
+export interface FlagSubmitResult {
+  readonly correct: boolean;
+  readonly already_solved: boolean;
+  readonly points: number | null;
+  readonly first_blood: boolean;
+}
+
+// --- Notifications --------------------------------------------------------
+
+export interface NotificationItem {
+  readonly id: string;
+  readonly category: string;
+  readonly payload: Readonly<Record<string, unknown>>;
+  readonly read_at: string | null;
+  readonly created_at: string;
+}
+
+export interface NotificationFeed {
+  readonly items: readonly NotificationItem[];
+  readonly total: number;
+  readonly offset: number;
+}
+
+export interface NotificationPrefs {
+  readonly channel_in_app: boolean;
+  readonly channel_email: boolean;
+  readonly digest_weekly: boolean;
+  readonly muted_categories: readonly string[];
+}
+
 export interface ApiClientOptions {
   /** Base URL of the FastAPI server, e.g. http://localhost:8700. */
   readonly baseUrl?: string;
@@ -165,6 +337,48 @@ export class ApiClient {
       this.deleteJson(`/api/labs/${encodeURIComponent(labId)}`),
   };
 
+  readonly learning = {
+    paths: (): Promise<readonly LearningPath[]> => this.getJson('/api/learning/paths'),
+    path: (slug: string): Promise<LearningPathDetail> =>
+      this.getJson(`/api/learning/paths/${encodeURIComponent(slug)}`),
+    enroll: (slug: string): Promise<EnrollmentMutationResult> =>
+      this.postJson(`/api/learning/paths/${encodeURIComponent(slug)}/enroll`, {}),
+    pause: (slug: string): Promise<EnrollmentMutationResult> =>
+      this.postJson(`/api/learning/paths/${encodeURIComponent(slug)}/pause`, {}),
+    resume: (slug: string): Promise<EnrollmentMutationResult> =>
+      this.postJson(`/api/learning/paths/${encodeURIComponent(slug)}/resume`, {}),
+    module: (slug: string, lang?: string): Promise<LearningModule> => {
+      const query = lang === undefined ? '' : `?lang=${encodeURIComponent(lang)}`;
+      return this.getJson(`/api/learning/modules/${encodeURIComponent(slug)}${query}`);
+    },
+    completeSection: (moduleSlug: string, sectionId: string): Promise<SectionCompleteResult> =>
+      this.postJson(
+        `/api/learning/modules/${encodeURIComponent(moduleSlug)}/sections/${encodeURIComponent(sectionId)}/complete`,
+        {},
+      ),
+    quizAttempt: (sectionId: string, input: QuizAttemptInput): Promise<QuizAttemptResult> =>
+      this.postJson(`/api/learning/quiz/${encodeURIComponent(sectionId)}/attempt`, input),
+  };
+
+  readonly challenges = {
+    list: (): Promise<readonly ChallengeSummary[]> => this.getJson('/api/challenges'),
+    get: (slug: string): Promise<ChallengeDetail> =>
+      this.getJson(`/api/challenges/${encodeURIComponent(slug)}`),
+    submitFlag: (slug: string, flag: string): Promise<FlagSubmitResult> =>
+      this.postJson(`/api/challenges/${encodeURIComponent(slug)}/submit`, { flag }),
+  };
+
+  readonly notifications = {
+    feed: (limit = 50, offset = 0): Promise<NotificationFeed> =>
+      this.getJson(`/api/notifications/me?limit=${limit}&offset=${offset}`),
+    markRead: (notificationId: string): Promise<{ id: string; read: boolean }> =>
+      this.postJson(`/api/notifications/${encodeURIComponent(notificationId)}/read`, {}),
+    readAll: (): Promise<{ updated: number }> => this.postJson('/api/notifications/read-all', {}),
+    prefs: (): Promise<NotificationPrefs> => this.getJson('/api/notifications/me/prefs'),
+    updatePrefs: (input: Partial<NotificationPrefs>): Promise<NotificationPrefs> =>
+      this.putJson('/api/notifications/me/prefs', input),
+  };
+
   readonly setup = {
     status: (): Promise<SetupStatus> => this.getJson('/api/setup/status'),
   };
@@ -214,6 +428,20 @@ export class ApiClient {
       headers['x-csrf-token'] = token;
     }
     const response = await this.request(path, { method: 'DELETE', headers });
+    return parseJsonBody<T>(response);
+  }
+
+  private async putJson<T>(path: string, body: unknown): Promise<T> {
+    const token = this.currentCsrfToken();
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token !== undefined) {
+      headers['x-csrf-token'] = token;
+    }
+    const response = await this.request(path, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+    });
     return parseJsonBody<T>(response);
   }
 }

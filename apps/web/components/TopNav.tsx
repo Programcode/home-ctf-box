@@ -2,12 +2,24 @@ import Link from 'next/link';
 import { getCurrentUser } from '@/lib/api-server';
 import { CommandPalette } from './CommandPalette';
 import { LogoutButton } from './LogoutButton';
+import { MobileNav } from './MobileNav';
+import { NavLink } from './NavLink';
 
 export async function TopNav() {
   const user = await getCurrentUser();
 
+  const links = [
+    { href: '/catalog', label: 'Catalog' },
+    { href: '/dashboard', label: 'Dashboard' },
+    { href: '/learn', label: 'Learn' },
+    { href: '/challenges', label: 'Challenges' },
+    { href: '/terminal', label: 'Terminal' },
+    { href: '/notifications', label: 'Notifications' },
+    ...(user === null ? [] : [{ href: '/profile', label: 'Profile' }]),
+  ];
+
   return (
-    <header className="border-b border-edge bg-panel">
+    <header className="relative border-b border-edge bg-panel">
       <nav
         aria-label="Main navigation"
         className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-4 sm:px-6"
@@ -18,36 +30,18 @@ export async function TopNav() {
         >
           Open<span className="text-accent">Range</span>
         </Link>
-        <ul className="ml-1 flex list-none items-center gap-0.5 p-0 text-sm sm:ml-2 sm:gap-1">
-          <li>
-            <Link
-              href="/catalog"
-              className="inline-block rounded-md px-2 py-2 text-muted hover:text-content sm:px-3"
-            >
-              Catalog
-            </Link>
-          </li>
-          <li>
-            <Link
-              href="/dashboard"
-              className="inline-block rounded-md px-2 py-2 text-muted hover:text-content sm:px-3"
-            >
-              Dashboard
-            </Link>
-          </li>
-          {user !== null ? (
-            <li>
-              <Link
-                href="/profile"
-                className="inline-block rounded-md px-2 py-2 text-muted hover:text-content sm:px-3"
-              >
-                Profile
-              </Link>
+        <ul className="ml-1 hidden list-none items-center gap-1 p-0 text-sm md:flex">
+          {links.map((link) => (
+            <li key={link.href}>
+              <NavLink href={link.href}>
+                <span className="inline-block px-2 py-2 sm:px-2.5">{link.label}</span>
+              </NavLink>
             </li>
-          ) : null}
+          ))}
         </ul>
         <div className="ml-auto flex items-center gap-3">
           <CommandPalette authenticated={user !== null} />
+          <MobileNav links={links} />
           {user === null ? (
             <Link
               href="/login"
