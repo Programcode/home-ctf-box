@@ -1,0 +1,370 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: reversing-assembly-and-static-triage
+  title: 'Assembly mental models and the static triage pass'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - assembly
+    - disassembly
+    - static-analysis
+    - triage
+    - malware
+spec:
+  track: crypto-binary
+  summary: >-
+    Reversing rewards analysts who can read a program the way an electrician
+    reads wiring: slowly, structurally, and without fear. This module builds
+    the two skills every later analysis depends on. First you assemble a
+    working mental model of registers, memory, and control flow so that
+    disassembly reads as sentences instead of noise. Then you learn the static
+    triage pass, a fixed sequence of cheap observations, from file identity to
+    strings to imports, that turns an unknown binary into a prioritized set of
+    hypotheses without ever executing a byte. The module closes by turning raw
+    triage output into a written verdict you could defend to a reviewer.
+  objectives:
+    - Explain registers, memory, and control flow using a stable mental model.
+    - Read short disassembly excerpts and describe what each instruction does.
+    - Recognize compiler patterns such as function prologues and string setup.
+    - Run the standard static triage pass on an unknown sample in order.
+    - Extract strings, imports, and hashes that sharpen or kill hypotheses.
+    - Record a triage verdict with evidence and explicit confidence levels.
+  sections:
+    - id: why-a-mental-model-beats-memorization
+      title: 'Why a mental model beats memorization'
+      blocks:
+        - type: prose
+          markdown: |
+            New analysts often ask how many instructions they must memorize
+            before reversing starts making sense. The honest answer is that
+            memorization is the wrong investment. What separates readers from
+            stargazers is a small mental model with three parts: a CPU that
+            executes one instruction at a time, a handful of named boxes called
+            registers that hold the values currently being worked on, and one
+            large addressable memory where everything else lives. Every x86-64
+            instruction you will ever meet is a sentence about moving values
+            between those places, doing arithmetic on them, or choosing which
+            instruction runs next.
+
+            The model pays off because real binaries contain thousands of
+            instructions and nobody holds them all in mind. When you read a
+            function, you are not memorizing it; you are asking three questions
+            repeatedly. What value is being moved? Where is it going? What
+            decision follows? An analyst who can answer those questions for a
+            dozen common instruction families can follow almost any compiled C
+            program, because compilers are extremely predictable writers. They
+            reuse the same phrases millions of times, and once your eye catches
+            a phrase, recognition replaces decoding forever.
+        - type: code
+          language: asm
+          code: |
+            ; three sentences about values and control
+            mov rax, rbx        ; copy the value in rbx into rax
+            add rax, 8          ; add 8 to that value
+            cmp rax, 100        ; compare against 100, set flags
+            jg  too_big         ; if greater, jump to label too_big
+
+            ; expected reading: "if rbx + 8 exceeds 100, take the jump"
+        - type: callout
+          tone: tip
+          markdown: |
+            Keep a personal glossary of the twenty instructions you meet most.
+            The list converges fast: mov, lea, push, pop, call, ret, cmp,
+            test, and the conditional jumps cover most of what compiled code
+            says day to day.
+    - id: registers-memory-and-control-flow
+      title: 'Registers, memory, and control flow'
+      blocks:
+        - type: prose
+          markdown: |
+            Registers deserve names because programs talk through them. On
+            x86-64, rax traditionally carries return values, rsp tracks the top
+            of the stack, rbp marks the current stack frame, and rdi and rsi
+            usually hold the first two arguments a function received. None of
+            this is enforced by hardware; it is a calling convention, an
+            agreement between compilers. Reading disassembly without knowing
+            the agreement is like eavesdropping on people who share private
+            shorthand. Learning six conventions restores the missing context.
+
+            Memory enters the picture whenever an instruction uses brackets.
+            The bracket means go look at that address. So mov eax, [rbx] does
+            not move the value of rbx; it moves whatever lives at the address
+            rbx contains. Square brackets plus a register is how compiled code
+            reads arrays, structs, and stack slots, which makes bracket
+            fluency the single highest-value skill in early reversing. Control
+            flow completes the model: cmp and test set invisible flag bits,
+            and the j-family of instructions redirects execution based on those
+            flags. Loops are just a comparison plus a backward jump; branches
+            are a forward jump; calls push a return address so ret can find
+            its way home.
+        - type: quiz
+          question_id: revast-bracket-meaning
+          question: 'In x86-64 disassembly, what does mov eax, [rbx] do?'
+          options:
+            - id: a
+              text: 'Copies the value of rbx into eax.'
+            - id: b
+              text: 'Copies the value stored at the memory address held in rbx into eax.'
+            - id: c
+              text: 'Copies eax into the address rbx points at.'
+            - id: d
+              text: 'Computes the sum of rbx and eax.'
+          answer_ids: [b]
+          explanation: >
+            Square brackets mean dereference: treat the register content as an
+            address and read memory there. Direction matters too; the first
+            operand receives, so eax is the destination. Option C reverses the
+            direction, which would be mov [rbx], eax.
+        - type: prose
+          markdown: |
+            One more habit belongs here. Compilers write idiomatically, so
+            certain instruction clusters have fixed meanings regardless of the
+            program. xor eax, eax is simply the fastest way to zero a
+            register. lea rax, [rip + 0x2f1a] loads the address of something
+            in read-only data, almost always a string constant about to be
+            passed somewhere. call followed immediately by a test of eax and a
+            conditional jump is error handling. Spotting idioms converts lines
+            of text back into intent, which is the entire point of the mental
+            model.
+    - id: reading-disassembly-without-panic
+      title: 'Reading disassembly without panic'
+      blocks:
+        - type: prose
+          markdown: |
+            A wall of disassembly frightens nobody who has learned to skim for
+            structure first. Professional readers triage a function the same
+            way they triage prose: find the boundaries, then the landmarks,
+            then the details. Boundaries come from call and ret pairs, which
+            mark where one function ends and the next begins. Landmarks are
+            the string references, since a lea loading a readable message tells
+            you what the nearby code cares about far faster than any amount of
+            arithmetic reading. Only after structure emerges do individual
+            instructions deserve attention.
+        - type: code
+          language: text
+          code: |
+            $ objdump -d --no-show-raw-insn toycheck | sed -n '/<check_age>:/,/ret/p'
+            0000000000001189 <check_age>:
+                1189: endbr64
+                118d: push   %rbp
+                118e: mov    %rsp,%rbp
+                1191: mov    %edi,-0x4(%rbp)
+                1194: cmpl   $0x11,-0x4(%rbp)
+                1198: jge    11a6 <check_age+0x1d>
+                119a: lea    -0x1f(%rip),%rax        # "too young"
+                11a1: jmp    11ab <check_age+0x22>
+                11a6: lea    -0x16(%rip),%rax        # "welcome"
+                11ab: pop    %rbp
+                11ac: ret
+        - type: prose
+          markdown: |
+            Walk that excerpt with the mental model and it narrates itself.
+            The push and mov pair is the frame prologue, bookkeeping rather
+            than logic. The argument arrived in edi and was parked in a stack
+            slot. The cmpl compares it against hexadecimal 0x11, decimal 17,
+            and the jge jumps past the first string when the argument reaches
+            it. Each branch loads a different rip-relative string, so the
+            function returns one of two messages depending on the comparison.
+            Ten lines of assembly reduced to one English sentence: reject
+            anyone under eighteen.
+
+            Notice also what never appeared. There were no syscalls, no
+            network strings, no obfuscation. Most functions in most binaries
+            look like this, ordinary plumbing. Triage means finding the small
+            percentage of functions whose plumbing touches files, networks, or
+            process control, and the skimming habits above get you there
+            without drowning.
+    - id: the-static-triage-pass-in-order
+      title: 'The static triage pass, in order'
+      blocks:
+        - type: prose
+          markdown: |
+            Static analysis begins with identity, not curiosity. The triage
+            pass is a fixed sequence of cheap, non-executing observations, run
+            the same way every time so results stay comparable across samples
+            and days. Identity comes first: cryptographic hashes give the file
+            a name you can search in threat databases, and the file utility
+            guesses format and architecture. Size and timestamps join the
+            record because they cost nothing and occasionally explain
+            everything. Only after the sample has a documented identity do
+            content inspections begin.
+        - type: code
+          language: bash
+          code: |
+            $ sha256sum sample.bin && file sample.bin && stat -c '%s bytes' sample.bin
+            9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  sample.bin
+            sample.bin: PE32+ executable (console) x86-64, for MS Windows
+            385024 bytes
+
+            $ strings -n 8 sample.bin | grep -Ei 'http|\.dll|cmd|socket' | head -5
+            http://update.example-sim.local/ping
+            KERNEL32.dll
+            WinHttpOpen
+            WS2_32.dll
+            cmd.exe /c echo ok
+        - type: prose
+          markdown: |
+            That output already supports three defensible statements. The file
+            claims to be a 64-bit Windows console program, so all further tool
+            choices inherit that fact. It links networking libraries and
+            contains an HTTP URL, so network contact is a working hypothesis
+            rather than a guess. It references cmd.exe, which always deserves
+            a note because spawning shells is rarely innocent. Nothing here
+            proves maliciousness; simulated training samples and legitimate
+            software both contain URLs. Triage produces hypotheses ranked by
+            evidence, and the ranking is the product.
+
+            Imports deserve their own moment in every pass. The import table
+            lists which operating system capabilities a binary asked for at
+            build time, and unusual combinations stand out immediately: file
+            enumeration plus process creation plus raw socket access is a trio
+            worth underlining even before anything else is checked.
+        - type: quiz
+          question_id: revast-triage-first-step
+          question: 'What is the correct first action when triage begins on an unknown binary?'
+          options:
+            - id: a
+              text: 'Run it briefly inside the analysis VM to see what happens.'
+            - id: b
+              text: 'Record hashes, file type, size, and timestamps without executing anything.'
+            - id: c
+              text: 'Dump strings immediately, since they reveal intent fastest.'
+            - id: d
+              text: 'Upload it to a public scanning service straight away.'
+          answer_ids: [b]
+          explanation: >
+            Identity precedes content. Hashes enable database lookups, and
+            file type steers every later tool choice, all without execution
+            risk. Strings matter but arrive second, and running or uploading
+            a sample involves policy decisions that belong after basic facts
+            are recorded.
+    - id: triaging-safely-and-legally
+      title: 'Triaging safely and inside scope'
+      blocks:
+        - type: prose
+          markdown: |
+            Static techniques are safe precisely because they refuse to let
+            the sample run, and keeping that refusal intact requires
+            environment discipline. Analysis belongs on disposable virtual
+            machines snapshotted before work began, never on a workstation
+            with access to your files, credentials, or employer network. Even
+            supposedly inert tools carry edges: archive extractors can be
+            coerced into path traversal, parsers have had memory corruption
+            bugs, and a misconfigured shared folder quietly defeats every
+            other precaution. Treat the sample as hostile input to your tools,
+            not only as a potential executable.
+
+            Scope rules apply to static work too. Samples arrive from
+            incidents, mail queues, and downloads, and each source carries its
+            own handling authorization. Copying a sample onto removable media,
+            shipping it to an online service, or retaining it beyond case
+            retention windows are policy decisions, and analysts who decide
+            them alone create incidents of their own. On this platform the
+            same discipline is exercised with simulated artifacts: the
+            quiet-persistence room hands you suspicious-looking files that
+            only print timestamped lines, so the entire identify, inspect,
+            hypothesize loop gets practiced honestly with zero detonation
+            risk.
+        - type: callout
+          tone: warning
+          markdown: |
+            Static does not mean harmless. Malformed inputs can crash or
+            exploit vulnerable parser tools, so keep tool versions patched,
+            keep snapshots fresh, and keep the sample off machines that hold
+            anything you would hate to lose.
+        - type: prose
+          markdown: |
+            Version awareness rounds out safe triage. Knowing which runtime
+            and library versions a target environment uses decides whether a
+            candidate weakness can apply at all, a judgment the
+            kernel-of-truth room drills deliberately: three candidate issues,
+            one set of version notes, and only one conclusion the evidence
+            actually supports. Carrying that habit into malware work prevents
+            confident reports built on inapplicable findings.
+    - id: from-output-to-verdict
+      title: 'From triage output to a written verdict'
+      blocks:
+        - type: prose
+          markdown: |
+            Triage ends in writing. A verdict document records four things for
+            every claim: the observation, the exact command producing it, the
+            hypothesis it supports or kills, and remaining uncertainty. This
+            format looks bureaucratic until the day a reviewer asks why you
+            called a sample a downloader, and the document answers with the
+            import table excerpt and the URL string instead of a shrug.
+            Verdicts also accumulate into institutional memory, letting the
+            next analyst confirm your hash hit in seconds rather than
+            repeating the whole pass.
+        - type: code
+          language: text
+          code: |
+            verdict.md (excerpt)
+
+            Sample: 9f86d081...00a08 (sha256), PE32+ console, 385024 bytes
+            Observation: imports WS2_32.dll and WININET.dll;
+                         string http://update.example-sim.local/ping
+            Hypothesis: HTTP-capable downloader or beacon (medium confidence)
+            Killed: none yet
+            Uncertainty: URL host resolves only in lab DNS; no dynamic check run
+
+            Next step: dynamic observation in isolated sandbox, if approved
+        - type: quiz
+          question_id: revast-verdict-quality
+          question: 'Which verdict line best matches the documentation standard taught here?'
+          options:
+            - id: a
+              text: '"File is definitely ransomware based on the encrypted feel of the strings."'
+            - id: b
+              text: '"Imports show socket APIs; hypothesis C2 beacon over TCP, medium confidence, proof attached."'
+            - id: c
+              text: '"Looks bad, escalating to IR."'
+            - id: d
+              text: '"VirusTotal said trojan, case closed."'
+          answer_ids: [b]
+          explanation: >
+            Option B names the evidence, states a bounded hypothesis, rates
+            confidence, and promises proof. Option A asserts motive without
+            mechanism, option C skips reasoning entirely, and option D
+            outsources judgment to someone else, exactly the habit triage
+            exists to replace.
+        - type: prose
+          markdown: |
+            Confidence wording deserves practice because downstream readers
+            act on it. High confidence means the evidence would survive a
+            hostile cross-examination; medium means reasonable but incomplete;
+            low means the observation is real while its meaning is not settled.
+            Writing low confidence is not weakness; it is the difference
+            between an analyst and a fortune teller. With verdicts flowing
+            reliably, the next module adds the sandbox workflow that tests
+            surviving hypotheses under controlled observation.
+  cheat_sheet: |
+    # Assembly mental models and static triage
+
+    Mental model:
+        CPU executes one instruction at a time
+        registers = named working values (rax return, rsp/rbp stack)
+        memory = big array addressed by brackets [reg]
+
+    Reading order:
+        boundaries (call/ret) -> landmarks (strings) -> details
+        idioms: xor eax,eax = zero; lea rip+X = load data address
+
+    Triage pass, in order:
+        1. sha256sum + md5sum, file, stat (identity)
+        2. strings -n 8 | grep -Ei 'http|dll|cmd|socket'
+        3. import table review (capabilities requested)
+        4. packer/entropy sanity check
+        5. verdict: observation, command, hypothesis, confidence
+
+    Safety rules:
+        snapshot VM first; no host folders mounted
+        never execute during static phase; patch parser tools
+        handling/sharing = policy decision, ask first
+
+    Verdict confidence:
+        high = survives cross-examination
+        medium = reasonable, incomplete
+        low = observation real, meaning unsettled

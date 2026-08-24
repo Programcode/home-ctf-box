@@ -1,0 +1,34 @@
+apiVersion: openrange.io/v1
+kind: Path
+metadata:
+  slug: applied-crypto-attacks
+  title: 'Applied crypto attacks'
+  version: 0.1.0
+  difficulty: medium
+  points: 450
+  estimated_minutes: 200
+  tags:
+    - crypto
+    - hashes
+    - ciphers
+    - rsa
+    - signatures
+spec:
+  track: crypto-binary
+  summary: >-
+    Most cryptography failures in the wild are not broken mathematics; they
+    are ordinary engineering mistakes wrapped around sound primitives. This
+    path trains you to find those mistakes on sight. You learn to separate
+    encoding from encryption, spot hash usage that cannot survive an
+    adversary, and read block cipher modes for the leaks they invite, up to
+    and including the padding oracle idea explained as a design lesson rather
+    than a tool recipe. RSA appears as five numbers you can actually reason
+    about, signature nonces get the failure history they deserve, and
+    protocol downgrade thinking turns negotiation logic into a reviewable
+    surface. Every concept lands in code-review habits you can carry into an
+    authorized engagement tomorrow, starting with reading a capture like the
+    one in packet-diary and asking what should never have crossed the wire.
+  modules:
+    - slug: encodings-and-hash-failures
+    - slug: cipher-modes-and-oracle-design
+    - slug: rsa-signatures-and-downgrades

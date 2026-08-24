@@ -1,0 +1,359 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: rop-concepts-responsible-disclosure
+  title: 'ROP concepts and responsible disclosure'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 65
+  tags:
+    - rop
+    - gadgets
+    - root-cause
+    - advisory-writing
+    - disclosure
+spec:
+  track: crypto-binary
+  summary: >-
+    Return-oriented programming explains why memory mitigations raised the bar
+    without lowering the stakes, and this module treats it as a concept and a
+    defensive problem rather than a construction project. You learn what makes
+    ROP conceptually different from code injection, how gadgets and chains are
+    described structurally at diagram level without building runnable ones,
+    and which defensive ideas such as control-flow integrity respond to it.
+    The second half moves from crashes to professionalism: reproducing faults
+    minimally under authorization, reading sanitizer output to name a root
+    cause class, writing an advisory with the fields reviewers expect, and
+    practicing coordinated disclosure norms including timelines, vendor
+    contact, and restraint about public detail. The judgment you rehearse here
+    mirrors kernel-of-truth, where evidence discipline decides conclusions.
+  objectives:
+    - Explain why NX motivated reuse of existing code instead of injected code.
+    - Describe gadgets and chains structurally without constructing them.
+    - Summarize control-flow integrity defenses at concept level.
+    - Reproduce crashes minimally and read sanitizer reports for root cause.
+    - Write advisories containing impact, reproduction bounds, and remediation.
+    - Apply coordinated disclosure norms to a realistic vulnerability case.
+  sections:
+    - id: why-reuse-beat-injection
+      title: 'Why reusing code beat injecting it'
+      blocks:
+        - type: prose
+          markdown: |
+            Before NX, an attacker who controlled instruction pointers could
+            point them at bytes they had smuggled into memory as data. NX made
+            those pages non-executable, closing that door on most platforms.
+            Return-oriented programming emerged from a simple observation: a
+            process already contains megabytes of legitimate, executable
+            machine code in its own text pages and libraries. If control of
+            the stack lets one choose where ret instructions land, existing
+            code fragments can be sequenced into behavior their authors never
+            intended, no injection required. The defense targeted where bytes
+            live; the response moved to borrowing execution that already lives
+            in allowed places.
+
+            Understanding this history matters because it reframes mitigation
+            talk from folklore into cause and effect. W xor X answered
+            injection. Randomization answered predictability. Reuse attacks
+            answered both by needing only relative structure, which is why the
+            field then developed ideas aimed directly at constraining control
+            flow itself. Each generation of defense names the assumption it
+            removes; naming assumptions is also exactly how defenders audit
+            new designs today.
+        - type: quiz
+          question_id: pwnrop-nx-motivation
+          question: 'Which development most directly motivated return-oriented techniques?'
+          options:
+            - id: a
+              text: 'Stack canaries detecting frame overwrites.'
+            - id: b
+              text: 'NX protections making injected data pages non-executable.'
+            - id: c
+              text: 'Full RELRO freezing library tables.'
+            - id: d
+              text: 'ASLR randomizing heap bases.'
+          answer_ids: [b]
+          explanation: >
+            ROP sidesteps injection entirely by sequencing existing executable
+            fragments, answering NX specifically. Canaries guard returns,
+            RELRO guards tables, ASLR raises knowledge costs; none created the
+            injection ban that reuse attacks circumvent.
+        - type: prose
+          markdown: |
+            One boundary belongs up front. Everything below describes
+            structure so that analysts can recognize and reason about the
+            technique. Constructing chains against software you do not own is
+            outside coursework scope everywhere on this platform, and nothing
+            in assessments requires it.
+    - id: gadgets-and-chains-in-theory
+      title: 'Gadgets and chains, structurally'
+      blocks:
+        - type: prose
+          markdown: |
+            A gadget is a short sequence of existing instructions ending in a
+            ret, discovered not by function boundaries but by starting the
+            decode anywhere inside byte streams, since x86 allows unaligned
+            instruction starts. Structurally a gadget performs some small
+            effect, moving a value, adding registers, loading from memory,
+            then transfers control via the return address popped off the top
+            of the stack. Because each ret consumes the next stack slot as its
+            destination, a sequence of chosen addresses laid out in stack
+            order behaves like a program counter walking a list of tiny
+            effects. Analysts call that layout a chain.
+
+            The diagram-level picture suffices for literacy: imagine the
+            stack as a column of saved return addresses, each pointing into a
+            different corner of legitimate code, with data slots interleaved
+            between them for gadget inputs. Reading literature becomes
+            possible once those roles are named. What this course never does
+            is enumerate real gadgets in real libraries toward a working
+            payload; the structural idea, plus toy diagrams like the block
+            below, carries every learning objective here.
+        - type: code
+          language: text
+          code: |
+            conceptual sketch (no real offsets, nothing runnable)
+
+            stack layout            borrowed fragments (existing code)
+            +---------------+       addr1 -> pop rax ; ret
+            | addr1         |       addr2 -> add rax, rbx ; ret
+            | value_for_rax |       addr3 -> mov [rdi], rax ; ret
+            | addr2         |
+            | addr3         |        effect: three tiny steps sequenced
+            +---------------+        purely by return-address order
+
+            defender's summary: control flow hopped between legal sites;
+            no page ever executed data, yet intent diverged wildly
+        - type: callout
+          tone: info
+          markdown: |
+            If a diagram like this appears in your future incident notes, the
+            takeaway is capability language: an adversary demonstrated stack
+            control sufficient to sequence existing fragments. Response teams
+            act on that statement without needing the artifact itself.
+    - id: defending-control-flow
+      title: 'Defensive responses to reuse attacks'
+      blocks:
+        - type: prose
+          markdown: |
+            Since reuse attacks abuse legitimate transitions, defenses aim at
+            making transitions lawful again. Control-flow integrity, CFI,
+            builds or infers a policy of allowed targets and validates every
+            indirect jump or return against it; coarse schemes constrain
+            categories while fine-grained research systems approximate exact
+            graphs. Shadow stacks keep a protected copy of return addresses
+            and compare at ret time, catching hijacked returns even when the
+            visible stack lies. Compilers contribute by reducing gadget
+            density, reordering instructions so useful ret-terminated
+            fragments become scarce. Hardware directions fold shadow-stack
+            support into CPUs, moving cost off software.
+
+            None of these ideas require offensive expertise to evaluate, and
+            reviews increasingly ask about them explicitly. Practical posture
+            questions look like: does the platform enable shadow stacks where
+            available, do high-risk services build with available CFI modes,
+            and does monitoring watch for aborts from such checks, since a
+            triggered enforcement event is itself a detection signal worth
+            alerting on?
+        - type: code
+          language: text
+          code: |
+            review checklist excerpt (control-flow hardening)
+
+            [ ] shadow stack enabled platform-side where offered
+            [ ] forward-edge CFI mode selected for service binaries
+            [ ] gadget-density flags considered in hardened builds
+            [ ] enforcement aborts wired into alerting, not silenced
+            [ ] documented residual risk accepted by owner, in writing
+        - type: prose
+          markdown: |
+            Notice the last checkbox borrows from risk management rather than
+            engineering. Perfect elimination of reuse potential remains
+            research territory, so professional documents state residual risk
+            plainly and let owners sign acceptance. That habit previews the
+            advisory writing later in this module.
+    - id: crash-to-root-cause
+      title: 'From crash report to root cause'
+      blocks:
+        - type: prose
+          markdown: |
+            Professional binary work spends more time explaining failures than
+            exploiting them, and explanation begins with disciplined
+            reproduction. Under authorization, reduce input toward the minimal
+            trigger: strip bytes that do not matter, fixate environment until
+            the failure repeats deterministically, record versions of the
+            program, libraries, and tooling. A minimized repro converts he said
+            she said into an experiment anyone can rerun, and often shrinks
+            the eventual patch diff dramatically because developers can see
+            the faulty loop immediately.
+        - type: code
+          language: text
+          code: |
+            sanitizer-style output (illustrative lab toy)
+
+            ==1==ERROR: AddressSanitizer: stack-buffer-overflow
+            WRITE of size 4 at 0x7ffc31d2a90 thread T0
+                #0 0x40113a in parse_header lab_toy.c:14
+                #1 0x4011c2 in main lab_toy.c:29
+            Address ... is located in stack of thread T0 at offset 68
+              ...which is 8 bytes after local 'header_buf[16]'
+
+            reading: write size, site, and relation to named local are all
+            stated; root cause candidate = unchecked length feeding line 14
+        - type: prose
+          markdown: |
+            Sanitizer reports compress hours into paragraphs by instrumenting
+            allocations and naming relationships: which access, which size,
+            which buffer, how far past its end. Learning to read the four key
+            lines, error class, operation and size, call stack, and address
+            relationship, turns scary walls into actionable sentences. Root
+            cause classification follows naturally: unchecked length, integer
+            confusion between signed and unsigned, off by one in a bound, use
+            after free. Classifying correctly matters because remediation
+            differs; swapping APIs fixes some classes and hides others.
+        - type: quiz
+          question_id: pwnrop-minimal-repro-goal
+          question: 'What is the primary purpose of minimizing a crash reproduction before writing an advisory?'
+          options:
+            - id: a
+              text: 'Shrinking files saves storage on the reporting platform.'
+            - id: b
+              text: 'A deterministic minimal case proves causality and speeds developer verification.'
+            - id: c
+              text: 'Minimized inputs hide sensitive details from vendors.'
+            - id: d
+              text: 'Small inputs always crash faster during testing.'
+          answer_ids: [b]
+          explanation: >
+            Minimization isolates cause from noise, making the defect
+            demonstrable and the fix verifiable. Vendors reproduce in seconds,
+            patches stay tight, and disputes about whether the bug exists
+            evaporate. Storage and speed are incidental.
+    - id: writing-the-advisory
+      title: 'Writing the advisory'
+      blocks:
+        - type: prose
+          markdown: |
+            Advisories are structured arguments that a defect exists, that it
+            matters, and that a remedy works, written for three audiences at
+            once: maintainers who must fix it, downstream operators who must
+            prioritize it, and future readers who inherit the record. Core
+            fields recur across reputable programs: affected versions and
+            configurations, a precise weakness description using standard
+            vocabulary where possible, impact framed in operational terms,
+            reproduction bounded to proof without weaponization, remediation
+            guidance including workarounds, and credit plus timeline showing
+            good faith.
+        - type: code
+          language: text
+          code: |
+            advisory skeleton
+
+            TITLE     Unbounded header copy in widgetd 2.1..2.3.1
+            WEAKNESS  stack buffer overflow, missing capacity check
+            AFFECTED  widgetd 2.1.0 through 2.3.1, default config
+            IMPACT    remote pre-auth crash (DoS); memory-corruption
+                      potential unproven, see scope note
+            REPRO     12-byte header with declared_len=0xffff against
+                      lab instance; transcript attached, no exploit code
+            REMEDIATION vendor patch 2.3.2; workaround: disable remote
+                        header parsing until upgrade possible
+            TIMELINE  reported day 0, ack day 1, patch day 9, pub day 30
+            CREDIT    analyst name, coordinating CERT reference
+        - type: prose
+          markdown: |
+            Two habits separate strong advisories from noisy ones. First,
+            separate observed impact from speculated impact explicitly; the
+            example above claims denial of service because that was shown, and
+            marks corruption potential as unproven rather than inflating
+            severity with imagination. Second, attach verification artifacts,
+            transcripts, configuration, versions, so claims arrive checkable.
+            Reviewers trust writers whose statements come with receipts.
+        - type: callout
+          tone: warning
+          markdown: |
+            Advisory scope rule: include enough detail to verify and fix,
+            withhold enough detail that publication does not hand a crowd a
+            working attack. When unsure, coordinate with the receiving
+            program on redaction before publishing.
+    - id: coordinated-disclosure-norms
+      title: 'Coordinated disclosure norms'
+      blocks:
+        - type: prose
+          markdown: |
+            Coordinated disclosure is the social contract that turns private
+            findings into public safety without arming opportunists midstream.
+            Norms converge across programs: contact the maintainer through a
+            published security channel rather than public issue trackers,
+            agree on timelines measured in weeks, share technical depth with
+            the vendor sooner than with the world, publish together once a fix
+            ships or a deadline passes, and extend grace when complexity
+            warrants it. Embedded devices and long-support enterprise products
+            famously need patience, and mature reporters calibrate pressure
+            accordingly rather than treating every vendor identically.
+
+            Judgment calls fill the space rules cannot cover. Evidence
+            discipline keeps decisions honest, exactly as practiced in
+            kernel-of-truth where three candidate issues meet version facts
+            and only one conclusion survives: applicability gets verified
+            before escalation, severity gets argued from observed behavior,
+            and uncertainty gets stated rather than rounded up. Financial
+            incentives through bounty programs change mechanics but not
+            ethics; policy differences between programs get read before
+            testing starts, not after.
+        - type: quiz
+          question_id: pwnrop-disclosure-channel
+          question: 'You discover a likely serious flaw in an open-source project. Per coordinated norms, where does the report go first?'
+          options:
+            - id: a
+              text: 'A new public GitHub issue so the community can triage quickly.'
+            - id: b
+              text: 'The private security contact or reporting channel from the security policy.'
+            - id: c
+              text: 'Social media, to pressure a fast fix.'
+            - id: d
+              text: 'A full public post with exploit details after ninety days regardless.'
+          answer_ids: [b]
+          explanation: >
+            Private first protects users during the fix window. Security
+            policies exist precisely to route such reports; public trackers,
+            pressure posts, and unconditional deadlines skip the coordination
+            that gives maintainers room to ship safely.
+        - type: prose
+          markdown: |
+            The path closes where it began: memory safety is everyone's
+            problem, and the professionals who improve it are the ones who can
+            read a fault precisely, explain a root cause plainly, assess
+            protections fairly, and disclose with discipline. Carry these
+            habits into the applied cryptography path next door, where the
+            same evidence-first mindset meets mathematics instead of memory.
+  cheat_sheet: |
+    # ROP concepts and responsible disclosure
+
+    Concept map:
+        NX bans executing data -> reuse existing code fragments
+        gadget = existing instrs ending in ret, found by unaligned decode
+        chain = stack of return addrs walked by successive rets
+        effect: legal pages, illegal program
+
+    Defensive answers:
+        CFI validates indirect targets vs policy
+        shadow stack mirrors returns, compares at ret
+        compilers reduce gadget density
+        wire enforcement aborts into alerting
+
+    Crash workflow:
+        authorized repro -> minimize to deterministic case
+        -> read sanitizer: class, op+size, stack, offset relation
+        -> classify root cause (bounds, sign confusion, UAF...)
+
+    Advisory fields:
+        title, weakness, affected versions/config,
+        impact (observed vs speculative!), bounded repro,
+        remediation + workaround, timeline, credit
+
+    Disclosure norms:
+        private channel first, timelines in weeks,
+        vendor sees depth early, publish on fix or agreed date,
+        verify applicability before escalating claims

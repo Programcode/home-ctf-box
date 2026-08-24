@@ -1,0 +1,360 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: dynamic-analysis-and-unpacking
+  title: 'Dynamic analysis safety and unpacking concepts'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - malware
+    - dynamic-analysis
+    - sandbox
+    - unpacking
+    - behavior
+spec:
+  track: crypto-binary
+  summary: >-
+    Static analysis tells you what a sample claims; dynamic analysis shows you
+    what it actually does. That difference is why analysts detonate samples at
+    all, and it is also why detonation carries rules. This module teaches the
+    sandbox workflow professionals use: disposable machines, snapshots taken
+    before contact, egress denied, and every observation written down before
+    the revert. You learn to read process, file, registry, and network
+    telemetry as a story rather than a log dump, to recognize packed binaries
+    by their entropy and import shapes, and to describe how unpacking works as
+    a concept so tool output stops looking like sorcery. Nothing here builds
+    an exploit chain; everything here builds an analyst who can watch one get
+    attempted and narrate it precisely.
+  objectives:
+    - Decide when static evidence justifies moving to observed execution.
+    - Prepare a sandboxed analysis environment with snapshots and no egress.
+    - Interpret process, file, persistence, and network telemetry safely.
+    - Recognize packed samples from entropy, sections, and import tables.
+    - Explain the unpacking lifecycle conceptually without runnable recipes.
+    - Document dynamic findings with hashes, timelines, and captured evidence.
+  sections:
+    - id: when-static-evidence-runs-out
+      title: 'When static evidence runs out'
+      blocks:
+        - type: prose
+          markdown: |
+            Dynamic analysis earns its risk budget only when static work has
+            produced a question that observation can answer. Good triggering
+            questions look like these: the strings reference a URL, but does
+            the sample actually connect? An import table lists process
+            creation APIs, but which process, with what arguments, when? The
+            verdict document from your triage pass should name these questions
+            explicitly before any execution happens, because a detonation
+            without questions produces logs nobody reads and evidence nobody
+            can defend.
+
+            Equally important is knowing when not to go dynamic. Samples tied
+            to active incidents may need preservation over experimentation.
+            Environments lacking snapshot infrastructure or egress control are
+            not laboratories; they are exposures. And some questions answer
+            themselves statically: a configuration blob readable in plain text
+            needs no detonation to interpret. Professionals treat execution as
+            the expensive instrument, reserved for hypotheses that cheaper
+            tools cannot resolve.
+        - type: code
+          language: text
+          code: |
+            pre-flight checklist (all boxes required)
+
+            [ ] hypothesis list written, one line each
+            [ ] VM reverted to clean snapshot (verified timestamp)
+            [ ] host folders unmounted, clipboard disabled
+            [ ] egress denied at hypervisor network policy
+            [ ] capture tools armed: procmon-style log, pcap, file diff
+            [ ] clock synced; case ID stamped in notes header
+
+            expected result after run: revert + evidence bundle survives
+        - type: prose
+          markdown: |
+            The checklist converts safety from memory into procedure. Note the
+            last line especially: reverting destroys the machine state but
+            must never destroy the evidence, so logs and captures export to
+            storage outside the disposable machine before the snapshot rolls
+            back. Analysts who lose a finding to their own revert button tend
+            to make that mistake exactly once.
+    - id: sandbox-anatomy-and-guardrails
+      title: 'Sandbox anatomy and guardrails'
+      blocks:
+        - type: prose
+          markdown: |
+            A laboratory is defined by four properties, worth naming because
+            each property answers a specific failure mode. Isolation keeps the
+            sample away from networks and hosts it could harm, implemented
+            through dedicated virtualization hosts and denied egress rather
+            than politeness agreements. Disposability means every machine
+            reverts to a known-clean snapshot, so contamination cannot
+            accumulate across sessions. Observability means telemetry tools
+            are running before the sample wakes, since behavior missed during
+            boot rarely repeats on request. Attribution means the lab stamps
+            case IDs and timestamps into evidence automatically, because
+            findings that cannot be tied to a sample and a session are
+            anecdotes.
+
+            Guardrails extend beyond the machine. Simulated or benign training
+            samples belong in beginner labs precisely because real specimen
+            handling adds legal and safety dimensions that junior analysts
+            should meet gradually. This platform follows that philosophy: the
+            quiet-persistence room stages suspicious-looking cron drop-ins,
+            init-file edits, and systemd units that do nothing but print
+            timestamped lines, letting you practice the full observe,
+            attribute, report loop with zero detonation consequences.
+        - type: quiz
+          question_id: revdyn-sandbox-property
+          question: 'A colleague runs samples inside their daily-work VM because it already has tools installed. Which laboratory property fails first?'
+          options:
+            - id: a
+              text: 'Observability, because daily VMs lack logging tools.'
+            - id: b
+              text: 'Isolation and disposability, since the host holds real data and no clean-snapshot guarantee.'
+            - id: c
+              text: 'Attribution, because timestamps are missing.'
+            - id: d
+              text: 'None; installed tools make it a better lab.'
+          answer_ids: [b]
+          explanation: >
+            Convenience is not containment. A machine holding real files,
+            credentials, and network access violates isolation, and without a
+            verified clean snapshot every prior session contaminates the next.
+            Tools being present says nothing about the boundary holding.
+        - type: callout
+          tone: warning
+          markdown: |
+            Egress denial happens at the network layer, not by trusting the
+            sample to behave. Host-only networking with explicit allowlists
+            for lab infrastructure is the default posture for this course.
+    - id: reading-behavior-telemetry
+      title: 'Reading behavior telemetry as a story'
+      blocks:
+        - type: prose
+          markdown: |
+            Dynamic tools emit thousands of events per minute, and raw volume
+            drowns beginners. The remedy is reading telemetry as narrative
+            arcs instead of lines. Execution begins somewhere: a parent
+            process, a scheduled task, a service start. From there the story
+            develops through writes, spawns, and connections, and it ends
+            either quietly or with persistence. Ask of every capture who
+            started this, what did it change, what did it talk to, and did it
+            arrange to survive a reboot. Four questions, asked in order, turn
+            noise into plot.
+        - type: code
+          language: text
+          code: |
+            condensed behavioral timeline (simulated benign lab sample)
+
+            10:02:11  proc spawn   cmd.exe <- explorer.exe (user opened it)
+            10:02:12  file write   %TEMP%\\note_sim.txt ("hello from sim")
+            10:02:12  registry     HKCU\\...\\Run key queried, value NOT set
+            10:02:13  socket       connect 10.10.0.5:9999 refused (policy)
+            10:02:13  exit         code 0
+
+            reading: short-lived, wrote one file, probed Run key,
+            attempted one local connection, died politely
+        - type: prose
+          markdown: |
+            That timeline supports concrete statements: the sample touched one
+            file whose contents are fully known, queried persistence locations
+            without modifying them, attempted exactly one connection that
+            policy refused, and exited cleanly. Each statement cites timeline
+            rows, which is what makes the difference between observation and
+            vibes. Notice too what absence means: no child processes beyond
+            itself, no writes outside TEMP, no service creation. Negative
+            space is evidence, provided the telemetry covered those event
+            classes.
+
+            Registry and filesystem watching deserve special attention during
+            malware-adjacent work because they are where intent shows first.
+            Writes to autostart locations, shadow copy deletion commands, or
+            security tool service names appearing in string form all shift a
+            verdict faster than any exotic API call. The habit to build now,
+            on harmless samples, is pausing at each such row and asking what
+            it would mean if the sample were hostile.
+    - id: recognizing-packed-binaries
+      title: 'Recognizing packed and obfuscated samples'
+      blocks:
+        - type: prose
+          markdown: |
+            Packing compresses or encrypts a program and wraps it in a small
+            stub that reconstructs the original at runtime. Analysts care
+            because packed samples defeat strings, hide imports, and generally
+            refuse the static triage pass. Three signals catch most cases.
+            Entropy measures how unpredictable bytes are; compressed sections
+            read near maximum while normal code sits comfortably lower.
+            Section names drift from compiler norms, either missing entirely
+            or wearing packer brand names. Import tables shrink to a handful
+            of functions, typically memory allocation plus dynamic loading,
+            because the stub needs almost nothing until the payload appears.
+        - type: code
+          language: bash
+          code: |
+            $ python3 - <<'EOF'
+            import math, collections
+            data = open("packed.bin","rb").read()
+            freq = collections.Counter(data)
+            n = len(data)
+            H = -sum((c/n) * math.log2(c/n) for c in freq.values())
+            print(f"size={n} entropy={H:.3f} bits/byte")
+            EOF
+            size=24576 entropy=7.912 bits/byte
+
+            $ objdump -x packed.bin | sed -n '/Sections/,/SYMBOL/p' | head -8
+            Sections:
+            Idx Name          Size      VMA               Type
+              0 UPX0          00000000  .text             UNDEFINED
+              1 UPX1          00005e00  .rsrc             CONTENT
+        - type: prose
+          markdown: |
+            Both signals agree here: entropy near the theoretical ceiling of
+            eight bits per byte plus sections named for a common packer. That
+            agreement matters because single signals mislead. High entropy in
+            one section of an otherwise normal binary usually means embedded
+            crypto keys or resources, not packing, and tiny import tables can
+            also indicate deliberate minimalism rather than compression.
+            Triage records the suspicion and moves on; confirmation belongs to
+            the unpacking concepts next section or to controlled observation.
+    - id: unpacking-concepts-without-recipes
+      title: 'Unpacking as a concept, not a recipe'
+      blocks:
+        - type: prose
+          markdown: |
+            Every unpacking story shares one skeleton, and learning the shape
+            beats memorizing tool clickpaths. At load time the stub runs
+            first. It allocates memory, decompresses or decrypts the original
+            program into that memory, repairs imports by walking the real
+            import table and filling addresses, then transfers control to the
+            recovered entry point, sometimes called the original entry point.
+            Everything an analyst needs therefore exists briefly in memory:
+            unpacked code, rebuilt imports, visible strings. Conceptually the
+            craft is capturing that transient state, and entire tool families
+            exist to automate pieces of it.
+
+            Understanding the skeleton also explains defenses without anyone
+            handing you a working chain. Multi-layer packing repeats the cycle
+            so the final payload surfaces only after several rounds. Virtual
+            machine protectors translate original code into custom bytecode
+            interpreted by an embedded engine, so even a memory capture holds
+            translator plus bytecode rather than familiar instructions. Anti-analysis tricks detect debugger presence or delay execution past
+            sandbox timeouts. None of these require offensive detail to
+            understand; each simply relocates or obscures the moment the
+            skeleton describes.
+        - type: quiz
+          question_id: revdyn-oep-meaning
+          question: 'In unpacking terminology, what has happened at the moment control reaches the original entry point?'
+          options:
+            - id: a
+              text: 'The stub has finished rebuilding the program in memory and jumps into the recovered code.'
+            - id: b
+              text: 'The sample has finished executing and exits cleanly.'
+            - id: c
+              text: 'The operating system finishes loading system libraries.'
+            - id: d
+              text: 'The packer encrypts the payload a second time.'
+          answer_ids: [a]
+          explanation: >
+            The original entry point marks handoff from reconstruction stub to
+            recovered program. Imports are repaired and the unpacked image
+            exists in memory at that instant, which is why the concept frames
+            unpacking as capturing a moment rather than defeating a lock.
+        - type: callout
+          tone: info
+          markdown: |
+            Course scope note: you will never be asked to build unpackers or
+            bypass anti-analysis here. Assessment focuses on recognizing
+            packed states, explaining the lifecycle accurately, and deciding
+            when a sample warrants escalation to specialists.
+        - type: prose
+          markdown: |
+            Keep the concept tethered to safety. Memory capture techniques
+            belong to authorized environments with legal custody of the
+            sample; describing them in reports is normal, improvising them on
+            random internet downloads is how analysts become incident
+            statistics. When a packed sample exceeds your authorization or
+            tooling, the professional move is documentation and handoff, not
+            heroics.
+    - id: documenting-dynamic-findings
+      title: 'Documenting dynamic findings'
+      blocks:
+        - type: prose
+          markdown: |
+            Dynamic sessions produce perishable evidence, so documentation
+            discipline decides whether the hour of observation survives past
+            the revert. Three artifacts form the minimum record. The timeline
+            exports from your telemetry tools with timestamps intact and gets
+            annotated with your four narrative questions answered. Dropped
+            artifacts, meaning files the sample created, each receive fresh
+            hashes and a copy into evidence storage, because those files often
+            become the next analysis target. Finally a session summary states
+            which pre-flight hypotheses were confirmed, refuted, or left
+            open, closing the loop the triage verdict opened.
+        - type: code
+          language: text
+          code: |
+            session-summary.md (template)
+
+            case: SIM-2026-081  sample: 9f86d081...00a08
+            vm: win11-lab snapshot clean-2026-08-20T09:55Z
+            hypotheses:
+              h1 contacts update.example-sim.local -> REFUTED (egress denied,
+                 single refused connect to lab IP, see pcap line 44)
+              h2 drops secondary payload -> CONFIRMED (1 file, sha256 recorded)
+              h3 installs persistence -> OPEN (Run key queried, no write seen;
+                 recommend longer observation window next session)
+            artifacts: note_sim.txt (benign text), hash logged
+            revert performed: 10:14Z, evidence exported 10:13Z
+        - type: quiz
+          question_id: revdyn-evidence-survival
+          question: 'Why must dropped-artifact copies and exported logs leave the analysis VM before the snapshot revert?'
+          options:
+            - id: a
+              text: 'Reverting deletes current disk state, taking unretrieved evidence with it.'
+            - id: b
+              text: 'Snapshots corrupt files copied after boot.'
+            - id: c
+              text: 'Evidence tools stop working once samples exit.'
+            - id: d
+              text: 'Logs must stay inside the VM for legal reasons.'
+          answer_ids: [a]
+          explanation: >
+            Disposability is a feature, and its price is that post-revert the
+            machine no longer contains the session. Export first, revert
+            second; the template above records both times so reviewers can
+            verify the ordering held.
+        - type: prose
+          markdown: |
+            With summaries flowing, findings become reusable: hashes feed
+            detections, timelines feed reports, and open hypotheses feed the
+            next session plan. That pipeline is exactly where the path goes
+            next, turning documented observations into YARA rules and
+            indicators other defenders can act on.
+  cheat_sheet: |
+    # Dynamic analysis safety and unpacking
+
+    Go dynamic only with:
+        written hypotheses + clean snapshot + no egress + capture armed
+
+    Sandbox properties:
+        isolation (network/host), disposability (revert),
+        observability (telemetry pre-start), attribution (case ID stamps)
+
+    Telemetry narrative questions:
+        1. who started it   2. what changed (files/registry)
+        3. what it contacted 4. persistence attempts?
+        negative space counts as evidence
+
+    Packing signals:
+        entropy near 8 bits/byte, odd section names (UPX...),
+        tiny import table (alloc + LoadLibrary pattern)
+
+    Unpacking skeleton:
+        stub runs -> allocate -> decrypt/decompress -> repair imports
+        -> jump to original entry point (OEP); layers repeat the cycle
+
+    Session minimum record:
+        annotated timeline + artifact hashes + hypothesis verdicts
+        export evidence BEFORE revert; stamp case ID everywhere

@@ -1,0 +1,381 @@
+apiVersion: openrange.io/v1
+kind: Module
+metadata:
+  slug: mitigations-and-overflow-mechanics
+  title: 'Common mitigations and overflow mechanics'
+  version: 0.1.0
+  difficulty: medium
+  points: 150
+  estimated_minutes: 70
+  tags:
+    - nx
+    - aslr
+    - canary
+    - pie
+    - relro
+    - overflow
+spec:
+  track: crypto-binary
+  summary: >-
+    Memory corruption stopped being easy decades ago, and this module explains
+    what changed. Starting from how a plain buffer overflow actually corrupts
+    a toy program, you meet each mainstream mitigation as an engineering
+    answer to a specific question: NX removes execute permission from data,
+    stack canaries notice overwritten frames before return, ASLR and PIE
+    shuffle addresses so knowledge from one run fails on the next, and RELRO
+    hardens the tables used for library calls. Every mechanism is shown
+    through observable output such as mapping dumps and checksec-style
+    reports rather than through bypass instructions. The module ends with the
+    professional framing: assessing which protections apply to a target and
+    writing findings that respect disclosure norms instead of shipping exploit
+    chains.
+  objectives:
+    - Describe how unbounded writes overflow buffers on toy programs.
+    - Explain NX and W xor X and their effect at runtime.
+    - Trace canary placement and detection during function returns.
+    - Distinguish ASLR from PIE and predict their visible symptoms.
+    - Summarize partial versus full RELRO and the lazy binding tradeoff.
+    - Assess a binary's protection set and report it without bypass detail.
+  sections:
+    - id: how-plain-overflows-work
+      title: 'How a plain buffer overflow works'
+      blocks:
+        - type: prose
+          markdown: |
+            An overflow is bookkeeping failure, not sorcery. A program
+            reserves fixed space for a buffer, then copies input into it while
+            trusting the length the input claims about itself. When input runs
+            longer than reserved space, the copy continues into adjacent stack
+            bytes: first other locals, then saved registers, eventually the
+            saved frame pointer and return address. Nothing exotic happened;
+            memory simply received more than it was promised. The classic
+            unsafe functions all share that shape, copying until a terminator
+            or claimed count rather than until the destination is full.
+
+            The reason this matters professionally is not nostalgia for old
+            bugs. The same pattern survives wherever code trusts attacker
+            influenced lengths: parsing file headers, network protocols, image
+            metadata. Recognizing the mechanics lets a reviewer read unfamiliar
+            C and ask one sharp question about every copy loop: who verified
+            destination capacity against true source length, using source
+            facts rather than embedded length fields?
+        - type: code
+          language: c
+          code: |
+            /* illustrative only: deliberately unsafe, never deploy */
+            void greet(char *input) {
+                char buf[16];
+                strcpy(buf, input);      /* trusts NUL, not capacity */
+                puts(buf);
+            }
+
+            /* stack picture during the call (16-byte slots):
+                 buf[16]      <- reserved for input
+                 saved rbp    <- next in line when input overruns
+                 return addr  <- the prize overwrite reaches last
+            */
+
+            /* safe variant for contrast:
+                 snprintf(buf, sizeof buf, "%s", input);
+               truncates instead of trespassing; capacity wins.
+            */
+        - type: quiz
+          question_id: pwnmit-overflow-cause
+          question: 'At its core, what causes a stack buffer overflow?'
+          options:
+            - id: a
+              text: 'Writing past a buffer boundary because capacity was never checked against true input length.'
+            - id: b
+              text: 'Using too many variables inside one function.'
+            - id: c
+              text: 'Forgetting to free heap allocations.'
+            - id: d
+              text: 'Calling functions with too few arguments.'
+          answer_ids: [a]
+          explanation: >
+            Overflow means exceeding reserved space during write. Leaks are
+            forgetting frees, and argument mistakes cause different bugs. The
+            fix family all enforce capacity: bounded copies, length checks on
+            real lengths, safer APIs.
+        - type: callout
+          tone: warning
+          markdown: |
+            Scope note: this course demonstrates corruption concepts on toy
+            programs inside your own lab and stops there. Building working
+            exploits against other software belongs to authorized work with
+            written permission, and assessments here never require it.
+    - id: nx-and-wxorx
+      title: 'NX and W xor X'
+      blocks:
+        - type: prose
+          markdown: |
+            The oldest mitigation changes page permissions so data pages are
+            not executable. Hardware support arrived as the NX bit on page
+            table entries; operating systems then enforced a policy usually
+            called W xor X, meaning any page may be writable or executable
+            but never both. Under this regime, bytes copied into a stack
+            buffer remain inert data even if control flow somehow lands on
+            them, because the fetch would fault. The attack idea of leaving
+            machine code in an input buffer and jumping to it dies quietly.
+
+            Observability makes the concept concrete. Process maps show which
+            regions carry execute permission, and modern toolchains enable NX
+            by default for most platforms. The interesting exceptions teach
+            as much as the rule: JIT engines need writable-then-executable
+            transitions and manage them carefully; some embedded and legacy
+            environments lack the bit entirely, which is why mitigation
+            posture varies by platform and why reviewers ask about it
+            explicitly rather than assuming.
+        - type: code
+          language: text
+          code: |
+            $ readelf -lW ./toy | grep -E 'GNU_STACK|LOAD.*RWE'
+              GNU_STACK      0x000000 0x00000000 0x00000000
+                             0x00000 0x00000 RW  0x10
+
+            reading: RW stack, no E -> NX active for this build
+
+            $ cat /proc/self/maps | awk '$2 ~ /x/ {print; exit}'
+            5541a2b40000-5541a2b44000 r-xp ... /usr/bin/cat
+
+            reading: exactly one executable region expected per mapped
+            object; data regions below carry no x
+        - type: prose
+          markdown: |
+            Notice the division of labor: hardware supplies the bit, kernel
+            enforces policy, loader requests it via program headers. Reviews
+            therefore check three layers, and a missing GNU_STACK header or a
+            toolchain flag from another decade explains most gaps found in
+            practice.
+    - id: stack-canaries
+      title: 'Stack canaries'
+      blocks:
+        - type: prose
+          markdown: |
+            Where NX guards what bytes may do, canaries guard whether frames
+            were trespassed. At program start the runtime draws a random
+            value, and prologues place a copy just above local buffers,
+            between them and the saved frame pointer. Epilogues re-read the
+            value and compare before returning; mismatch means something
+            wrote across the buffer boundary, so the process aborts instead
+            of returning into corrupted state. The metaphor holds: the
+            canary dies visibly before miners walk into gas.
+
+            Placement explains both strength and limits. Overwriting the
+            return address requires crossing the canary, so linear stack
+            overflows get caught reliably. But canaries protect the return
+            path only: pointers stored elsewhere, heap objects, and
+            information leaks revealing the canary value itself sit outside
+            the contract. Compilers also vary in aggressiveness, protecting
+            every function or only those with suspicious buffers, which is
+            why flag choices appear in review checklists.
+        - type: code
+          language: text
+          code: |
+            $ gcc -fstack-protector-strong lab_toy.c -o lab_sp
+            $ checksec --file=lab_sp 2>/dev/null || pwn checksec lab_sp
+                ARCH     x86-64
+                RELRO    Partial
+                Canary   yes
+                NX       enabled
+                PIE      yes
+
+            $ objdump -d lab_sp | grep -m1 -B1 'fs:0x28'
+                mov %fs:0x28,%rax        ; load TLS-stored canary
+                mov %rax,-0x8(%rbp)      ; park it above locals
+        - type: quiz
+          question_id: pwnmit-canary-check-time
+          question: 'When does a canary mismatch actually abort the process?'
+          options:
+            - id: a
+              text: 'The instant any byte beyond a buffer is written.'
+            - id: b
+              text: 'During the epilogue check, before the corrupted function returns.'
+            - id: c
+              text: 'At process startup, before main begins.'
+            - id: d
+              text: 'Only when the kernel detects execution of data.'
+          answer_ids: [b]
+          explanation: >
+            Detection rides the return path: prologue plants the sentinel,
+            epilogue verifies it. Writes themselves go unnoticed until the
+            function attempts its guarded exit, which shapes both the
+            mitigation's power and its blind spots.
+        - type: prose
+          markdown: |
+            One nuance worth carrying into reviews: canaries derive from
+            thread-local storage, so threads each inherit correct values, but
+            anything able to read process memory wholesale, an unrelated
+            infoleak bug, undermines secrecy. Defense in depth exists precisely
+            because single mechanisms have edges; canaries plus NX plus
+            randomization overlap their blind spots substantially.
+    - id: aslr-and-pie
+      title: 'ASLR and PIE'
+      blocks:
+        - type: prose
+          markdown: |
+            Randomization attacks the prerequisite every simple exploit
+            assumes: knowing addresses in advance. ASLR, address space layout
+            randomization, asks the kernel to place regions at unpredictable
+            bases per run, shifting libraries, stack, and heap. PIE,
+            position independent executables, extends the same treatment to
+            the program itself by compiling it so code loads fine at any
+            base. Together they turn yesterday's hardcoded addresses into
+            today's guesses, forcing any hypothetical attacker to leak
+            runtime information before relying on layout knowledge.
+
+            The two layers fail independently, which is why reviews name them
+            separately. A non-PIE binary linked against randomized libraries
+            still exposes fixed program addresses; full PIE under a kernel
+            with randomization disabled gains little. Symptoms are easy to
+            spot: run a PIE toy twice and compare map dumps, watching bases
+            move while offsets within regions stay constant. That offset
+            constancy is also the analysis lesson, since relative structure
+            remains meaningful even after absolute addresses stop being.
+        - type: code
+          language: bash
+          code: |
+            $ for i in 1 2 3; do cat /proc/self/maps | grep 'libc' | head -1; done
+            7f2c8a100000-7f2c8a290000 r--p ... libc.so.6
+            7e4b11c00000-7e4b11c90000 r--p ... libc.so.6
+            7fa93d800000-7fa93d890000 r--p ... libc.so.6
+
+            $ readelf -h ./toy_pie | grep Type
+              Type:                              DYN (Position-Independent Executable)
+            $ readelf -h ./toy_nopie | grep Type
+              Type:                              EXEC (Executable file, fixed base)
+        - type: prose
+          markdown: |
+            Three runs, three different library bases: ASLR demonstrably live.
+            The ELF type field separates the compile-time decisions, DYN
+            meaning position independent, EXEC meaning a preferred fixed
+            base. Both outputs belong in triage notes for any binary you are
+            authorized to assess, since they summarize half the mitigation
+            posture in two lines.
+    - id: relro-and-binding-tables
+      title: 'RELRO and library call tables'
+      blocks:
+        - type: prose
+          markdown: |
+            Dynamic linking keeps a small address book called the GOT, the
+            global offset table, where calls to library functions look up
+            actual locations at runtime. Lazy binding historically filled
+            entries on first use, trading startup speed for a table that
+            stayed writable long after launch. Writable tables holding
+            control-relevant pointers became a classic target class, and
+            RELRO, relocation read-only, answers it. Partial RELRO makes most
+            startup relocations read-only while keeping lazy binding working;
+            full RELRO resolves everything at startup and marks the whole
+            table immutable, eliminating the window entirely at a small
+            startup cost.
+
+            Reviewers care because the setting summarizes intent. Full RELRO
+            appears in hardened builds; its absence alone proves nothing but
+            joins the checklist beside missing canaries or non-PIE builds.
+            As with every mitigation here, the point is assessment vocabulary:
+            being able to say precisely which guarantees a binary carries,
+            which it lacks, and what each gap means operationally.
+        - type: code
+          language: text
+          code: |
+            $ readelf -d ./toy_full | grep -E 'BIND_NOW|FLAGS' && \
+              readelf -lW ./toy_full | grep GNU_RELRO
+             0x000000006ffffffb (FLAGS)    BIND_NOW
+              GNU_RELRO    0x000640 ... r-- read-only after relocation
+            -> full RELRO confirmed
+
+            $ readelf -d ./toy_partial | grep -E 'BIND_NOW|FLAGS'; echo "exit=$?"
+            exit=1
+            -> no BIND_NOW -> partial RELRO at best
+        - type: quiz
+          question_id: pwnmit-relro-tradeoff
+          question: 'What does full RELRO give up relative to partial RELRO?'
+          options:
+            - id: a
+              text: 'Compatibility with dynamic linking entirely.'
+            - id: b
+              text: 'Lazy binding, resolving symbols at startup instead of first call.'
+            - id: c
+              text: 'The ability to use shared libraries.'
+            - id: d
+              text: 'Nothing; the settings are equivalent.'
+          answer_ids: [b]
+          explanation: >
+            Full RELRO pays eager resolution cost at startup to keep GOT pages
+            immutable forever. Libraries still link dynamically; only the
+            deferral trick disappears, trading microseconds of startup time
+            for a permanently closed window.
+    - id: mitigation-assessment-not-bypass
+      title: 'Assessment mindset, not bypass recipes'
+      blocks:
+        - type: prose
+          markdown: |
+            Each mitigation exists because some technique worked once, and a
+            whole folklore catalogs countermeasures to the countermeasures.
+            This course deliberately teaches the defensive half of that
+            history: how to determine what protections a target carries, how
+            to reason about what those protections guarantee and omit, and
+            how to communicate findings responsibly. Assessment produces
+            statements like this build lacks PIE and ships partial RELRO,
+            raising the ceiling for any future memory bug but proving none by
+            itself. That sentence fits a report; a gadget chain does not.
+
+            The reporting discipline has concrete rules. Describe capability
+            gaps, never deliver working weaponization for them. Prefer
+            demonstrating impact bounds on your own lab binaries when
+            evidence helps. Coordinate anything stronger through the owner,
+            following the disclosure practices the next module develops
+            properly. Reviewers reading your work should learn the risk story,
+            not inherit a loaded weapon.
+        - type: code
+          language: text
+          code: |
+            finding excerpt (assessment voice)
+
+            Binary: ./legacy-agent 1.4 (vendor build)
+            Protections observed: NX absent (RWX stack), canary off,
+                                  EXEC type (no PIE), partial RELRO
+            Impact framing: any memory-write primitive in this build
+                            escalates further than on hardened peers
+            Recommendation: rebuild with default hardening flags;
+                            verify via attached checksec transcript
+            Not included: exploitation walkthroughs, per policy
+        - type: callout
+          tone: danger
+          markdown: |
+            Hard rule for this path: assessments describe mitigations and
+            gaps. Working bypass development, gadget hunting against third
+            party software, and payload crafting fall outside authorized
+            coursework everywhere on this platform.
+        - type: prose
+          markdown: |
+            With assessment fluency established, ROP enters next as a concept
+            and a defensive concern: why NX alone cannot stop all control
+            flow abuse, what gadgets mean structurally, and how defenders
+            raise the cost. Keep your toy laboratory warm; seeing is
+            believing.
+  cheat_sheet: |
+    # Mitigations and overflow mechanics
+
+    Overflow essence:
+        trusted-length copy > reserved capacity -> neighbor bytes die
+        fix family: bounded copies, checked true lengths, safe APIs
+
+    Mitigation quick map:
+        NX / W^X      data pages never executable
+        canary        sentinel above locals, checked pre-return
+        ASLR          kernel shuffles region bases per run
+        PIE           binary itself relocatable (ELF DYN vs EXEC)
+        partial RELRO .init/GOT mostly ro, lazy binding stays
+        full RELRO    BIND_NOW + GNU_RELRO, GOT immutable
+
+    Observable checks:
+        readelf -lW | grep GNU_STACK       (NX request)
+        readelf -h  | grep Type            (PIE?)
+        readelf -d  | grep BIND_NOW        (full RELRO?)
+        objdump canary: fs:0x28 load/store pair
+        repeated /proc/maps lines moving = ASLR live
+
+    Assessment voice:
+        report capability gaps + rebuild advice
+        never attach weaponization; coordinate through owner
