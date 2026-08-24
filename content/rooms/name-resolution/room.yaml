@@ -1,0 +1,109 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: name-resolution
+  title: 'Name Resolution'
+  version: 1.0.0
+  difficulty: easy
+  points: 175
+  estimated_minutes: 30
+  tags: [windows-concepts, llmnr, nbtns, poisoning, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    An honest simulation of LLMNR and NBT-NS poisoning mechanics on a
+    Linux box. A responder-sim daemon listens on loopback UDP 5355 and
+    137, logs every single-label query, and answers one configured name
+    with a clearly labeled fake credential blob. You will read the site
+    inventory to pick the right name, run the provided query client,
+    pull the captured blob from the responder log exposed through the
+    simulated share directory, and submit it to the checker endpoint for
+    the flag. No real protocol bytes or real credentials exist here.
+  objectives:
+    - 'Explain why legacy name-resolution fallbacks let any host answer for any name.'
+    - 'Generate name queries with the provided client and observe which ones the responder claims.'
+    - 'Read captured material from the shared log directory and verify it against the checker.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'ssh://target:22'
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Honest Linux-hosted Windows-concept simulation of LLMNR/NBT-NS
+      poisoning. The responder is a plain Python UDP logger bound to
+      loopback only; packets are text stand-ins, not LLMNR/NBT-NS/NTLM
+      frames, and the captured blob is an HMAC-derived labeled fake with
+      no relationship to any real credential. sshd requires setuid and
+      DAC overrides for privilege separation; capabilities are bounded
+      to the ssh server profile and sessions run as unprivileged learner
+      (uid 1000). The checker endpoint serves this container's own flag.
+  target:
+    privilege_profile: elevated
+    build_context: ./target
+    ports: [8000, 22]
+    healthcheck:
+      tcp_port: 22
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: capture-and-submit
+      title: 'Claim a name, capture the blob, cash it in'
+      prompt: >-
+        SSH in as learner with password learner. Read the tooling notes
+        under /home/learner/tools and the simulated site inventory at
+        /srv/public/network-inventory.txt to identify which bare name
+        clients in this scenario still resolve without DNS. Use the
+        provided namesim_query.py client to send that name to the
+        responder-sim, collect the NTLMv2-SIM blob it returns (also
+        recorded in /srv/public/responder-capture.log), then submit the
+        SIM-HASH value to the checker page on port 8000. Submit the FLAG
+        value it shows.
+      points: 175
+      hints:
+        - cost: 0
+          text: >-
+            Start with `cat /home/learner/tools/README.md`. The client
+            usage is `python3 /home/learner/tools/namesim_query.py
+            --proto llmnr --name NAME`. Names that draw no reply are not
+            being claimed by the responder.
+        - cost: 10
+          text: >-
+            The inventory note says finance workstations still resolve
+            their legacy file server by bare name because a login script
+            maps its share. That bare name is what the responder answers
+            for.
+        - cost: 25
+          text: >-
+            Run `python3 /home/learner/tools/namesim_query.py --proto
+            llmnr --name FILESRV01`, copy the SIM-HASH value from the
+            reply or from /srv/public/responder-capture.log, and POST it
+            as the capture field to http://target:8000/submit.
+      solution: |
+        1. SSH in as learner (password learner). The motd discloses that
+           everything here simulates poisoning mechanics on loopback;
+           no real protocol bytes or credentials exist.
+        2. Read /home/learner/tools/README.md and
+           /srv/public/network-inventory.txt. The inventory marks
+           FILESRV01 as the name clients still resolve via the legacy
+           fallback path.
+        3. Send the query: `python3 /home/learner/tools/namesim_query.py
+           --proto llmnr --name FILESRV01`. The reply prints
+           "NTLMv2-SIM SIM-HASH-<hex> [simulation...]". Trying other
+           inventory names first shows they get no reply, which is the
+           selective-answer behavior this room teaches.
+        4. Cross-check the capture log: `cat
+           /srv/public/responder-capture.log` records the same blob,
+           standing in for the share a real responder would expose.
+        5. Submit the blob: POST the SIM-HASH value as form field
+           `capture` to http://target:8000/submit (or paste it into the
+           form on the checker home page). The verified page prints
+           FLAG{...}.
+        6. Submit the flag value.
+      validator:
+        type: per_session_flag

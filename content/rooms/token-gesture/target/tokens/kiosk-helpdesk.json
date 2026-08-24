@@ -1,0 +1,9 @@
+{
+  "domain": "LAB-SIM",
+  "groups": ["DOMAIN USERS-SIM"],
+  "integrity_level": "low",
+  "kind": "interactive-sim",
+  "user": "kiosk-helpdesk",
+  "version": 1,
+  "checksum": "sha256:12a80a758aed1f0586cc886e4631a70acb9e487c4032114348a8a5927cf0bc2c"
+}

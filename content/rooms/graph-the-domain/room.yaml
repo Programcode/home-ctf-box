@@ -1,0 +1,101 @@
+apiVersion: openrange.io/v1
+kind: Room
+metadata:
+  slug: graph-the-domain
+  title: 'Graph the Domain'
+  version: 1.0.0
+  difficulty: easy
+  points: 200
+  estimated_minutes: 35
+  tags: [windows-concepts, bloodhound, graph, enumeration, simulation]
+spec:
+  track: windows-ad
+  type: challenge
+  summary: >-
+    Attack-path tools such as BloodHound turned directory enumeration
+    into a graph problem: users, groups, and computers become nodes, and
+    permissions become edges you can walk. This room serves a fictional
+    collector JSON at /collect/graph.json with the same shape of data.
+    Answer five questions on the /quiz page purely from that graph, from
+    shortest hop counts to reset chains, and the complete correct set
+    unlocks your session flag. No real directory exists anywhere here.
+  objectives:
+    - 'Read a collector-style JSON graph and reason about its nodes, edge types, and directions.'
+    - 'Compute shortest paths and privilege chains instead of eyeballing lists.'
+    - 'Answer every mapping question correctly to unlock the per-session flag.'
+  prerequisites: []
+  scope:
+    allowed_targets:
+      - 'http://target:8000'
+    forbidden: [control-plane, other-labs, internet, host]
+  safety:
+    simulated_only: true
+    no_real_malware: true
+    reviewer_notes: >-
+      Plain Flask app on a disposable python:3.12-alpine container under
+      the locked privilege profile (cap_drop ALL, no-new-privileges),
+      running as uid 10001. The served graph is fictional in-memory
+      training data imitating a BloodHound-style collection; no LDAP,
+      Kerberos, or directory connection of any kind exists. The quiz
+      endpoint validates answers server-side (exact/set comparison) and
+      reveals this container's own flag only on a fully correct set.
+  target:
+    build_context: ./target
+    ports: [8000]
+    healthcheck:
+      http_path: /healthz
+    flag_delivery: env
+    flag_env: ROOM_FLAG
+  workstation: terminal
+  tasks:
+    - id: map-and-quiz
+      title: 'Answer the path quiz from the collected graph'
+      prompt: >-
+        Fetch /collect/graph.json from http://target:8000 and study its
+        nodes, relationships, and method notes. Using only that data,
+        answer all five questions on the /quiz page: the shortest hop
+        count from dana.reyes to DOMAIN ADMINS, the DOMAIN ADMINS member,
+        how many users can reset svc_backup's password, where svc_backup
+        holds a session, and which group grants AdminOn over FILE-01.
+        The full correct set returns FLAG{...}; submit that value.
+      points: 200
+      hints:
+        - cost: 0
+          text: >-
+            The meta block in graph.json defines every relationship type.
+            Hop counting treats edges as traversable in either direction;
+            one edge is one hop.
+        - cost: 10
+          text: >-
+            For q1 run breadth-first search from dana.reyes. The chain
+            runs through the password-reset edge to svc_backup, then its
+            session computer, then the group admin over that computer,
+            then the member who can reset a domain admin.
+        - cost: 25
+          text: >-
+            Expected answers: 6 hops, alice.wu, 2 resetters, FILE-01,
+            SERVER OPERATORS. Derive each from the JSON yourself so the
+            next graph needs no cheat sheet.
+      solution: |
+        1. GET http://target:8000/collect/graph.json and save it. Note
+           the simulation notice header and fictional node set.
+        2. Read meta.edge_semantics: MemberOf joins users to groups,
+           CanResetPassword lets one user reset another, HasSession
+           places a user interactively on a machine, AdminOn grants a
+           group local admin on a machine.
+        3. Q1: treat the graph as undirected for hop counting and BFS
+           from dana.reyes toward DOMAIN ADMINS:
+           dana.reyes -> svc_backup (CanResetPassword), svc_backup ->
+           FILE-01 (HasSession), FILE-01 -> SERVER OPERATORS (AdminOn),
+           SERVER OPERATORS -> marko.vukas (MemberOf), marko.vukas ->
+           alice.wu (CanResetPassword), alice.wu -> DOMAIN ADMINS
+           (MemberOf). That is 6 edges; no shorter chain exists.
+        4. Q2: scan MemberOf edges into DOMAIN ADMINS; alice.wu.
+        5. Q3: count CanResetPassword edges aimed at svc_backup;
+           dana.reyes plus tom.hale equals 2.
+        6. Q4: find HasSession with src svc_backup; FILE-01.
+        7. Q5: find AdminOn targeting FILE-01; SERVER OPERATORS.
+        8. POST all five answers to /quiz as fields q1 through q5. The
+           success page prints FLAG{...}. Submit it.
+      validator:
+        type: per_session_flag

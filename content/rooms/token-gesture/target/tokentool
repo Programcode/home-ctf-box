@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""tokentool: simulated token broker for the token-gesture room.
+
+Everything this tool does is a teaching simulation. There is no Windows
+kernel here, no token handle, and no privilege machinery. The tool reads
+plain JSON stand-ins from two locations:
+
+  TRUSTED  /opt/tokens            root-issued tokens, root-owned directory
+  CACHE    /var/cache/tokentool   runtime cache, world-writable directory
+
+A token is accepted when its self-declared checksum verifies. --assume
+then acts in the name of that token; when the assumed identity holds
+high integrity AND DOMAIN ADMINS-SIM membership, the action is reading
+this box's guarded flag file on the identity's behalf.
+"""
+import argparse
+import hashlib
+import hmac
+import json
+import os
+import sys
+
+TRUSTED_DIR = "/opt/tokens"
+CACHE_DIR = "/var/cache/tokentool"
+FLAG_FILE = "/root/flag.txt"
+PRIV_GROUP = "DOMAIN ADMINS-SIM"
+
+BANNER = (
+    "[simulation] tokentool stands in for a Windows token-aware service. "
+    "No real Windows identity machinery exists on this box."
+)
+
+
+def canonical_body(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":")).encode()
+
+
+def load_token(path):
+    """Return (token dict, source label, error string). Exactly one of the latter two."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            obj = json.load(fh)
+    except (OSError, ValueError) as exc:
+        return None, "", f"unreadable ({exc.__class__.__name__})"
+    if not isinstance(obj, dict):
+        return None, "", "not a JSON object"
+    checksum = obj.pop("checksum", None)
+    if not isinstance(checksum, str) or not checksum.startswith("sha256:"):
+        return None, "", "missing sha256: checksum"
+    expected = "sha256:" + hashlib.sha256(canonical_body(obj)).hexdigest()
+    if not hmac.compare_digest(expected, checksum):
+        return None, "", f"integrity check failed (declared {checksum[:22]}...)"
+    return obj, "", ""
+
+
+def iter_tokens():
+    for label, base in (("trusted", TRUSTED_DIR), ("cache", CACHE_DIR)):
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(base, name)
+            tok, _, err = load_token(path)
+            yield label, name[: -len(".json")], tok, err
+
+
+def cmd_list(_args):
+    print(BANNER)
+    rows = list(iter_tokens())
+    if not rows:
+        print("no tokens found")
+        return 0
+    print(f"{'name':<18} {'source':<8} {'user':<16} {'integrity':<10} groups")
+    for label, name, tok, err in rows:
+        if tok is None:
+            print(f"{name:<18} {label:<8} <rejected: {err}>")
+            continue
+        groups = ",".join(tok.get("groups", []))
+        print(
+            f"{name:<18} {label:<8} {tok.get('user', '?'):<16} "
+            f"{tok.get('integrity_level', '?'):<10} {groups}"
+        )
+    return 0
+
+
+def cmd_assume(args):
+    print(BANNER)
+    wanted = args.name
+    chosen = None
+    for label, name, tok, _err in iter_tokens():
+        if name == wanted and tok is not None:
+            chosen = (label, tok)
+            break
+    if chosen is None:
+        print(f"no verifiable token named '{wanted}' in trusted store or cache")
+        return 1
+
+    label, tok = chosen
+    user = tok.get("user", "?")
+    level = tok.get("integrity_level", "?")
+    groups = tok.get("groups", [])
+    print(f"assumed identity: {user} (integrity {level}, source: {label})")
+
+    if level == "high" and PRIV_GROUP in groups:
+        print(
+            f"identity holds high integrity and {PRIV_GROUP} membership; "
+            "performing its privileged file read now"
+        )
+        try:
+            with open(FLAG_FILE, "r", encoding="utf-8") as fh:
+                print(fh.read().strip())
+        except OSError as exc:
+            print(f"privileged read failed: {exc}")
+            return 1
+        return 0
+
+    missing = []
+    if level != "high":
+        missing.append("high integrity")
+    if PRIV_GROUP not in groups:
+        missing.append(PRIV_GROUP + " membership")
+    print("no privileged action performed; identity lacks " + " and ".join(missing))
+    return 0
+
+
+def main(argv):
+    # Accept --list / --assume spellings as aliases of the subcommands.
+    if argv and argv[0] == "--list":
+        argv = ["list"] + argv[1:]
+    elif argv and argv[0] == "--assume":
+        argv = ["assume"] + argv[1:]
+
+    parser = argparse.ArgumentParser(
+        prog="tokentool",
+        description=(
+            "Simulated Windows token inspector (see /opt/tokens/README.txt). "
+            "Token files carry a sha256 checksum over their canonical JSON body."
+        ),
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("list", help="list tokens from trusted store and cache").set_defaults(
+        func=cmd_list
+    )
+    assume = sub.add_parser("assume", help="act in the name of a stored token")
+    assume.add_argument("name", help="token name, e.g. svc-backup")
+    assume.set_defaults(func=cmd_assume)
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
