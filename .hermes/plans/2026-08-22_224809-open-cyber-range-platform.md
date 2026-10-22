@@ -1,7 +1,5 @@
 # Open Cyber Range Platform Implementation Plan
 
-> **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
-
 **Goal:** Transform `home-ctf-box` from a 20-room LAN demo into a polished, safe, fully open-source cyber-learning platform with 100 original lab-backed rooms, structured courses, personal lab instances, browser workstations, competition, authoring tools, and production-grade self-hosting.
 
 **Architecture:** Build a modular control plane (web, API, workers, data, search, object storage) separated from an untrusted lab data plane (per-user containers/VMs, isolated networks, runtime quotas, TTLs, and audited lifecycle operations). Ship a single-node Community Edition for one machine or a Raspberry Pi-class controller, plus a clustered deployment profile for serious multi-user installations; use the same APIs, content format, and UI in both modes.
@@ -13,7 +11,7 @@
 ## 1. Owner, audience, target environments
 
 - **Owner:** Adam and future project maintainers.
-- **Implementer:** A long-running coding agent with permission to change this repository, run local containers/tests, and create original training content. It must not deploy publicly, buy services, rotate credentials, or expose intentionally vulnerable targets without Adam's explicit approval.
+- **Contributors:** Changes stay in this repository. Do not deploy publicly, buy services, rotate credentials, or expose intentionally vulnerable targets without the maintainer's explicit approval.
 - **Community Edition:** One Linux host, Docker or rootless Podman, 8 CPU/16 GB RAM recommended; reduced concurrency profile for Raspberry Pi 5. The Pi may run the control plane and light container rooms, but Windows/AD, nested virtualization, and multi-host ranges require a stronger x86_64 runner.
 - **Cluster Edition:** Kubernetes on x86_64 nodes, ingress, PostgreSQL, Redis, object storage, isolated runner node pools, and optional VM-capable runtime.
 - **Supported clients:** Current desktop/mobile browsers; desktop Chrome/Firefox/Safari/Edge are first-class for lab work. Mobile is first-class for reading, progress, and administration, but not claimed as a full terminal replacement.
@@ -574,7 +572,7 @@ Adam must eventually choose or approve:
 5. Whether public community content, organizations, and competitive events are enabled on the first hosted instance.
 6. Acceptance of external security review findings and any time-bounded risks before internet exposure.
 
-The implementing agent should use safe local defaults and feature flags so these decisions do not block development.
+Use safe local defaults and feature flags so these decisions do not block development.
 
 ## 16. First implementation sequence
 

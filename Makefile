@@ -33,7 +33,7 @@ test-integration: ## Integration tests against core services
 	uv run pytest -m integration
 
 test-contract: ## API contract / OpenAPI compatibility tests
-	@echo "contract suite arrives with the API foundation phase"; exit 1
+	@echo "contract suite is not wired yet; see docs/roadmap/implementation-status.md"; exit 1
 
 test-content: ## Validate every content bundle (schema, lints)
 	uv run cyberrange lint
@@ -44,17 +44,17 @@ content-check: test-content ## Alias kept for plan compatibility
 test-solvers: ## Build room images and run intended-path solvers
 	uv run python -m openrange.content.solve_all content/rooms
 
-test-e2e: ## Browser journeys via Playwright
-	@echo "e2e journeys arrive with the web app shell"; exit 1
+test-e2e: ## Browser journeys via Playwright (starts the web app)
+	pnpm --filter web test:e2e
 
-test-a11y: ## Accessibility checks (axe, keyboard)
-	@echo "a11y checks arrive with the design system"; exit 1
+test-a11y: ## Accessibility checks (axe and keyboard) via Playwright
+	pnpm --filter web exec playwright test tests/e2e/a11y.spec.ts tests/e2e/keyboard-journey.spec.ts --project=chromium
 
-test-security: ## Security scans (semgrep, gitleaks, ZAP baseline)
-	@echo "security gates arrive with the security engineering phase"; exit 1
+test-security: ## Security scans (bandit, pip-audit, pnpm audit, gitleaks)
+	@echo "run the checks in .github/workflows/security.yml; this target is not a local runner yet"; exit 1
 
 test-load: ## k6 load soaks (5-user single node, 50-user cluster)
-	@echo "load profiles arrive with the observability/ops phase"; exit 1
+	@echo "load profiles are not implemented yet; see docs/roadmap/implementation-status.md"; exit 1
 
 test-compose-clean-install: ## Fresh-install proof of the documented commands
 	bash tests/install/compose-clean-install.sh

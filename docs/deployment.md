@@ -6,7 +6,7 @@ multi-stage images, one Compose stack, Caddy edge with automatic HTTPS.
 - Stack definition: `infra/compose/production.yml`
 - Edge proxy config: `infra/caddy/Caddyfile`
 - Images: `docker/Dockerfile.api`, `docker/Dockerfile.web`, `docker/Dockerfile.gateway`
-- Environment template: `.env.example` (production section at the bottom)
+- Environment template: `.env.example` (commented production block at the bottom)
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ cd openrange
 cp .env.example .env
 ```
 
-Edit `.env`. Every secret line marked `openssl rand -hex 32` must be filled:
+Edit `.env`. Uncomment the production block at the bottom of the file, then fill every secret. Values marked `openssl rand -hex 32` must be generated, not left blank:
 
 ```bash
 openssl rand -hex 32   # repeat per secret: SECRET_KEY, FLAG_MASTER_KEY,

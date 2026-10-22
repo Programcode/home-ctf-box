@@ -169,7 +169,7 @@ async def test_default_port_is_5900(make_live_gateway: GatewayFactory) -> None:
     # Token allows 5900 only and nothing listens there: dial happens on the
     # default port and fails as upstream-unavailable, proving the default.
     try:
-        probe_reader, probe_writer = await asyncio.wait_for(  # noqa: F841 - probe only
+        _probe_reader, probe_writer = await asyncio.wait_for(
             asyncio.open_connection("127.0.0.1", 5900), timeout=0.5
         )
     except OSError:

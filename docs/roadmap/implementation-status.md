@@ -8,7 +8,8 @@ or a CI run you can re-check. Phase summaries use four labels:
 
 Plan of record:
 `.hermes/plans/2026-08-22_224809-open-cyber-range-platform.md`.
-Last updated 2026-08-24 at main commit `ddbc21e` (PR #54).
+Last updated 2026-10-22. The previous snapshot was main commit `ddbc21e`
+(PR #54) on 2026-08-24.
 
 CI note that colors every run citation below: the last green CI run on
 main is 32709414616 (success, 2026-08-24 09:02 UTC). Every later ci and
@@ -62,12 +63,13 @@ Remaining: enable branch protection on main.
 | Make targets bootstrap/check/test/test-integration/test-content/test-solvers/up/down/reset-demo/backup/restore/clean-install/backup-restore/build-images/push-images/release-check | verified | `Makefile`; `tests/install/compose-clean-install.sh`, `tests/install/backup-restore.sh`    |
 | Local unit suite green on this machine, 2026-08-24                                                                                                                                 | verified | `uv run pytest -m "not integration and not e2e and not slow"`: 49 passed                   |
 
-Remaining: `make test-contract`, `test-e2e`, `test-a11y`, `test-security`,
-and `test-load` are still placeholders that print and exit 1
-(`Makefile:35`, `Makefile:47`, `Makefile:50`, `Makefile:53`,
-`Makefile:56`). Each is tracked under its owning phase below. Main CI has
-failed since 10:00 UTC on 2026-08-24 for environmental reasons (see the
-note at the top); local runs are the current proof of record.
+Remaining: `make test-contract`, `test-security`, and `test-load` still
+print a message and exit 1 (`Makefile:35`, `Makefile:53`, `Makefile:56`).
+`make test-e2e` and `make test-a11y` run the Playwright suite
+(`Makefile:47`, `Makefile:50`). Each leftover placeholder is tracked under
+its owning phase below. Main CI has failed since 10:00 UTC on 2026-08-24
+for environmental reasons (see the note at the top); local runs are the
+current proof of record.
 
 ## Phase 2: API foundation, database, authentication
 
@@ -89,17 +91,15 @@ Remaining: exercise OIDC against a real provider before any hosted launch.
 
 Status: core-done.
 
-| Item                                             | Status      | Evidence                                                                                                                                                                                                                                          |
-| ------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Design-system package with tokens and components | verified    | `packages/ui/src/tokens.css`, `packages/ui/src/components/`, stories under `packages/ui/src/stories/`                                                                                                                                             |
-| Learner web app routes                           | verified    | `apps/web/app/catalog`, `dashboard`, `labs`, `login`, `register`, `profile` (PR #5); learning view, challenge board, terminal page, and notifications inbox added by PR #54 under `apps/web/app/learn`, `challenges`, `terminal`, `notifications` |
-| Playwright e2e specs                             | in-progress | `apps/web/tests/e2e/a11y.spec.ts`, `keyboard-journey.spec.ts` exist; nothing runs them                                                                                                                                                            |
+| Item                                             | Status   | Evidence                                                                                                                                                                                                                                          |
+| ------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Design-system package with tokens and components | verified | `packages/ui/src/tokens.css`, `packages/ui/src/components/`, stories under `packages/ui/src/stories/`                                                                                                                                             |
+| Learner web app routes                           | verified | `apps/web/app/catalog`, `dashboard`, `labs`, `login`, `register`, `profile` (PR #5); learning view, challenge board, terminal page, and notifications inbox added by PR #54 under `apps/web/app/learn`, `challenges`, `terminal`, `notifications` |
+| Playwright e2e specs                             | verified | `apps/web/tests/e2e/` (17 passed locally on 2026-10-22); `make test-e2e` and `make test-a11y`; CI job `web-e2e` in `.github/workflows/ci.yml`                                                                                                     |
 
 Remaining:
 
-1. Wire `make test-e2e` and `make test-a11y` to the existing Playwright specs
-   and add both to CI. Both targets are currently exit-1 stubs.
-2. Author/admin UI surfaces for studio and orgs (APIs exist; web routes do not).
+1. Author/admin UI surfaces for studio and orgs (APIs exist; web routes do not).
 
 ## Phase 5: content SDK and declarative content format
 
