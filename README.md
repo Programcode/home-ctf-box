@@ -1,89 +1,59 @@
-# home_ctf_box
+# OpenRange
 
-A self-hosted cyber range platform (working title: OpenRange) plus a
-backwards-compatible 20-room LAN demo. The platform part is a monorepo:
-FastAPI control plane, Next.js learner app, lab gateway and runner for
-isolated per-user labs, a content SDK, and a growing curriculum of rooms,
-paths, and modules. Built for a Raspberry Pi 5 on your home LAN and
-developed on an x86 VPS; images are multi-arch.
+Self-hosted cyber range for learning offensive and defensive security in isolated labs you run yourself.
 
-Status snapshot (2026-08-24): 109 lab-backed room bundles across six
-tracks plus four external OSS wrappers, 18 learning paths, 54 modules,
-learning engine with streaks and i18n, jeopardy challenge board,
-teams and events with frozen scoreboards, scoring with leaderboards,
-orgs and cohorts, notifications, studio review workflow, observability
-stack, packaging and release pipeline, and CI security gates. Current
-phase status lives in `docs/roadmap/implementation-status.md`.
+![OpenRange landing page. The headline reads “Learn to break things on hardware you own,” with room, guided, and points counts beside it.](docs/images/landing.png)
+
+OpenRange (repository name `home-ctf-box`) is a monorepo: a FastAPI control plane, a Next.js learner app, a lab gateway and runner for per-user containers, a content SDK, and a curriculum of original rooms, paths, and modules. It runs on one Linux machine. A Raspberry Pi 5 can host the control plane and lighter rooms; images are multi-arch.
+
+Status snapshot (2026-08-24): 109 lab-backed room bundles across six tracks, four external OSS wrappers, 18 learning paths, and 54 modules. The platform includes a learning engine with streaks and localization, a jeopardy board, teams and events, scoring and leaderboards, organizations, notifications, a studio review workflow, observability, packaging, and CI security gates. Phase notes live in [`docs/roadmap/implementation-status.md`](docs/roadmap/implementation-status.md).
+
+## Features
+
+What works in this tree, each one traceable to the linked code:
+
+- Accounts and access: local accounts, session cookies, CSRF, TOTP, recovery codes, WebAuthn, optional OIDC, and rate limits (`apps/api/src/openrange/api/auth/`).
+- Personal labs: start, readiness, extend, reset, stop, expiry, and cross-tenant isolation at the API layer (`apps/api/src/openrange/api/labs/`).
+- Learning engine: enrollment, section progress, and catalog queries (`apps/api/src/openrange/api/learning/`).
+- Streaks: timezone-safe daily streaks with freeze days and milestone thresholds (`apps/api/src/openrange/api/streaks/`).
+- Localization: bundle-level i18n with protected spans and a Hungarian sample (`packages/content-sdk/src/openrange/content/i18n.py`, `docs/i18n.md`).
+- Jeopardy board: containerless challenges, attachments, dynamic score decay, and a submissions audit (`apps/api/src/openrange/api/challenges/`).
+- Scoring: flag submission, first blood, and scoped leaderboards (`apps/api/src/openrange/api/scoring/`).
+- Teams and events: rosters, invites, an event builder, and frozen scoreboards (`apps/api/src/openrange/api/teams/`, `apps/api/src/openrange/api/events/`).
+- External labs: OWASP Juice Shop, DVWA, WebGoat, and WrongSecrets from upstream images pinned by digest (`docs/labs-external.md`).
+- Remote access: WireGuard device lifecycle (`apps/api/src/openrange/api/vpn/routes.py`) and a browser VNC bridge (`apps/lab-gateway/src/openrange/gateway/desktop.py`).
+- Web app: learning view, embedded terminal, jeopardy board, and a notifications inbox (`apps/web/app/learn`, `terminal`, `challenges`, `notifications`).
+- Organizations, notifications, and a content-studio review workflow (`apps/api/src/openrange/api/orgs/`, `notifications/`, `studio/`).
+
+## Tech stack
+
+| Layer    | Choices                                                           |
+| -------- | ----------------------------------------------------------------- |
+| Web      | Next.js 15, React 19, TypeScript, Tailwind CSS 4                  |
+| API      | FastAPI, SQLAlchemy, Alembic, PostgreSQL 16, Redis 7              |
+| Labs     | Docker, HMAC-authenticated runner, browser SSH (xterm.js) and VNC |
+| Content  | YAML bundles, `cyberrange` CLI, automated intended-path solvers   |
+| Tooling  | pnpm, Turborepo, uv, Ruff, mypy, pytest, Playwright               |
+| Shipping | Multi-stage images, Compose profiles, tag-triggered GHCR release  |
 
 ## What runs where
 
-| Piece             | Path                   | What it is                                                                                                            |
-| ----------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Control plane API | `apps/api`             | Auth/RBAC/sessions/MFA, labs, learning, streaks, challenges, scoring, teams, events, orgs, notifications, studio, vpn |
-| Learner web app   | `apps/web`             | Catalog, dashboard, labs, learn, challenges, terminal, notifications, profile pages on Next.js                        |
-| Lab gateway       | `apps/lab-gateway`     | Authenticated HTTP proxy to lab targets plus browser SSH terminal and VNC desktop bridge                              |
-| Lab runner        | `apps/lab-runner`      | Per-user container lifecycle with HMAC auth and reconcile loop                                                        |
-| Content SDK       | `packages/content-sdk` | Room/path/module schema, linting, solver harness, i18n validation, `cyberrange` CLI                                   |
-| Design system     | `packages/ui`          | Shared tokens and React components                                                                                    |
-| Content           | `content/`             | 109 room bundles, 18 paths, 54 modules                                                                                |
-| Compose stacks    | `infra/compose/`       | core, dev, runner, gateway, observability, production profiles                                                        |
+| Piece             | Path                   | What it is                                                                                          |
+| ----------------- | ---------------------- | --------------------------------------------------------------------------------------------------- |
+| Control plane API | `apps/api`             | Auth, labs, learning, streaks, challenges, scoring, teams, events, orgs, notifications, studio, VPN |
+| Learner web app   | `apps/web`             | Catalog, dashboard, labs, learn, challenges, terminal, notifications, profile                       |
+| Lab gateway       | `apps/lab-gateway`     | Authenticated HTTP proxy plus browser SSH and VNC                                                   |
+| Lab runner        | `apps/lab-runner`      | Per-user container lifecycle with HMAC auth and a reconcile loop                                    |
+| Content SDK       | `packages/content-sdk` | Room, path, and module schema, linting, solver harness, i18n, `cyberrange` CLI                      |
+| Design system     | `packages/ui`          | Shared tokens and React components                                                                  |
+| Content           | `content/`             | 109 room bundles, 18 paths, 54 modules                                                              |
+| Compose stacks    | `infra/compose/`       | core, dev, runner, gateway, observability, and production profiles                                  |
 
-## Feature list
-
-What actually works today, each verifiable in the linked code:
-
-- Accounts and access: local accounts, session cookies, CSRF, TOTP,
-  recovery codes, WebAuthn, optional OIDC, rate limits (`apps/api/src/openrange/api/auth/`).
-- Personal labs: start, readiness, extend, reset, stop, expiry reaper,
-  cross-tenant isolation at the API layer (`apps/api/src/openrange/api/labs/`).
-- Learning engine: enrollment, section progress, catalog queries backing
-  the web catalog (`apps/api/src/openrange/api/learning/`).
-- Streaks: timezone-safe daily streaks with freeze days and healthy
-  milestone thresholds (`apps/api/src/openrange/api/streaks/`).
-- Localization: bundle-level i18n framework with protected spans and a
-  shipped Hungarian sample (`packages/content-sdk/src/openrange/content/i18n.py`,
-  `docs/i18n.md`).
-- Jeopardy board: containerless CTF challenges with attachments, a file
-  download portal, dynamic score decay, and submissions audit
-  (`apps/api/src/openrange/api/challenges/`).
-- Scoring: flag submission with first-blood handling, projections, scoped
-  leaderboards including monthly periods (`apps/api/src/openrange/api/scoring/`).
-- Teams and events: team rosters with invites, an event builder with
-  registrations, and frozen event scoreboards
-  (`apps/api/src/openrange/api/teams/`, `apps/api/src/openrange/api/events/`).
-- External OSS lab integrations: OWASP Juice Shop, DVWA, WebGoat, and
-  WrongSecrets run from upstream official images pinned by digest inside
-  normal lab lifecycle rooms (`content/rooms/juice-shop-tour/`,
-  `docs/labs-external.md`).
-- Remote access: WireGuard device lifecycle API with per-device config QRs
-  (`apps/api/src/openrange/api/vpn/routes.py`) and a browser VNC desktop
-  bridge in the gateway (`apps/lab-gateway/src/openrange/gateway/desktop.py`).
-- Web app surfaces: learning view with path progress, embedded browser
-  terminal, jeopardy challenge board, and a notifications inbox
-  (`apps/web/app/learn`, `terminal`, `challenges`, `notifications`).
-- Organizations: orgs, cohorts, invites, instructor endpoints
-  (`apps/api/src/openrange/api/orgs/`).
-- Notifications: announcements, preferences, feed, email outbox worker
-  (`apps/api/src/openrange/api/notifications/`).
-- Studio: drafts, review workflow, atomic publish
-  (`apps/api/src/openrange/api/studio/`).
-- Packaging: production images for api/web/gateway, production compose
-  stack, tag-triggered GHCR release pipeline (`docker/`,
-  `infra/compose/production.yml`, `.github/workflows/release.yml`,
-  `docs/deployment.md`).
-- Observability: Prometheus, Grafana, Loki stack with readiness probes and
-  backup/restore tooling (`infra/compose/observability.yml`, `docs/operations.md`).
-- Security gates in CI: bandit, pip-audit, pnpm audit, gitleaks
-  (`.github/workflows/security.yml`).
-- Content quality gate: every bundle passes schema lint plus an automated
-  intended-path solver with reset proof on every content PR
-  (`.github/workflows/content.yml`).
-
-## Developer quickstart
+## Quick start
 
 ```sh
 make bootstrap   # uv + pnpm toolchains
-make check       # ruff, mypy, prettier over everything
+make check       # ruff, mypy, prettier
 make test        # fast unit suite
 make up          # postgres :15432, redis :16379, minio :19000, meili :17700
 ```
@@ -98,37 +68,37 @@ Content work:
 
 ```sh
 make test-content   # cyberrange lint over every bundle
-make test-solvers   # build room images, run intended-path solvers locally
+make test-solvers   # build room images and run intended-path solvers locally
+```
+
+Browser checks (Playwright starts the web app on port 3210):
+
+```sh
+make test-e2e    # journeys, including accessibility
+make test-a11y   # axe and keyboard specs only
 ```
 
 Operations:
 
 ```sh
-make backup / make restore
+make backup
+make restore
 docker compose -f infra/compose/observability.yml up -d   # prometheus :19090, grafana :13000
-make test-compose-clean-install
-make test-backup-restore
 ```
 
-Targets that do not work yet and exit with an error by design:
-`test-contract`, `test-e2e`, `test-a11y`, `test-security`, `test-load`.
-The security scans they promise already run directly in
-`.github/workflows/security.yml`; the rest are tracked in
-`docs/roadmap/implementation-status.md`.
+Production install steps are in [`docs/deployment.md`](docs/deployment.md). Copy `.env.example` to `.env` and uncomment the production block before using `infra/compose/production.yml`. Dev commands use safe local defaults and do not need that block.
+
+These Make targets still exit with an error on purpose: `test-contract`, `test-security`, and `test-load`. Security scans run in [`.github/workflows/security.yml`](.github/workflows/security.yml). The gaps are tracked in [`docs/roadmap/implementation-status.md`](docs/roadmap/implementation-status.md).
 
 ## Legacy LAN demo
 
-The original 20-room scoreboard demo still runs unchanged under the
-legacy-v0 compose profile. Same rules as ever: everything binds to
-127.0.0.1 unless you say otherwise, never expose it to the internet,
-never port-forward it.
+The original 20-room scoreboard still runs under the `legacy-v0` compose profile. Published ports bind to `127.0.0.1` unless you change `CTF_BIND`. Do not expose this profile to the internet.
 
 ```sh
 docker compose --profile legacy-v0 up -d --build
 ```
 
-Platform: http://localhost:8000 (override with `PLATFORM_PORT`). Rooms on
-ports 8081 to 8100, one service per room, 2975 points total:
+Platform: http://localhost:8000 (override with `PLATFORM_PORT`). Rooms listen on ports 8081–8100, one service per room, 2975 points total.
 
 | #   | Room                | Port | Points | Technique                            |
 | --- | ------------------- | ---- | ------ | ------------------------------------ |
@@ -159,52 +129,38 @@ Automated full solve from another machine:
 PLATFORM_PORT=8000 ./scripts/demo-solve.sh
 ```
 
-The script registers a throwaway player, exploits all twenty rooms,
-submits the flags, and exits non-zero unless the scoreboard confirms
-2975 points.
-
-Full rebuild of the demo from scratch:
+The script registers a throwaway player, exploits all twenty rooms, submits the flags, and exits non-zero unless the scoreboard confirms 2975 points.
 
 ```sh
-make reset-demo
+make reset-demo   # destroy volumes and rebuild the demo, then run the solver
 ```
 
-## Deploying to the Pi
+On a home LAN, bind the demo to every interface only if you trust that network:
 
 ```sh
-git clone <this repo> && cd home-ctf-box
 CTF_BIND=0.0.0.0 docker compose --profile legacy-v0 up -d --build
 ```
 
-Then browse to `http://<pi-ip>:8000` from your laptop.
+Then browse to `http://<lan-address>:8000`.
 
 ## Safety
 
 - Every published port binds to `127.0.0.1` by default (`CTF_BIND`).
-- These services are vulnerable **on purpose**. Never expose them to the internet,
-  never port-forward them on your router, never run them on a shared host.
-- To play from another device on your LAN, set `CTF_BIND=0.0.0.0` in `.env`
-  (or export it) only on a trusted home network.
-- Lab isolation is enforced by default-deny internal networks created by the
-  runner; see `security/threat-model.md`.
+- These services are vulnerable on purpose. Do not expose them to the internet, port-forward them, or run them on a shared host.
+- Lab isolation uses default-deny networks created by the runner. See [`security/threat-model.md`](security/threat-model.md).
+- Report control-plane vulnerabilities privately. See [`SECURITY.md`](SECURITY.md).
 
 ## Adding content
 
-Rooms are declarative bundles under `content/rooms/<slug>/`: a `room.yaml`
-manifest, a target Dockerfile, lesson markdown, and a solver script. Start
-from an existing bundle, then:
+Rooms are declarative bundles under `content/rooms/<slug>/`: a `room.yaml` manifest, a target Dockerfile, lesson markdown, and a solver. Start from an existing bundle, then:
 
 ```sh
 uv run cyberrange lint     # schema and writing-standard checks
 make test-solvers          # prove the intended path solves cleanly
 ```
 
-CI refuses content PRs that fail either gate. Curriculum authoring follows
-the same pattern in `content/modules/` and `content/paths/`; see
-`docs/content/catalog-status.md` for what exists and what gaps remain.
+CI refuses content changes that fail either gate. Paths and modules follow the same pattern. See [`docs/content/catalog-status.md`](docs/content/catalog-status.md).
 
-## Roadmap ideas
+## Licence
 
-Tracked seriously now, not as a bullet list here. See
-`docs/roadmap/implementation-status.md` for per-phase status and
-`docs/content/catalog-status.md` for content targets vs reality.
+Code is [AGPL-3.0-or-later](LICENSE). Training prose and assets under `content/` are CC BY-SA 4.0 unless a bundle's license field says otherwise. See [`NOTICE`](NOTICE), [`docs/content-licensing.md`](docs/content-licensing.md), and [`licenses/CC-BY-SA-4.0.txt`](licenses/CC-BY-SA-4.0.txt).

@@ -13,12 +13,14 @@ useDefault = true
 
 [allowlist]
 description = "Intentional challenge fixtures: room targets and manifests carry training flags/codes"
+# Anchors allow an optional directory prefix so the same patterns match
+# repo-relative git paths and absolute paths from `gitleaks detect --no-git`.
 paths = [
-  '''^content/rooms/[^/]+/target/.*$''',
-  '''^content/rooms/[^/]+/room\.yaml$''',
+  '''(^|/)content/rooms/[^/]+/target/.*$''',
+  '''(^|/)content/rooms/[^/]+/room\.yaml$''',
   # Curriculum crypto lessons use obviously fake encoded strings as
   # teaching examples; nothing real is ever stored here.
-  '''^content/modules/[^/]+/module\.yaml$''',
-  '''^rooms/''',
-  '''^platform/''',
+  '''(^|/)content/modules/[^/]+/module\.yaml$''',
+  '''(^|/)rooms/''',
+  '''(^|/)platform/''',
 ]
